@@ -109,13 +109,13 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
     // ============= 功能列表 (Module List) 配置 =============
     object ModuleList : ToggleableValueGroup(ModuleHud, "ModuleList", enabled = true) {
         /** 背景颜色 (ARGB) */
-        val backgroundColor by int("BackgroundColor", 0xC915171B, 0..0x7FFFFFFF)
+        val backgroundColor by int("BackgroundColor", 0xC915171B, 0..Int.MAX_VALUE)
 
         /** 背景透明度 (0-255) */
         val backgroundAlpha by int("BackgroundAlpha", 60, 0..255)
 
         /** 文字颜色 (ARGB) */
-        val textColor by int("TextColor", 0xFFE0E0E0, 0..0x7FFFFFFF)
+        val textColor by int("TextColor", 0xFFE0E0E0, 0..Int.MAX_VALUE)
 
         /** 圆角半径 */
         val cornerRadius by int("CornerRadius", 4, 0..16)
@@ -189,7 +189,7 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
     // ============= 功能列表渲染 (完全复制 ClickGuiScreen 的 API 使用) =============
     @Suppress("unused")
     private val gameRenderHandler = handler<GameRenderEvent> { event ->
-        renderModuleList(event.graphics)
+        renderModuleList(event.context)
     }
 
     private fun getEnabledModules(): List<ClientModule> {
