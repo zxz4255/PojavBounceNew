@@ -87,6 +87,13 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         var collapsed: Boolean = false // 【新增】：折叠状态
     )
 
+    private data class LayoutData(
+        val tag: String,
+        val x: Float,
+        val y: Float,
+        val collapsed: Boolean
+    )
+
     private var panels = mutableListOf<PanelData>()
     private var searchPanel: PanelData? = null
 
@@ -213,14 +220,14 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 val x = parts[1].toFloatOrNull() ?: return@mapNotNull null
                 val y = parts[2].toFloatOrNull() ?: return@mapNotNull null
                 val collapsed = parts[3].toBoolean()
-                Triple(tag, x, y, collapsed)
+                LayoutData(tag, x, y, collapsed)
             }
             for (panel in panels) {
-                val layout = data.find { it.first == panel.category?.tag }
+                val layout = data.find { it.tag == panel.category?.tag }
                 if (layout != null) {
-                    panel.x = layout.second
-                    panel.y = layout.third
-                    panel.collapsed = layout.fourth
+                    panel.x = layout.x
+                    panel.y = layout.y
+                    panel.collapsed = layout.collapsed
                 }
             }
         } catch (_: Exception) {}
