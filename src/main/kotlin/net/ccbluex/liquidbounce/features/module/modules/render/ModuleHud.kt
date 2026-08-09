@@ -19,9 +19,9 @@
 package net.ccbluex.liquidbounce.features.module.modules.render
 
 import net.ccbluex.liquidbounce.config.ConfigSystem
+import net.ccbluex.liquidbounce.config.types.EnumValue // 【修复】：使用标准的 EnumValue 类替代失败的扩展
 import net.ccbluex.liquidbounce.config.types.group.ToggleableValueGroup
 import net.ccbluex.liquidbounce.config.types.group.ValueGroup
-import net.ccbluex.liquidbounce.config.types.enum // 【修复】：正确导入 enum 委托
 import net.ccbluex.liquidbounce.event.EventManager
 import net.ccbluex.liquidbounce.event.events.BrowserReadyEvent
 import net.ccbluex.liquidbounce.event.events.DisconnectEvent
@@ -107,8 +107,8 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
     private val hudSettings = ValueGroup("ArrayList Settings")
     private enum class Position { TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT, CUSTOM }
 
-    // 【修复】：使用标准的 enum 委托，并且无需手动导入 enumValue
-    val position by enum<Position>("Position", Position.TOP_RIGHT)
+    // 【修复】：直接使用 EnumValue 类，彻底解决扩展函数找不到的问题
+    val position by EnumValue("Position", Position.TOP_RIGHT)
     val posX by float("Offset X", 10f, 0f..1000f)
     val posY by float("Offset Y", 10f, 0f..1000f)
     val bgAlpha by int("Background Alpha", 100, 0..255)
@@ -194,8 +194,8 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
     private val renderHandler = handler<GameRenderEvent> { event ->
         if (mc.player == null || mc.level == null) return@handler
 
-        // 【修复 ctx 报错】：显式捕获 ctx 以避免编译器作用域模糊
-        val ctx = event.ctx
+        // 【修复】：显式声明类型，强制识别正确的 ctx
+        val ctx: GuiGraphicsExtractor = event.ctx
         val font = mc.font
         val screenWidth = mc.window.guiScaledWidth
         val screenHeight = mc.window.guiScaledHeight
