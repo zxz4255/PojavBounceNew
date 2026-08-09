@@ -171,10 +171,11 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         overlay.close()
     }
 
-    // ============= 功能列表渲染 (完全复制 ClickGuiScreen 的 API) =============
+    // ============= 功能列表渲染 (使用 GuiGraphicsExtractor + ctx.text) =============
     @Suppress("unused")
     private val gameRenderHandler = handler<GameRenderEvent> { event ->
-        renderModuleList(event.GuiGraphicsExtractor)  // 改为 guiGraphics
+        // 改成你找到的正确字段名（可能是 graphics、context、drawContext 等）
+        renderModuleList(event.graphics)
     }
 
     private fun getEnabledModules(): List<ClientModule> {
@@ -231,7 +232,7 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
 
         val bgColor = (bgColorRaw and 0x00FFFFFF) or ((bgAlpha shl 24) and 0xFF000000.toInt())
 
-        // 绘制圆角矩形背景（完全复制 ClickGuiScreen 的 drawRoundedRect）
+        // 绘制圆角矩形背景 (完全复制 ClickGuiScreen)
         drawRoundedRect(ctx, xPos.toFloat(), yPos.toFloat(), boxWidth.toFloat(), boxHeight.toFloat(), cornerRadius, bgColor)
 
         // 绘制所有模块名称 (使用 ctx.text，与 ClickGuiScreen 完全一致)
