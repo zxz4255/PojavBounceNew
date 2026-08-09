@@ -20,8 +20,7 @@ import java.util.IdentityHashMap
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.sin
-import com.google.gson.Gson // 新增：用于保存布局
-import java.io.File // 新增：处理文件读写
+import java.io.File // 【修复】：使用原生 File 类
 
 /**
  * LiquidBounce-style ClickGUI — Multi-panel layout, each category is an independent floating panel.
@@ -62,8 +61,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     // 【新增】滑块绝对定位与拖动状态
     private var sliderDragTarget: Value<*>? = null
     private var sliderDragPanel: PanelData? = null
-    private val gson = Gson()
-    private val layoutFile by lazy { mc.gameDirectory.resolve("config/clickgui_layout.json").toFile() }
     private var isFirstLoad = true
 
     // ==================== State ====================
@@ -189,29 +186,41 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         fillRect(ctx, 0, 0, sc, sh, OVERLAY)
     }
 
-    // ==================== 布局的保存与恢复 ====================
-    private data class PanelLayoutData(val tag: String, val x: Float, val y: Float, val collapsed: Boolean)
+    // ==================== 布局的保存与恢复（纯原生 File + 字符串解析） ====================
+    private fun getLayoutFile(): File {
+        return File(minecraft!!.gameDirectory, "config/clickgui_layout.json")
+    }
 
     private fun saveLayout() {
         try {
-            val entries = panels.mapNotNull { panel ->
+            val file = getLayoutFile()
+            val lines = panels.mapNotNull { panel ->
                 if (panel.category == null) return@mapNotNull null
-                PanelLayoutData(panel.category.tag, panel.x, panel.y, panel.collapsed)
+                "${panel.category.tag}|${panel.x}|${panel.y}|${panel.collapsed}"
             }
-            layoutFile.writeText(gson.toJson(entries))
+            file.writeText(lines.joinToString("\n"))
         } catch (_: Exception) {}
     }
 
     private fun loadLayout() {
-        if (!layoutFile.exists()) return
+        val file = getLayoutFile()
+        if (!file.exists()) return
         try {
-            val entries = gson.fromJson(layoutFile.readText(), Array<PanelLayoutData>::class.java).toList()
+            val data = file.readText().lines().mapNotNull { line ->
+                val parts = line.split('|')
+                if (parts.size != 4) return@mapNotNull null
+                val tag = parts[0]
+                val x = parts[1].toFloatOrNull() ?: return@mapNotNull null
+                val y = parts[2].toFloatOrNull() ?: return@mapNotNull null
+                val collapsed = parts[3].toBoolean()
+                Triple(tag, x, y, collapsed)
+            }
             for (panel in panels) {
-                val layout = entries.find { it.tag == panel.category?.tag }
+                val layout = data.find { it.first == panel.category?.tag }
                 if (layout != null) {
-                    panel.x = layout.x
-                    panel.y = layout.y
-                    panel.collapsed = layout.collapsed
+                    panel.x = layout.second
+                    panel.y = layout.third
+                    panel.collapsed = layout.fourth
                 }
             }
         } catch (_: Exception) {}
