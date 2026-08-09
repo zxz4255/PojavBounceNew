@@ -44,7 +44,7 @@ import net.ccbluex.liquidbounce.integration.theme.component.components.minimap.M
 import net.ccbluex.liquidbounce.utils.client.chat
 import net.ccbluex.liquidbounce.utils.client.inGame
 import net.ccbluex.liquidbounce.utils.client.markAsError
-import net.minecraft.client.gui.DrawContext
+import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.screens.DisconnectedScreen
 import net.minecraft.client.gui.screens.LevelLoadingScreen
 import net.minecraft.client.gui.screens.Screen
@@ -106,9 +106,8 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         val alphaBlendRange by floatRange("AlphaBlendRange", 0.0F..0.75F, 0.0F..1.0F)
     }
 
-    // ============= 功能列表 (Module List) 配置 =============
+    // ============= 功能列表配置 =============
     object ModuleList : ToggleableValueGroup(ModuleHud, "ModuleList", enabled = true) {
-        // 使用 .toInt() 确保颜色值为 Int 类型
         val backgroundColor by int("BackgroundColor", 0xC915171B.toInt(), Int.MIN_VALUE..Int.MAX_VALUE)
         val backgroundAlpha by int("BackgroundAlpha", 60, 0..255)
         val textColor by int("TextColor", 0xFFE0E0E0.toInt(), Int.MIN_VALUE..Int.MAX_VALUE)
@@ -116,9 +115,9 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         val padding by int("Padding", 4, 0..12)
         val lineSpacing by int("LineSpacing", 2, 0..8)
         val maxDisplay by int("MaxDisplay", 20, 0..50)
-        val position by int("Position", 0, 0..3) // 0=右上,1=右下,2=左上,3=左下
+        val position by int("Position", 0, 0..3)
     }
-    // ========================================================
+    // ========================================
 
     @Suppress("unused")
     private val spaceSeperatedNames by boolean("SpaceSeperatedNames", true).onChange { state ->
@@ -172,10 +171,10 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         overlay.close()
     }
 
-    // ============= 功能列表渲染 (使用 DrawContext) =============
+    // ============= 功能列表渲染 (完全复制 ClickGuiScreen 的 API) =============
     @Suppress("unused")
     private val gameRenderHandler = handler<GameRenderEvent> { event ->
-        renderModuleList(event.drawContext)
+        renderModuleList(event.graphics)
     }
 
     private fun getEnabledModules(): List<ClientModule> {
@@ -184,7 +183,7 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
             .sortedByDescending { it.name.length }
     }
 
-    private fun renderModuleList(ctx: DrawContext) {
+    private fun renderModuleList(ctx: GuiGraphicsExtractor) {
         if (!enabled || !isVisible || !ModuleList.enabled) return
 
         val client = mc
@@ -232,20 +231,21 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
 
         val bgColor = (bgColorRaw and 0x00FFFFFF) or ((bgAlpha shl 24) and 0xFF000000.toInt())
 
-        // 绘制背景（使用 DrawContext 的 fill 和 drawRoundedRect 复制）
+        // 绘制圆角矩形背景（完全复制 ClickGuiScreen 的 drawRoundedRect）
         drawRoundedRect(ctx, xPos.toFloat(), yPos.toFloat(), boxWidth.toFloat(), boxHeight.toFloat(), cornerRadius, bgColor)
 
+        // 绘制所有模块名称 (使用 ctx.text，与 ClickGuiScreen 完全一致)
         var currentY = yPos + padding
         for ((text, _) in lines) {
-            ctx.drawText(font, text, (xPos + padding).toInt(), currentY.toInt(), textColor, false)
+            ctx.text(font, text, (xPos + padding).toInt(), currentY.toInt(), textColor)
             currentY += font.lineHeight + lineSpacing
         }
     }
 
     /**
-     * 圆角矩形绘制（适配 DrawContext）
+     * 完整复制 ClickGuiScreen 的 drawRoundedRect 实现
      */
-    private fun drawRoundedRect(ctx: DrawContext, x: Float, y: Float, w: Float, h: Float, radius: Float, color: Int) {
+    private fun drawRoundedRect(ctx: GuiGraphicsExtractor, x: Float, y: Float, w: Float, h: Float, radius: Float, color: Int) {
         val r = radius.coerceAtMost(w / 2f).coerceAtMost(h / 2f)
         if (r <= 0.5f) {
             ctx.fill(x.toInt(), y.toInt(), (x + w).toInt(), (y + h).toInt(), color)
