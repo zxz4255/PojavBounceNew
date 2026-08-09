@@ -4,12 +4,12 @@
  */
 package net.ccbluex.liquidbounce.features.module.modules.render
 
-import net.ccbluex.liquidbounce.config.values.*
 import net.ccbluex.liquidbounce.event.EventTarget
 import net.ccbluex.liquidbounce.event.Render2DEvent
 import net.ccbluex.liquidbounce.features.module.ClientModule
 import net.ccbluex.liquidbounce.features.module.ModuleCategory
 import net.ccbluex.liquidbounce.features.module.ModuleManager
+import net.ccbluex.liquidbounce.features.value.*
 import net.ccbluex.liquidbounce.utils.client.mc
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import java.awt.Color
@@ -17,10 +17,7 @@ import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.sin
 
-object ArrayListModule : ClientModule() {
-
-    override val name = "ArrayList"
-    override val category = ModuleCategory.RENDER
+object ArrayListModule : ClientModule("ArrayList", ModuleCategory.RENDER) {
 
     // ==================== 配置项 ====================
     private val scaleValue = FloatValue("Scale", 1.0f, 0.5f, 3.0f)
