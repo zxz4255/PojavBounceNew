@@ -93,12 +93,12 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         browserSettings = BrowserSettings(60, ::reopen)
     )
 
-    // ========== ArrayList Screen 实例 ==========
+    // ========== ArrayList Screen 实例（类似 ModuleClickGui 的 ClickGuiScreen） ==========
     private var arrayListScreen: HudArrayListScreen? = null
 
     init {
         tree(Blur)
-        tree(ModuleList)  // 添加功能列表配置
+        tree(ModuleList)   // 添加功能列表配置
     }
 
     object Blur : ToggleableValueGroup(ModuleHud, "Blur", enabled = true) {
@@ -106,7 +106,7 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         val alphaBlendRange by floatRange("AlphaBlendRange", 0.0F..0.75F, 0.0F..1.0F)
     }
 
-    // ========== 功能列表配置 ==========
+    // ========== 功能列表配置（完全仿照 ClickGuiScreen 的配置风格） ==========
     object ModuleList : ToggleableValueGroup(ModuleHud, "ModuleList", enabled = true) {
         val backgroundColor by int("BackgroundColor", 0xC915171B.toInt(), Int.MIN_VALUE..Int.MAX_VALUE)
         val backgroundAlpha by int("BackgroundAlpha", 60, 0..255)
@@ -115,7 +115,7 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         val padding by int("Padding", 4, 0..12)
         val lineSpacing by int("LineSpacing", 2, 0..8)
         val maxDisplay by int("MaxDisplay", 20, 0..50)
-        val position by int("Position", 0, 0..3)
+        val position by int("Position", 0, 0..3) // 0=右上,1=右下,2=左上,3=左下
     }
     // =================================
 
@@ -151,15 +151,15 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         }
 
         updateOverlayVisibility(mc.gui.screen())
-        openArrayListScreen()  // 打开功能列表
+        openArrayListScreen()   // 像 ClickGui 那样打开屏幕
     }
 
     override fun onDisabled() {
         overlay.close()
-        closeArrayListScreen()  // 关闭功能列表
+        closeArrayListScreen()  // 关闭屏幕
     }
 
-    // ========== 打开/关闭 ArrayList Screen ==========
+    // ========== 打开/关闭 ArrayList Screen（仿照 ModuleClickGui 的 openGui） ==========
     private fun openArrayListScreen() {
         if (mc.gui.screen() !is HudArrayListScreen) {
             arrayListScreen = HudArrayListScreen()
