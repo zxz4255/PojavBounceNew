@@ -6,7 +6,7 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModuleHud
 import net.ccbluex.liquidbounce.integration.theme.component.HudComponent
 import net.ccbluex.liquidbounce.integration.theme.component.HudComponentTweak
 import net.ccbluex.liquidbounce.utils.render.Alignment
-import net.minecraft.client.gui.DrawContext
+import net.minecraft.client.gui.GuiGraphicsExtractor
 
 class ArrayListComponent(
     name: String,
@@ -18,7 +18,7 @@ class ArrayListComponent(
 
     private val config get() = ModuleHud.ModuleList
 
-    override fun render(ctx: DrawContext, mouseX: Int, mouseY: Int, delta: Float) {
+    override fun render(ctx: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, delta: Float) {
         if (!enabled || !config.enabled) return
 
         val client = mc
@@ -63,12 +63,12 @@ class ArrayListComponent(
 
         var currentY = yPos + padding
         for ((text, _) in lines) {
-            ctx.drawText(font, text, (xPos + padding).toInt(), currentY.toInt(), textColor, false)
+            ctx.text(font, text, (xPos + padding).toInt(), currentY.toInt(), textColor)
             currentY += font.lineHeight + lineSpacing
         }
     }
 
-    private fun drawRoundedRect(ctx: DrawContext, x: Float, y: Float, w: Float, h: Float, radius: Float, color: Int) {
+    private fun drawRoundedRect(ctx: GuiGraphicsExtractor, x: Float, y: Float, w: Float, h: Float, radius: Float, color: Int) {
         val r = radius.coerceAtMost(w / 2f).coerceAtMost(h / 2f)
         if (r <= 0.5f) {
             ctx.fill(x.toInt(), y.toInt(), (x + w).toInt(), (y + h).toInt(), color)
