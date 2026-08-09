@@ -174,7 +174,7 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
     // ============= 功能列表渲染 (完全复制 ClickGuiScreen 的 API) =============
     @Suppress("unused")
     private val gameRenderHandler = handler<GameRenderEvent> { event ->
-        renderModuleList(event.graphics)
+        renderModuleList(event.context)  // 唯一改动：graphics → context
     }
 
     private fun getEnabledModules(): List<ClientModule> {
