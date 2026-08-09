@@ -24,6 +24,7 @@ import net.ccbluex.liquidbounce.config.types.group.ValueGroup
 import net.ccbluex.liquidbounce.event.EventManager
 import net.ccbluex.liquidbounce.event.events.BrowserReadyEvent
 import net.ccbluex.liquidbounce.event.events.DisconnectEvent
+import net.ccbluex.liquidbounce.event.events.GameRenderEvent
 import net.ccbluex.liquidbounce.event.events.ScreenEvent
 import net.ccbluex.liquidbounce.event.events.SpaceSeperatedNamesChangeEvent
 import net.ccbluex.liquidbounce.event.handler
@@ -42,6 +43,7 @@ import net.ccbluex.liquidbounce.integration.theme.component.components.minimap.M
 import net.ccbluex.liquidbounce.utils.client.chat
 import net.ccbluex.liquidbounce.utils.client.inGame
 import net.ccbluex.liquidbounce.utils.client.markAsError
+import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.screens.DisconnectedScreen
 import net.minecraft.client.gui.screens.LevelLoadingScreen
 import net.minecraft.client.gui.screens.Screen
@@ -93,9 +95,6 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         browserSettings = BrowserSettings(60, ::reopen)
     )
 
-    // ========== ArrayList Screen 实例（类似 ModuleClickGui 的 ClickGuiScreen） ==========
-    private var arrayListScreen: HudArrayListScreen? = null
-
     init {
         tree(Blur)
         tree(ModuleList)   // 添加功能列表配置
@@ -106,7 +105,7 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         val alphaBlendRange by floatRange("AlphaBlendRange", 0.0F..0.75F, 0.0F..1.0F)
     }
 
-    // ========== 功能列表配置（完全仿照 ClickGuiScreen 的配置风格） ==========
+    // ========== 功能列表配置 ==========
     object ModuleList : ToggleableValueGroup(ModuleHud, "ModuleList", enabled = true) {
         val backgroundColor by int("BackgroundColor", 0xC915171B.toInt(), Int.MIN_VALUE..Int.MAX_VALUE)
         val backgroundAlpha by int("BackgroundAlpha", 60, 0..255)
@@ -115,7 +114,7 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         val padding by int("Padding", 4, 0..12)
         val lineSpacing by int("LineSpacing", 2, 0..8)
         val maxDisplay by int("MaxDisplay", 20, 0..50)
-        val position by int("Position", 0, 0..3) // 0=右上,1=右下,2=左上,3=左下
+        val position by int("Position", 0, 0..3)
     }
     // =================================
 
@@ -151,27 +150,10 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         }
 
         updateOverlayVisibility(mc.gui.screen())
-        openArrayListScreen()   // 像 ClickGui 那样打开屏幕
     }
 
     override fun onDisabled() {
         overlay.close()
-        closeArrayListScreen()  // 关闭屏幕
-    }
-
-    // ========== 打开/关闭 ArrayList Screen（仿照 ModuleClickGui 的 openGui） ==========
-    private fun openArrayListScreen() {
-        if (mc.gui.screen() !is HudArrayListScreen) {
-            arrayListScreen = HudArrayListScreen()
-            mc.gui.setScreen(arrayListScreen)
-        }
-    }
-
-    private fun closeArrayListScreen() {
-        if (mc.gui.screen() is HudArrayListScreen) {
-            mc.gui.setScreen(null)
-            arrayListScreen = null
-        }
     }
 
     @Suppress("unused")
@@ -182,15 +164,29 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
     @Suppress("unused")
     private val screenHandler = handler<ScreenEvent> { event ->
         updateOverlayVisibility(event.screen)
-        // 如果打开的是其他 Screen（且不是 ClickGUI），关闭 ArrayList
-        if (event.screen != null && event.screen !is HudArrayListScreen && event.screen !is ClickGuiScreen) {
-            closeArrayListScreen()
-        }
     }
 
     @Suppress("unused")
     private val disconnectHandler = handler<DisconnectEvent> {
         overlay.close()
+    }
+
+    // ========== 功能列表渲染（使用反射自动获取 Graphics）==========
+    @Suppress("unused")
+    private val gameRenderHandler = handler<GameRenderEvent> { event ->
+        // 反射获取类型为 GuiGraphicsExtractor 的字段（自动适配字段名）
+        val graphics = try {
+            val field = event.javaClass.declaredFields.firstOrNull { 
+                GuiGraphicsExtractor::class.java.isAssignableFrom(it.type) 
+            }
+            field?.apply { isAccessible = true }?.get(event) as? GuiGraphicsExtractor
+        } catch (e: Exception) {
+            null
+        }
+
+        if (graphics != null) {
+            ArrayListRenderer.render(graphics)
+        }
     }
 
     fun reopen() {
