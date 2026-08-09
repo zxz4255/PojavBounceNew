@@ -44,7 +44,7 @@ import net.ccbluex.liquidbounce.integration.theme.component.components.minimap.M
 import net.ccbluex.liquidbounce.utils.client.chat
 import net.ccbluex.liquidbounce.utils.client.inGame
 import net.ccbluex.liquidbounce.utils.client.markAsError
-import net.minecraft.client.gui.DrawContext
+import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.screens.DisconnectedScreen
 import net.minecraft.client.gui.screens.LevelLoadingScreen
 import net.minecraft.client.gui.screens.Screen
@@ -102,26 +102,19 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
     }
 
     object Blur : ToggleableValueGroup(ModuleHud, "Blur", enabled = true) {
-        /**
-         * Gaussian sigma controlling blur strength. Higher values produce stronger blur.
-         */
         val sigma by float("Sigma", 5.0F, 1.0F..15.0F)
-
-        /**
-         * The range in which the blending from not-blurred to blurred occurs.
-         */
         val alphaBlendRange by floatRange("AlphaBlendRange", 0.0F..0.75F, 0.0F..1.0F)
     }
 
     // ============= 功能列表 (Module List) 配置 =============
     object ModuleList : ToggleableValueGroup(ModuleHud, "ModuleList", enabled = true) {
-        /** 背景颜色 (ARGB) 使用 IntRange 0..0xFFFFFFFF */
+        /** 背景颜色 (ARGB) */
         val backgroundColor by int("BackgroundColor", 0xC915171B, 0..0x7FFFFFFF)
 
         /** 背景透明度 (0-255) */
         val backgroundAlpha by int("BackgroundAlpha", 60, 0..255)
 
-        /** 文字颜色 (ARGB) 使用 IntRange 0..0xFFFFFFFF */
+        /** 文字颜色 (ARGB) */
         val textColor by int("TextColor", 0xFFE0E0E0, 0..0x7FFFFFFF)
 
         /** 圆角半径 */
@@ -136,8 +129,8 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         /** 最大显示模块数 (0 表示不限制) */
         val maxDisplay by int("MaxDisplay", 20, 0..50)
 
-        /** 显示位置 (右上/右下/左上/左下) */
-        val position by choice("Position", arrayOf("右上", "右下", "左上", "左下"), "右上")
+        /** 显示位置：0=右上，1=右下，2=左上，3=左下 */
+        val position by int("Position", 0, 0..3)
     }
     // ========================================================
 
@@ -156,11 +149,7 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         tree(MinimapHudComponent)
     }
 
-    /**
-     * Updates [themes] content
-     */
     fun updateThemes() {
-        // filterIsInstance then forEach to prevent ConcurrentModificationException
         themes.inner.filterIsInstance<ValueGroup>().forEach {
             themes.drop(it)
         }
@@ -175,7 +164,6 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         if (isHidingNow) {
             chat(markAsError(message("hidingAppearance")))
         }
-
         updateOverlayVisibility(mc.gui.screen())
     }
 
@@ -198,25 +186,19 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         overlay.close()
     }
 
-    // ============= 功能列表渲染 (独立于浏览器) =============
+    // ============= 功能列表渲染 (完全参考 ClickGuiScreen) =============
     @Suppress("unused")
     private val gameRenderHandler = handler<GameRenderEvent> { event ->
         renderModuleList(event.graphics)
     }
 
-    /**
-     * 获取当前启用的模块列表（按文本长度从长到短排序）
-     */
     private fun getEnabledModules(): List<ClientModule> {
         return ModuleManager.getModules()
             .filter { it.enabled && it !is ModuleHud && it !is ModuleClickGui }
             .sortedByDescending { it.name.length }
     }
 
-    /**
-     * 在 HUD 右上角绘制功能列表
-     */
-    private fun renderModuleList(ctx: DrawContext) {
+    private fun renderModuleList(ctx: GuiGraphicsExtractor) {
         if (!enabled || !isVisible || !ModuleList.enabled) return
 
         val client = mc
@@ -231,61 +213,53 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         val scWidth = client.window.guiScaledWidth
         val scHeight = client.window.guiScaledHeight
 
-        // 从配置读取参数
         val padding = ModuleList.padding
         val lineSpacing = ModuleList.lineSpacing
         val cornerRadius = ModuleList.cornerRadius.toFloat()
         val textColor = ModuleList.textColor
         val bgColorRaw = ModuleList.backgroundColor
         val bgAlpha = ModuleList.backgroundAlpha.coerceIn(0, 255)
-        val position = ModuleList.position
+        val position = ModuleList.position // 0=右上,1=右下,2=左上,3=左下
 
-        // 计算每个模块的文本尺寸
+        // 计算每行文本宽度和总高度
         val lines = displayModules.map { mod ->
             val text = mod.name
             val width = font.width(text)
-            val height = font.lineHeight
             Pair(text, width)
         }
 
         if (lines.isEmpty()) return
 
-        // 计算最大宽度和总高度
         val maxWidth = lines.maxOfOrNull { it.second } ?: 0
         val totalHeight = lines.size * (font.lineHeight + lineSpacing) - lineSpacing
 
-        // 添加内边距
         val boxWidth = maxWidth + padding * 2
         val boxHeight = totalHeight + padding * 2
 
-        // 计算位置 (右上角默认)
         val xPos = when (position) {
-            "左上", "左下" -> padding
-            else -> scWidth - boxWidth - padding
+            2, 3 -> padding // 左
+            else -> scWidth - boxWidth - padding // 右
         }
         val yPos = when (position) {
-            "左上", "右上" -> padding + 10  // 留一点顶部边距
-            else -> scHeight - boxHeight - padding - 30
+            2, 0 -> padding + 10 // 上
+            else -> scHeight - boxHeight - padding - 30 // 下
         }
 
-        // 构建背景颜色 (保留原始 RGB，覆盖 Alpha)
         val bgColor = (bgColorRaw and 0x00FFFFFF) or ((bgAlpha shl 24) and 0xFF000000.toInt())
 
-        // 绘制半透明背景 (圆角)
+        // 绘制圆角矩形背景（完全模仿 ClickGuiScreen 的 drawRoundedRect）
         drawRoundedRect(ctx, xPos.toFloat(), yPos.toFloat(), boxWidth.toFloat(), boxHeight.toFloat(), cornerRadius, bgColor)
 
-        // 绘制所有模块名称 (按长度排序)
+        // 绘制所有模块名称
         var currentY = yPos + padding
         for ((text, _) in lines) {
-            ctx.drawText(font, text, (xPos + padding).toInt(), currentY.toInt(), textColor, false)
+            ctx.text(font, text, (xPos + padding).toInt(), currentY.toInt(), textColor)
             currentY += font.lineHeight + lineSpacing
         }
     }
 
-    /**
-     * 绘制圆角矩形 (参考 ClickGuiScreen 实现)
-     */
-    private fun drawRoundedRect(ctx: DrawContext, x: Float, y: Float, w: Float, h: Float, radius: Float, color: Int) {
+    // 完全复制 ClickGuiScreen 的 drawRoundedRect 实现
+    private fun drawRoundedRect(ctx: GuiGraphicsExtractor, x: Float, y: Float, w: Float, h: Float, radius: Float, color: Int) {
         val r = radius.coerceAtMost(w / 2f).coerceAtMost(h / 2f)
         if (r <= 0.5f) {
             ctx.fill(x.toInt(), y.toInt(), (x + w).toInt(), (y + h).toInt(), color)
