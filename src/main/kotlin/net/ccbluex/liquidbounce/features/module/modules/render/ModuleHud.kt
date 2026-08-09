@@ -19,7 +19,6 @@
 package net.ccbluex.liquidbounce.features.module.modules.render
 
 import net.ccbluex.liquidbounce.config.ConfigSystem
-import net.ccbluex.liquidbounce.config.types.EnumValue // 【修复】：LiquidBounce 官方标准枚举委托
 import net.ccbluex.liquidbounce.config.types.group.ToggleableValueGroup
 import net.ccbluex.liquidbounce.config.types.group.ValueGroup
 import net.ccbluex.liquidbounce.event.EventManager
@@ -46,13 +45,6 @@ import net.ccbluex.liquidbounce.utils.client.markAsError
 import net.minecraft.client.gui.screens.DisconnectedScreen
 import net.minecraft.client.gui.screens.LevelLoadingScreen
 import net.minecraft.client.gui.screens.Screen
-
-// ================= 【26.2 版本标准导入】 =================
-import net.ccbluex.liquidbounce.event.events.GameRenderEvent
-import net.ccbluex.liquidbounce.features.module.ModuleManager
-import net.minecraft.client.gui.Font
-import net.minecraft.client.gui.DrawContext // 26.2 下绘图核心类依然是 DrawContext
-// ==========================================================
 
 /**
  * Module HUD
@@ -101,29 +93,19 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         browserSettings = BrowserSettings(60, ::reopen)
     )
 
-    // ==========================================================
-    // 【配置组】ArrayList 设置
-    // ==========================================================
-    private val hudSettings = ValueGroup("ArrayList Settings")
-    private enum class Position { TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT, CUSTOM }
-
-    // 【修复】：使用 LiquidBounce 标准的 EnumValue 类进行委托
-    val position by EnumValue("Position", Position.TOP_RIGHT)
-    val posX by float("Offset X", 10f, 0f..1000f)
-    val posY by float("Offset Y", 10f, 0f..1000f)
-    val bgAlpha by int("Background Alpha", 100, 0..255)
-    val scale by float("Scale", 1f, 0.5f..2f)
-    val maxWidth by float("Max Width", 150f, 50f..500f)
-    val maxHeight by float("Max Height", 300f, 50f..800f)
-    // ==========================================================
-
     init {
         tree(Blur)
-        tree(hudSettings)
     }
 
     object Blur : ToggleableValueGroup(ModuleHud, "Blur", enabled = true) {
+        /**
+         * Gaussian sigma controlling blur strength. Higher values produce stronger blur.
+         */
         val sigma by float("Sigma", 5.0F, 1.0F..15.0F)
+
+        /**
+         * The range in which the blending from not-blurred to blurred occurs.
+         */
         val alphaBlendRange by floatRange("AlphaBlendRange", 0.0F..0.75F, 0.0F..1.0F)
     }
 
@@ -133,15 +115,23 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         state
     }
 
-    val isBlurEffectActive get() = Blur.enabled && !(mc.gui.hud.isHidden && mc.gui.screen() == null)
+    val isBlurEffectActive
+        get() = Blur.enabled && !(mc.gui.hud.isHidden && mc.gui.screen() == null)
 
     val themes = tree(ValueGroup("Themes"))
+
     val components = tree(ValueGroup("AdditionalComponents")).apply {
         tree(MinimapHudComponent)
     }
 
+    /**
+     * Updates [themes] content
+     */
     fun updateThemes() {
-        themes.inner.filterIsInstance<ValueGroup>().forEach { themes.drop(it) }
+        // filterIsInstance then forEach to prevent ConcurrentModificationException
+        themes.inner.filterIsInstance<ValueGroup>().forEach {
+            themes.drop(it)
+        }
         for (theme in ThemeManager.themes) {
             themes.tree(theme.settings)
         }
@@ -150,7 +140,10 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
     }
 
     override fun onEnabled() {
-        if (isHidingNow) chat(markAsError(message("hidingAppearance")))
+        if (isHidingNow) {
+            chat(markAsError(message("hidingAppearance")))
+        }
+
         updateOverlayVisibility(mc.gui.screen())
     }
 
@@ -178,97 +171,4 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         updateOverlayVisibility(mc.gui.screen())
     }
 
-    // ==========================================================
-    // 【原生渲染】26.2 映射下完美适配版
-    // ==========================================================
-    private fun trimText(font: Font, text: String, maxWidth: Int): String {
-        if (font.width(text) <= maxWidth) return text
-        var str = text
-        while (str.isNotEmpty() && font.width("$str...") > maxWidth) {
-            str = str.substring(0, str.length - 1)
-        }
-        return if (str.isEmpty()) "..." else "$str..."
-    }
-
-    @Suppress("unused")
-    private val renderHandler = handler<GameRenderEvent> { event ->
-        if (mc.player == null || mc.level == null) return@handler
-
-        // 【最核心修复】：26.2 版本的 Fabric API 中，绘图上下文字段已更名为 drawContext
-        val drawContext: DrawContext = event.drawContext
-        val font = mc.font
-        val screenWidth = mc.window.guiScaledWidth
-        val screenHeight = mc.window.guiScaledHeight
-
-        // 按文本长度从长到短降序排列
-        val enabledModules = ModuleManager.getModules()
-            .filter { it.enabled && it.name != "HUD" && it.name != "ClickGUI" }
-            .sortedByDescending { font.width(it.name) }
-
-        if (enabledModules.isEmpty()) return@handler
-
-        var totalHeight = 0f
-        var maxTextWidth = 0f
-        val itemData = mutableListOf<Pair<ClientModule, String>>()
-
-        val limitWidthPx = maxWidth.toInt()
-        for (mod in enabledModules) {
-            val displayName = trimText(font, mod.name, limitWidthPx)
-            val textWidth = font.width(displayName).toFloat()
-            val rowHeight = font.lineHeight + 4f
-            totalHeight += rowHeight
-            maxTextWidth = maxTextWidth.coerceAtLeast(textWidth)
-            itemData.add(Pair(mod, displayName))
-        }
-
-        if (itemData.isEmpty()) return@handler
-
-        val rawScale = this.scale
-        val limitHeightPx = maxHeight
-
-        var finalGlobalScale = rawScale
-        var finalRenderWidth = maxTextWidth * rawScale
-        var finalRenderHeight = totalHeight * rawScale
-
-        if (finalRenderHeight > limitHeightPx) {
-            val fitScale = limitHeightPx / finalRenderHeight
-            finalGlobalScale = rawScale * fitScale
-            finalRenderWidth = maxTextWidth * finalGlobalScale
-            finalRenderHeight = totalHeight * finalGlobalScale
-        }
-
-        // 计算绝对定位锚点
-        var baseX = 0f
-        var baseY = 0f
-        when (position) {
-            Position.TOP_LEFT -> { baseX = posX; baseY = posY }
-            Position.TOP_RIGHT -> { baseX = screenWidth - finalRenderWidth - posX; baseY = posY }
-            Position.BOTTOM_LEFT -> { baseX = posX; baseY = screenHeight - finalRenderHeight - posY }
-            Position.BOTTOM_RIGHT -> { baseX = screenWidth - finalRenderWidth - posX; baseY = screenHeight - finalRenderHeight - posY }
-            Position.CUSTOM -> { baseX = posX; baseY = posY }
-        }
-
-        // 【完美适配 26.2】：PoseStack 的方法签名完全一致，传入 Float 即可
-        drawContext.pose().pushPose()
-        drawContext.pose().translate(baseX, baseY, 0f)
-        drawContext.pose().scale(finalGlobalScale, finalGlobalScale, 1f)
-
-        var yCursor = 0f
-
-        for ((mod, displayName) in itemData) {
-            val textWidth = font.width(displayName).toFloat()
-            val rowHeight = font.lineHeight + 4f
-            val color = if (mod.enabled) 0xFFFFFFFF.toInt() else 0xFFA0A0A0.toInt()
-
-            if (bgAlpha > 0) {
-                val bgColor = (bgAlpha shl 24) or 0x000000
-                drawContext.fill(0, yCursor.toInt(), (textWidth + 4).toInt(), (yCursor + rowHeight).toInt(), bgColor)
-            }
-
-            drawContext.drawText(font, displayName, 2, yCursor.toInt() + 2, color)
-
-            yCursor += rowHeight
-        }
-        drawContext.pose().popPose()
-    }
 }
