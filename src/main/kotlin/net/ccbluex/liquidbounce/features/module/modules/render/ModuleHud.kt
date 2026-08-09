@@ -21,6 +21,7 @@ package net.ccbluex.liquidbounce.features.module.modules.render
 import net.ccbluex.liquidbounce.config.ConfigSystem
 import net.ccbluex.liquidbounce.config.types.group.ToggleableValueGroup
 import net.ccbluex.liquidbounce.config.types.group.ValueGroup
+import net.ccbluex.liquidbounce.config.types.enum // 【修复】：正确导入 enum 委托
 import net.ccbluex.liquidbounce.event.EventManager
 import net.ccbluex.liquidbounce.event.events.BrowserReadyEvent
 import net.ccbluex.liquidbounce.event.events.DisconnectEvent
@@ -46,12 +47,11 @@ import net.minecraft.client.gui.screens.DisconnectedScreen
 import net.minecraft.client.gui.screens.LevelLoadingScreen
 import net.minecraft.client.gui.screens.Screen
 
-// ================= 【补全缺失的关键导入】 =================
+// ================= 【事件与渲染导入】 =================
 import net.ccbluex.liquidbounce.event.events.GameRenderEvent
 import net.ccbluex.liquidbounce.features.module.ModuleManager
 import net.minecraft.client.gui.Font
 import net.minecraft.client.gui.GuiGraphicsExtractor
-import net.ccbluex.liquidbounce.config.types.enumValue
 // ========================================================
 
 /**
@@ -102,13 +102,13 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
     )
 
     // ==========================================================
-    // 【配置组】ArrayList 设置（最大宽高 + 整体缩放）
+    // 【配置组】ArrayList 设置
     // ==========================================================
     private val hudSettings = ValueGroup("ArrayList Settings")
     private enum class Position { TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT, CUSTOM }
 
-    // 【修复 enum 报错】：将 by enum 替换为 enumValue
-    val position by enumValue<Position>("Position", Position.TOP_RIGHT)
+    // 【修复】：使用标准的 enum 委托，并且无需手动导入 enumValue
+    val position by enum<Position>("Position", Position.TOP_RIGHT)
     val posX by float("Offset X", 10f, 0f..1000f)
     val posY by float("Offset Y", 10f, 0f..1000f)
     val bgAlpha by int("Background Alpha", 100, 0..255)
@@ -179,7 +179,7 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
     }
 
     // ==========================================================
-    // 【原生渲染】纯视觉展示，无点击交互
+    // 【原生渲染】纯视觉展示
     // ==========================================================
     private fun trimText(font: Font, text: String, maxWidth: Int): String {
         if (font.width(text) <= maxWidth) return text
@@ -192,15 +192,15 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
 
     @Suppress("unused")
     private val renderHandler = handler<GameRenderEvent> { event ->
-        // 【修复 world 报错】：Mojang 映射下必须使用 level
         if (mc.player == null || mc.level == null) return@handler
 
+        // 【修复 ctx 报错】：显式捕获 ctx 以避免编译器作用域模糊
         val ctx = event.ctx
         val font = mc.font
         val screenWidth = mc.window.guiScaledWidth
         val screenHeight = mc.window.guiScaledHeight
 
-        // 按文本长度从长到短进行排序（降序）
+        // 按文本长度从长到短降序排列
         val enabledModules = ModuleManager.getModules()
             .filter { it.enabled && it.name != "HUD" && it.name != "ClickGUI" }
             .sortedByDescending { font.width(it.name) }
@@ -211,12 +211,11 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         var maxTextWidth = 0f
         val itemData = mutableListOf<Pair<ClientModule, String>>()
 
-        // 1. 计算自然尺寸与宽度截断
         val limitWidthPx = maxWidth.toInt()
         for (mod in enabledModules) {
             val displayName = trimText(font, mod.name, limitWidthPx)
             val textWidth = font.width(displayName).toFloat()
-            val rowHeight = font.lineHeight + 4
+            val rowHeight = font.lineHeight + 4f
             totalHeight += rowHeight
             maxTextWidth = maxTextWidth.coerceAtLeast(textWidth)
             itemData.add(Pair(mod, displayName))
@@ -224,13 +223,15 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
 
         if (itemData.isEmpty()) return@handler
 
-        // 2. 计算宽度高度限制与缩放适配
         val rawScale = this.scale
         val limitHeightPx = maxHeight
 
+        // 【修复作用域】：在 if 之外声明 finalGlobalScale
+        var finalGlobalScale = rawScale
         var finalRenderWidth = maxTextWidth * rawScale
         var finalRenderHeight = totalHeight * rawScale
 
+        // 计算极限高度适配缩放
         if (finalRenderHeight > limitHeightPx) {
             val fitScale = limitHeightPx / finalRenderHeight
             finalGlobalScale = rawScale * fitScale
@@ -238,7 +239,7 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
             finalRenderHeight = totalHeight * finalGlobalScale
         }
 
-        // 3. 计算绝对坐标
+        // 计算绝对定位锚点
         var baseX = 0f
         var baseY = 0f
         when (position) {
@@ -249,7 +250,7 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
             Position.CUSTOM -> { baseX = posX; baseY = posY }
         }
 
-        // 4. 矩阵变换与渲染
+        // 矩阵整体变换与渲染
         ctx.pose().pushPose()
         ctx.pose().translate(baseX.toDouble(), baseY.toDouble(), 0.0)
         ctx.pose().scale(finalGlobalScale, finalGlobalScale, 1f)
@@ -258,16 +259,14 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
 
         for ((mod, displayName) in itemData) {
             val textWidth = font.width(displayName).toFloat()
-            val rowHeight = font.lineHeight + 4
+            val rowHeight = font.lineHeight + 4f
             val color = if (mod.enabled) 0xFFFFFFFF.toInt() else 0xFFA0A0A0.toInt()
 
-            // 【修复 fill 参数报错】：原生 ctx.fill 参数必须转为 Int
             if (bgAlpha > 0) {
                 val bgColor = (bgAlpha shl 24) or 0x000000
                 ctx.fill(0, yCursor.toInt(), (textWidth + 4).toInt(), (yCursor + rowHeight).toInt(), bgColor)
             }
 
-            // 【修复 text 参数报错】：原生 ctx.text 参数必须转为 Int
             ctx.text(font, displayName, 2, yCursor.toInt() + 2, color)
 
             yCursor += rowHeight
