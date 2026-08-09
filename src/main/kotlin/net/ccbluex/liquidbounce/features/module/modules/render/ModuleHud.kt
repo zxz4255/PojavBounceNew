@@ -46,6 +46,11 @@ import net.minecraft.client.gui.screens.DisconnectedScreen
 import net.minecraft.client.gui.screens.LevelLoadingScreen
 import net.minecraft.client.gui.screens.Screen
 
+// ================= 【事件导入】 =================
+import net.ccbluex.liquidbounce.event.events.GameRenderEvent
+import net.ccbluex.liquidbounce.features.module.ModuleManager
+// =================================================
+
 /**
  * Module HUD
  *
@@ -93,19 +98,28 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         browserSettings = BrowserSettings(60, ::reopen)
     )
 
+    // ==========================================================
+    // 【配置组】ArrayList 设置（最大宽高 + 整体缩放）
+    // ==========================================================
+    private val hudSettings = ValueGroup("ArrayList Settings")
+    private enum class Position { TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT, CUSTOM }
+    val position by enum("Position", Position.TOP_RIGHT)
+    val posX by float("Offset X", 10f, 0f..1000f)
+    val posY by float("Offset Y", 10f, 0f..1000f)
+    val bgAlpha by int("Background Alpha", 100, 0..255)
+    val scale by float("Scale", 1f, 0.5f..2f)
+    // 【新增】极限宽度与极限高度
+    val maxWidth by float("Max Width", 150f, 50f..500f)
+    val maxHeight by float("Max Height", 300f, 50f..800f)
+    // ==========================================================
+
     init {
         tree(Blur)
+        tree(hudSettings)
     }
 
     object Blur : ToggleableValueGroup(ModuleHud, "Blur", enabled = true) {
-        /**
-         * Gaussian sigma controlling blur strength. Higher values produce stronger blur.
-         */
         val sigma by float("Sigma", 5.0F, 1.0F..15.0F)
-
-        /**
-         * The range in which the blending from not-blurred to blurred occurs.
-         */
         val alphaBlendRange by floatRange("AlphaBlendRange", 0.0F..0.75F, 0.0F..1.0F)
     }
 
@@ -115,23 +129,15 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         state
     }
 
-    val isBlurEffectActive
-        get() = Blur.enabled && !(mc.gui.hud.isHidden && mc.gui.screen() == null)
+    val isBlurEffectActive get() = Blur.enabled && !(mc.gui.hud.isHidden && mc.gui.screen() == null)
 
     val themes = tree(ValueGroup("Themes"))
-
     val components = tree(ValueGroup("AdditionalComponents")).apply {
         tree(MinimapHudComponent)
     }
 
-    /**
-     * Updates [themes] content
-     */
     fun updateThemes() {
-        // filterIsInstance then forEach to prevent ConcurrentModificationException
-        themes.inner.filterIsInstance<ValueGroup>().forEach {
-            themes.drop(it)
-        }
+        themes.inner.filterIsInstance<ValueGroup>().forEach { themes.drop(it) }
         for (theme in ThemeManager.themes) {
             themes.tree(theme.settings)
         }
@@ -140,10 +146,7 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
     }
 
     override fun onEnabled() {
-        if (isHidingNow) {
-            chat(markAsError(message("hidingAppearance")))
-        }
-
+        if (isHidingNow) chat(markAsError(message("hidingAppearance")))
         updateOverlayVisibility(mc.gui.screen())
     }
 
@@ -171,4 +174,102 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         updateOverlayVisibility(mc.gui.screen())
     }
 
+    // ==========================================================
+    // 【原生渲染】纯视觉展示，无点击交互
+    // ==========================================================
+    private fun trimText(font: Font, text: String, maxWidth: Int): String {
+        if (font.width(text) <= maxWidth) return text
+        var str = text
+        while (str.isNotEmpty() && font.width("$str...") > maxWidth) {
+            str = str.substring(0, str.length - 1)
+        }
+        return if (str.isEmpty()) "..." else "$str..."
+    }
+
+    @Suppress("unused")
+    private val renderHandler = handler<GameRenderEvent> { event ->
+        if (mc.player == null || mc.world == null || !enabled) return@handler
+
+        val ctx = event.ctx
+        val font = mc.font
+        val screenWidth = mc.window.guiScaledWidth
+        val screenHeight = mc.window.guiScaledHeight
+
+        // 【修改】按文本长度从长到短进行排序（降序）
+        val enabledModules = ModuleManager.getModules()
+            .filter { it.enabled && it.name != "HUD" && it.name != "ClickGUI" }
+            .sortedByDescending { font.width(it.name) } // 越长，排得越靠上
+
+        if (enabledModules.isEmpty()) return@handler
+
+        var totalHeight = 0f
+        var maxTextWidth = 0f
+        val itemData = mutableListOf<Pair<ClientModule, String>>()
+
+        // 1. 计算自然尺寸与宽度截断
+        val limitWidthPx = maxWidth.toInt()
+        for (mod in enabledModules) {
+            val displayName = trimText(font, mod.name, limitWidthPx) // 超出极限宽度直接带省略号截断
+            val textWidth = font.width(displayName).toFloat()
+            val rowHeight = font.lineHeight + 4
+            totalHeight += rowHeight
+            maxTextWidth = maxTextWidth.coerceAtLeast(textWidth)
+            itemData.add(Pair(mod, displayName))
+        }
+
+        if (itemData.isEmpty()) return@handler
+
+        // 2. 计算宽度高度限制与缩放适配
+        val rawScale = this.scale
+        val limitHeightPx = maxHeight
+
+        // 已限制截断后的自然宽度，乘以用户设定的缩放比例
+        var finalRenderWidth = maxTextWidth * rawScale
+        var finalRenderHeight = totalHeight * rawScale
+
+        // 如果超出了设定的极限高度，计算一个“自动适应缩放”的比例
+        var finalGlobalScale = rawScale
+        if (finalRenderHeight > limitHeightPx) {
+            val fitScale = limitHeightPx / finalRenderHeight
+            finalGlobalScale = rawScale * fitScale
+            finalRenderWidth = maxTextWidth * finalGlobalScale
+            finalRenderHeight = totalHeight * finalGlobalScale
+        }
+
+        // 3. 计算绝对坐标
+        var baseX = 0f
+        var baseY = 0f
+        when (position) {
+            Position.TOP_LEFT -> { baseX = posX; baseY = posY }
+            Position.TOP_RIGHT -> { baseX = screenWidth - finalRenderWidth - posX; baseY = posY }
+            Position.BOTTOM_LEFT -> { baseX = posX; baseY = screenHeight - finalRenderHeight - posY }
+            Position.BOTTOM_RIGHT -> { baseX = screenWidth - finalRenderWidth - posX; baseY = screenHeight - finalRenderHeight - posY }
+            Position.CUSTOM -> { baseX = posX; baseY = posY }
+        }
+
+        // 4. 矩阵变换与渲染
+        ctx.pose().pushPose()
+        ctx.pose().translate(baseX.toDouble(), baseY.toDouble(), 0.0)
+        ctx.pose().scale(finalGlobalScale, finalGlobalScale, 1f)
+
+        var yCursor = 0f
+
+        for ((mod, displayName) in itemData) {
+            val textWidth = font.width(displayName).toFloat()
+            val rowHeight = font.lineHeight + 4
+            val color = if (mod.enabled) 0xFFFFFFFF.toInt() else 0xFFA0A0A0.toInt()
+
+            // 绘制背景条
+            if (bgAlpha > 0) {
+                val bgColor = (bgAlpha shl 24) or 0x000000
+                ctx.fill(0f, yCursor, textWidth + 4, yCursor + rowHeight, bgColor)
+            }
+
+            // 绘制文字
+            ctx.text(font, displayName, 2, yCursor + 2, color)
+
+            yCursor += rowHeight
+        }
+        ctx.pose().popPose()
+    }
 }
