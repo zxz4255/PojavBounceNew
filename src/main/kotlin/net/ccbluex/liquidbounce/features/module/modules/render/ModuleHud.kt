@@ -116,7 +116,6 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         val lineSpacing by int("LineSpacing", 2, 0..8)
         val maxDisplay by int("MaxDisplay", 20, 0..50)
         val position by int("Position", 0, 0..3)
-        val scale by float("Scale", 1.0f, 0.5f..2.0f)  // 整体缩放
     }
     // =================================
 
