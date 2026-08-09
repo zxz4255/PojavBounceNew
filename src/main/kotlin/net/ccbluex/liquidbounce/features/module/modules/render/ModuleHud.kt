@@ -115,14 +115,14 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
 
     // ============= 功能列表 (Module List) 配置 =============
     object ModuleList : ToggleableValueGroup(ModuleHud, "ModuleList", enabled = true) {
-        /** 背景颜色 (ARGB) */
-        val backgroundColor by int("BackgroundColor", 0xC915171B)
+        /** 背景颜色 (ARGB) 使用 IntRange 0..0xFFFFFFFF */
+        val backgroundColor by int("BackgroundColor", 0xC915171B, 0..0x7FFFFFFF)
 
-        /** 背景透明度 (覆盖 alpha 通道，方便快捷调整) 0-255 */
+        /** 背景透明度 (0-255) */
         val backgroundAlpha by int("BackgroundAlpha", 60, 0..255)
 
-        /** 文字颜色 (ARGB) */
-        val textColor by int("TextColor", 0xFFE0E0E0)
+        /** 文字颜色 (ARGB) 使用 IntRange 0..0xFFFFFFFF */
+        val textColor by int("TextColor", 0xFFE0E0E0, 0..0x7FFFFFFF)
 
         /** 圆角半径 */
         val cornerRadius by int("CornerRadius", 4, 0..16)
@@ -132,6 +132,9 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
 
         /** 行间距 */
         val lineSpacing by int("LineSpacing", 2, 0..8)
+
+        /** 最大显示模块数 (0 表示不限制) */
+        val maxDisplay by int("MaxDisplay", 20, 0..50)
 
         /** 显示位置 (右上/右下/左上/左下) */
         val position by choice("Position", arrayOf("右上", "右下", "左上", "左下"), "右上")
@@ -198,7 +201,7 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
     // ============= 功能列表渲染 (独立于浏览器) =============
     @Suppress("unused")
     private val gameRenderHandler = handler<GameRenderEvent> { event ->
-        renderModuleList(event.context)
+        renderModuleList(event.graphics)
     }
 
     /**
@@ -220,6 +223,10 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         val modules = getEnabledModules()
         if (modules.isEmpty()) return
 
+        val maxDisplay = ModuleList.maxDisplay
+        val displayModules = if (maxDisplay > 0) modules.take(maxDisplay) else modules
+        if (displayModules.isEmpty()) return
+
         val font = client.font
         val scWidth = client.window.guiScaledWidth
         val scHeight = client.window.guiScaledHeight
@@ -234,7 +241,7 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         val position = ModuleList.position
 
         // 计算每个模块的文本尺寸
-        val lines = modules.map { mod ->
+        val lines = displayModules.map { mod ->
             val text = mod.name
             val width = font.width(text)
             val height = font.lineHeight
@@ -270,8 +277,7 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         // 绘制所有模块名称 (按长度排序)
         var currentY = yPos + padding
         for ((text, _) in lines) {
-            val yOffset = currentY + (font.lineHeight - font.lineHeight) / 2
-            ctx.drawText(font, text, (xPos + padding).toInt(), yOffset.toInt(), textColor, false)
+            ctx.drawText(font, text, (xPos + padding).toInt(), currentY.toInt(), textColor, false)
             currentY += font.lineHeight + lineSpacing
         }
     }
