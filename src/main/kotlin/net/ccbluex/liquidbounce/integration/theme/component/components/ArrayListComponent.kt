@@ -1,10 +1,9 @@
 package net.ccbluex.liquidbounce.integration.theme.component.components
 
-import com.google.gson.JsonObject
 import net.ccbluex.liquidbounce.features.module.ModuleManager
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleHud
-import net.ccbluex.liquidbounce.integration.theme.component.HudComponent
 import net.ccbluex.liquidbounce.integration.theme.component.HudComponentTweak
+import net.ccbluex.liquidbounce.integration.theme.component.components.NativeHudComponent
 import net.ccbluex.liquidbounce.utils.render.Alignment
 import net.minecraft.client.gui.GuiGraphicsExtractor
 
@@ -12,14 +11,19 @@ class ArrayListComponent(
     name: String,
     enabled: Boolean,
     alignment: Alignment,
-    tweaks: Array<HudComponentTweak>,
-    values: Array<out Any>  // 修复：改为 Array<out Any> 避免类型不匹配
-) : HudComponent(name, enabled, alignment, tweaks, values) {
+    tweaks: Array<HudComponentTweak> = emptyArray(),
+    description: String = ""
+) : NativeHudComponent(name, enabled, alignment, tweaks, description) {
 
     private val config get() = ModuleHud.ModuleList
 
-    // 修复：使用正确的 override 签名，与 HudComponent 基类一致
-    override fun render(ctx: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, delta: Float) {
+    override val guiScaledWidth: Float
+        get() = mc.window.guiScaledWidth.toFloat()
+    override val guiScaledHeight: Float
+        get() = mc.window.guiScaledHeight.toFloat()
+
+    // 注意：没有 override 关键字，因为基类没有定义 render 方法
+    fun render(ctx: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, delta: Float) {
         if (!enabled || !config.enabled) return
 
         val client = mc
