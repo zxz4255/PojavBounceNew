@@ -99,12 +99,12 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
     )
 
     init {
-        tree(Blur)
-        tree(ModuleList)
+    tree(Blur)
+    tree(ModuleList)
 
-        NativeComponentRegistry.register("ArrayList") { name: String, enabled: Boolean, alignment: Alignment, tweaks: Array<HudComponentTweak>, values: Array<JsonObject> ->
-            ArrayListComponent(name, enabled, alignment, tweaks, values)
-        }
+    NativeComponentRegistry.register("ArrayList") { name, enabled, alignment, tweaks ->
+        ArrayListComponent(name, enabled, alignment, tweaks)
+    }
     }
 
     object Blur : ToggleableValueGroup(ModuleHud, "Blur", enabled = true) {
