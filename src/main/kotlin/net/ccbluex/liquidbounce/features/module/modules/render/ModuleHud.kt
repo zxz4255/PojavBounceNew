@@ -39,6 +39,8 @@ import net.ccbluex.liquidbounce.integration.screen.impl.CustomStandaloneMinecraf
 import net.ccbluex.liquidbounce.integration.screen.impl.CustomOverlay
 import net.ccbluex.liquidbounce.integration.theme.ThemeManager
 import net.ccbluex.liquidbounce.integration.theme.component.components.minimap.MinimapHudComponent
+import net.ccbluex.liquidbounce.integration.theme.component.NativeComponentRegistry
+import net.ccbluex.liquidbounce.integration.theme.component.components.ArrayListComponent
 import net.ccbluex.liquidbounce.utils.client.chat
 import net.ccbluex.liquidbounce.utils.client.inGame
 import net.ccbluex.liquidbounce.utils.client.markAsError
@@ -95,19 +97,31 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
 
     init {
         tree(Blur)
+        tree(ModuleList)  // ← 添加 ModuleList 配置树
+
+        // 注册 ArrayListComponent
+        NativeComponentRegistry.register("ArrayList") { name, enabled, alignment, tweaks, values ->
+            ArrayListComponent(name, enabled, alignment, tweaks, values)
+        }
     }
 
     object Blur : ToggleableValueGroup(ModuleHud, "Blur", enabled = true) {
-        /**
-         * Gaussian sigma controlling blur strength. Higher values produce stronger blur.
-         */
         val sigma by float("Sigma", 5.0F, 1.0F..15.0F)
-
-        /**
-         * The range in which the blending from not-blurred to blurred occurs.
-         */
         val alphaBlendRange by floatRange("AlphaBlendRange", 0.0F..0.75F, 0.0F..1.0F)
     }
+
+    // ========== 功能列表配置 ==========
+    object ModuleList : ToggleableValueGroup(ModuleHud, "ModuleList", enabled = true) {
+        val backgroundColor by int("BackgroundColor", 0xC915171B.toInt(), Int.MIN_VALUE..Int.MAX_VALUE)
+        val backgroundAlpha by int("BackgroundAlpha", 60, 0..255)
+        val textColor by int("TextColor", 0xFFE0E0E0.toInt(), Int.MIN_VALUE..Int.MAX_VALUE)
+        val cornerRadius by int("CornerRadius", 4, 0..16)
+        val padding by int("Padding", 4, 0..12)
+        val lineSpacing by int("LineSpacing", 2, 0..8)
+        val maxDisplay by int("MaxDisplay", 20, 0..50)
+        val position by int("Position", 0, 0..3)
+    }
+    // =================================
 
     @Suppress("unused")
     private val spaceSeperatedNames by boolean("SpaceSeperatedNames", true).onChange { state ->
@@ -124,11 +138,7 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         tree(MinimapHudComponent)
     }
 
-    /**
-     * Updates [themes] content
-     */
     fun updateThemes() {
-        // filterIsInstance then forEach to prevent ConcurrentModificationException
         themes.inner.filterIsInstance<ValueGroup>().forEach {
             themes.drop(it)
         }
@@ -170,5 +180,4 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         overlay.close()
         updateOverlayVisibility(mc.gui.screen())
     }
-
 }
