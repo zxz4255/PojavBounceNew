@@ -1,331 +1,185 @@
 /*
- * LiquidBounce Nextgen (PojavBounve) - ArrayList Module
+ * LiquidBounce Nextgen - ArrayList Module
  * 
- * 功能：在屏幕右上角按长度从长到短、从上到下排列显示所有已开启的功能模块。
- * 特性：可调整大小、最大显示数、字体颜色、背景，使用原版字体渲染。
- * 右键模块可打开详细设置面板。
+ * 功能：在屏幕右上角按长度从长到短排列显示所有已启用模块。
+ * 配置项完整，支持缩放、颜色、背景、圆角、排序等。
+ * 完全自包含，使用 mc.font 和 GuiGraphicsExtractor 绘制，兼容安卓。
  */
-
 package net.ccbluex.liquidbounce.features.module.modules.render
 
-import net.ccbluex.liquidbounce.LiquidBounce
-import net.ccbluex.liquidbounce.event.*
-import net.ccbluex.liquidbounce.features.module.Module
+import net.ccbluex.liquidbounce.config.values.*
+import net.ccbluex.liquidbounce.event.ModuleEvent
+import net.ccbluex.liquidbounce.event.Render2DEvent
+import net.ccbluex.liquidbounce.event.handler
+import net.ccbluex.liquidbounce.features.module.ClientModule
 import net.ccbluex.liquidbounce.features.module.ModuleCategory
-import net.ccbluex.liquidbounce.features.module.ModuleInfo
-import net.ccbluex.liquidbounce.features.value.*
-import net.ccbluex.liquidbounce.ui.font.Fonts
-import net.ccbluex.liquidbounce.utils.render.RenderUtils
-import net.ccbluex.liquidbounce.utils.render.ColorUtils
-import net.minecraft.client.Minecraft
-import net.minecraft.client.gui.FontRenderer
-import net.minecraft.client.gui.Gui
-import net.minecraft.client.renderer.GlStateManager
-import org.lwjgl.opengl.GL11
+import net.ccbluex.liquidbounce.features.module.ModuleManager
+import net.ccbluex.liquidbounce.utils.client.mc
+import net.minecraft.client.gui.GuiGraphicsExtractor
 import java.awt.Color
+import kotlin.math.cos
 import kotlin.math.max
-import kotlin.math.min
+import kotlin.math.sin
 
-@ModuleInfo(
-    name = "ArrayList",
-    description = "在屏幕右上角显示所有已开启的功能模块列表",
-    category = ModuleCategory.HUD,
-    canEnable = true
-)
-class ArrayListModule : Module() {
+/**
+ * 独立 ArrayList 模块，自带全套设置，渲染不依赖任何外部工具。
+ */
+object ArrayListModule : ClientModule() {
+    override val name = "ArrayList"
+    override val category = ModuleCategory.RENDER
 
-    // ==================== 设置定义 ====================
-    // 列表整体缩放比例
-    private val scaleValue = FloatValue("Scale", 1.0f, 0.5f, 3.0f)
+    // ==================== 设置项（委托属性） ====================
+    val scale by floatValue("Scale", 1.0f, 0.5f..3.0f)
+    val maxDisplay by intValue("MaxDisplay", -1, -1..50)   // -1 表示无限制
+    val textColor by colorValue("TextColor", Color.WHITE)
+    val backgroundColor by colorValue("BackgroundColor", Color(0, 0, 0, 100))
+    val backgroundAlpha by intValue("BgAlpha", 100, 0..255)
+    val cornerRadius by floatValue("CornerRadius", 3.0f, 0.0f..8.0f)
+    val padding by floatValue("Padding", 4.0f, 1.0f..10.0f)
+    val lineSpacing by floatValue("LineSpacing", 2.0f, 0.0f..8.0f)
+    val sortMode by listValue("SortMode", listOf("Length", "Alphabet", "EnableTime"), "Length")
+    val showTotalCount by boolValue("ShowTotalCount", false)
 
-    // 最大显示模块数量 (-1 表示无限制)
-    private val maxDisplayValue = IntegerValue("MaxDisplay", -1, -1, 50)
+    // 记录模块启用时间（用于“EnableTime”排序）
+    private val enableTimeMap = mutableMapOf<String, Long>()
 
-    // 字体颜色（包含 Alpha）
-    private val fontColorValue = ColorValue("FontColor", Color(255, 255, 255, 255).rgb)
-
-    // 是否启用文本阴影
-    private val shadowValue = BoolValue("Shadow", true)
-
-    // 背景颜色（包含 Alpha）
-    private val backgroundColorValue = ColorValue("BackgroundColor", Color(0, 0, 0, 100).rgb)
-
-    // 背景是否画矩形边框
-    private val backgroundBorderValue = BoolValue("Border", false)
-
-    // 边框颜色
-    private val borderColorValue = ColorValue("BorderColor", Color(60, 60, 60, 150).rgb)
-
-    // 排序模式：0 = 按名称长度降序，1 = 按名称字母升序，2 = 按模块启用时间降序
-    private val sortModeValue = ListValue("SortMode", arrayOf("Length", "Alphabet", "EnableTime"), "Length")
-
-    // 字体选择：原版 / 客户端自定义平滑字体 (如有)
-    private val fontStyleValue = ListValue("FontStyle", arrayOf("Minecraft", "Smooth"), "Minecraft")
-
-    // 圆角半径（背景矩形）
-    private val borderRadiusValue = FloatValue("BorderRadius", 3.0f, 0.0f, 8.0f)
-
-    // 内边距（文字与背景边缘的距离）
-    private val paddingValue = FloatValue("Padding", 4.0f, 1.0f, 10.0f)
-
-    // 行间距
-    private val lineSpacingValue = FloatValue("LineSpacing", 2.0f, 0.0f, 8.0f)
-
-    // 显示模块总数
-    private val showTotalCountValue = BoolValue("ShowTotalCount", false)
-
-    // 背景透明度单独调整（与背景颜色Alpha结合）
-    private val backgroundAlphaValue = IntegerValue("BgAlpha", 100, 0, 255)
-
-    // 记录每个模块的启用时间戳（用于排序）
-    private val moduleEnableTimeMap = mutableMapOf<String, Long>()
-
-    // 用于动画的平滑 Y 偏移缓存
-    private val moduleYCache = mutableMapOf<String, Float>()
-
-    // ==================== 初始化 ====================
-    init {
-        // 注册事件监听
-        LiquidBounce.eventManager.registerListener(this)
-    }
-
-    // ==================== 事件处理 ====================
-    /**
-     * 监听模块启用事件，记录启用时间
-     */
-    @EventTarget
-    fun onModuleEnable(event: ModuleEvent) {
-        if (event.module != this && event.module.state) {
-            moduleEnableTimeMap[event.module.name] = System.currentTimeMillis()
+    // 事件监听：模块启用时记录时间
+    private val moduleEnableHandler = handler<ModuleEvent> { event ->
+        if (event.module != this && event.module.enabled) {
+            enableTimeMap[event.module.name] = System.currentTimeMillis()
         }
     }
 
-    /**
-     * 主要渲染逻辑，在 2D 屏幕渲染事件中绘制
-     */
-    @EventTarget
-    fun onRender2D(event: Render2DEvent) {
-        if (!state) return
+    // 渲染监听
+    private val renderHandler = handler<Render2DEvent> { event ->
+        render(event.graphics)
+    }
 
-        val mc = Minecraft.getMinecraft()
-        if (mc.thePlayer == null || mc.theWorld == null) return
+    // ==================== 渲染逻辑 ====================
+    private fun render(ctx: GuiGraphicsExtractor) {
+        if (!enabled) return
 
-        // 获取当前启用的模块（不包括自身）
-        val enabledModules = LiquidBounce.moduleManager.modules
-            .filter { it.state && it != this }
+        val modules = ModuleManager.getModules()
+            .filter { it.enabled && it != this && it.name != "ClickGUI" && it.name != "HUD" }
             .toMutableList()
 
-        if (enabledModules.isEmpty()) return
+        if (modules.isEmpty()) return
 
-        // 根据排序模式排序
-        sortModules(enabledModules)
-
-        // 限制最大显示数量
-        val maxDisplay = maxDisplayValue.get()
-        val displayModules = if (maxDisplay > 0) enabledModules.take(maxDisplay) else enabledModules
-
-        // 获取字体渲染器
-        val fontRenderer = getSelectedFont()
-
-        // 计算缩放后的基准值
-        val scale = scaleValue.get().coerceIn(0.5f, 3.0f)
-        val padding = paddingValue.get() * scale
-        val lineSpacing = lineSpacingValue.get() * scale
-        val borderRadius = borderRadiusValue.get() * scale
-
-        // 预先计算所有文本宽度，找出最长宽度
-        var maxTextWidth = 0f
-        val textWidths = mutableListOf<Float>()
-        for (module in displayModules) {
-            val displayName = getModuleDisplayName(module)
-            val width = fontRenderer.getStringWidth(displayName) * scale
-            textWidths.add(width)
-            if (width > maxTextWidth) maxTextWidth = width
+        // 排序
+        when (sortMode.lowercase()) {
+            "alphabet" -> modules.sortBy { it.name.lowercase() }
+            "enabletime" -> modules.sortByDescending { enableTimeMap[it.name] ?: 0L }
+            else -> modules.sortByDescending { it.name.length } // "Length"
         }
 
-        // 背景宽度 = 最长文本宽度 + 左右内边距
-        val backgroundWidth = maxTextWidth + padding * 2
-        // 背景高度 = (文字高度 + 行间距) * 行数 - 行间距（最后一行不需要行间距）+ 上下内边距
-        val textHeight = fontRenderer.FONT_HEIGHT * scale
-        val totalLineHeight = textHeight + lineSpacing
-        val backgroundHeight = (totalLineHeight * displayModules.size - lineSpacing) + padding * 2
+        // 最大显示限制
+        val max = maxDisplay
+        val displayModules = if (max > 0) modules.take(max) else modules
+        if (displayModules.isEmpty()) return
 
-        // 计算绘制起始点：屏幕右上角，距离边缘一定距离
-        val margin = 2.0f * scale
-        val startX = event.scaledResolution.scaledWidth - backgroundWidth - margin
-        val startY = margin
+        val font = mc.font
+        val scW = mc.window.guiScaledWidth
+        val scH = mc.window.guiScaledHeight
 
-        // 保存当前矩阵状态
-        GlStateManager.pushMatrix()
-        GlStateManager.enableBlend()
-        GlStateManager.disableAlpha()
-        GlStateManager.tryBlendFuncSeparate(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA, 1, 0)
+        val s = scale
+        val pad = padding * s
+        val lineGap = lineSpacing * s
+        val radius = cornerRadius * s
 
-        // 绘制背景
-        drawBackground(
-            startX, startY,
-            backgroundWidth, backgroundHeight,
-            borderRadius
-        )
-
-        // 绘制每个模块的文字
-        var currentY = startY + padding
-        for ((index, module) in displayModules.withIndex()) {
-            val displayName = getModuleDisplayName(module)
-            val textWidth = textWidths[index]
-
-            // 文字水平靠右对齐（背景内右侧）
-            val textX = startX + backgroundWidth - padding - textWidth
-
-            // 平滑 Y 轴动画
-            val targetY = currentY
-            val smoothY = moduleYCache.getOrPut(module.name) { targetY }
-            val animatedY = smoothY + (targetY - smoothY) * 0.3f
-            moduleYCache[module.name] = animatedY
-
-            // 渲染文字
-            drawModuleText(
-                fontRenderer,
-                displayName,
-                textX,
-                animatedY,
-                scale,
-                textWidth,
-                fontColorValue.get()
-            )
-
-            currentY += totalLineHeight
+        // 计算每行宽度和总尺寸
+        val lines = displayModules.map { module ->
+            val displayName = if (showTotalCount) {
+                val count = ModuleManager.getModules().count { it.enabled }
+                "${module.name} [$count]"
+            } else module.name
+            displayName to font.width(displayName) * s
         }
+        val maxWidth = lines.maxOfOrNull { it.second } ?: 0f
+        val totalHeight = lines.size * (font.lineHeight * s + lineGap) - lineGap
+        val boxW = maxWidth + pad * 2
+        val boxH = totalHeight + pad * 2
 
-        GlStateManager.enableAlpha()
-        GlStateManager.disableBlend()
-        GlStateManager.popMatrix()
-    }
+        // 固定在右上角，留边距 4px
+        val margin = 4f * s
+        val x = scW - boxW - margin
+        val y = margin
 
-    // ==================== 私有绘制方法 ====================
-    /**
-     * 绘制列表背景矩形（支持圆角和边框）
-     */
-    private fun drawBackground(x: Float, y: Float, width: Float, height: Float, radius: Float) {
-        val bgColor = backgroundColorValue.get()
-        val alpha = backgroundAlphaValue.get().coerceIn(0, 255)
-        // 重新组合颜色，使用手动设置的背景透明度
-        val color = Color(
-            (bgColor shr 16) and 0xFF,
-            (bgColor shr 8) and 0xFF,
-            bgColor and 0xFF,
-            alpha
-        )
+        // 背景颜色（合并透明度）
+        val bgColor = (backgroundColor.rgb and 0x00FFFFFF) or ((backgroundAlpha shl 24) and 0xFF000000.toInt())
 
-        // 画圆角矩形
-        RenderUtils.drawRoundedRect(x, y, x + width, y + height, radius, color.rgb)
+        // 绘制圆角背景
+        drawRoundedRect(ctx, x, y, boxW, boxH, radius, bgColor)
 
-        // 绘制边框（如果启用）
-        if (backgroundBorderValue.get()) {
-            val borderColor = borderColorValue.get()
-            RenderUtils.drawRoundedRectOutline(
-                x, y, x + width, y + height, radius, 1.5f, borderColor
-            )
+        // 绘制文字
+        var curY = y + pad
+        val textColorInt = textColor.rgb
+        for ((text, width) in lines) {
+            // 右对齐
+            val tx = x + boxW - pad - width
+            ctx.text(font, text, tx.toInt(), curY.toInt(), textColorInt)
+            curY += font.lineHeight * s + lineGap
         }
     }
 
-    /**
-     * 绘制模块文字（支持阴影和原版字体风格）
-     */
-    private fun drawModuleText(
-        font: FontRenderer,
-        text: String,
-        x: Float,
-        y: Float,
-        scale: Float,
-        maxWidth: Float,
-        color: Int
-    ) {
-        GlStateManager.pushMatrix()
-        GlStateManager.translate(x, y, 0f)
-        GlStateManager.scale(scale, scale, 1f)
-
-        // 绘制阴影（如果启用且不是透明）
-        if (shadowValue.get() && (color ushr 24) > 0) {
-            font.drawString(text, 1f, 1f, Color(0, 0, 0, (color ushr 24) / 2).rgb)
-        }
-
-        // 绘制主文字
-        font.drawString(text, 0f, 0f, color)
-
-        GlStateManager.popMatrix()
+    // ==================== 绘图工具（直接取自 ClickGuiScreen，保证一致性） ====================
+    private fun fillRect(ctx: GuiGraphicsExtractor, x1: Int, y1: Int, x2: Int, y2: Int, color: Int) {
+        if (x2 <= x1 || y2 <= y1) return
+        ctx.fill(x1, y1, x2, y2, color)
     }
 
-    /**
-     * 获取模块的显示名称（可包含额外信息）
-     */
-    private fun getModuleDisplayName(module: Module): String {
-        val baseName = module.name
-        // 如果开启了显示总数，在文本末尾附加模块计数（示例）
-        return if (showTotalCountValue.get()) {
-            val enabledCount = LiquidBounce.moduleManager.modules.count { it.state }
-            "$baseName [$enabledCount]"
-        } else {
-            baseName
-        }
+    private fun fillRect(ctx: GuiGraphicsExtractor, x1: Float, y1: Float, x2: Float, y2: Float, color: Int) {
+        if (x2 <= x1 || y2 <= y1) return
+        ctx.fill(x1.toInt(), y1.toInt(), x2.toInt(), y2.toInt(), color)
     }
 
-    /**
-     * 根据设置返回当前使用的字体渲染器
-     */
-    private fun getSelectedFont(): FontRenderer {
-        return when (fontStyleValue.get().lowercase()) {
-            "smooth" -> Fonts.smoothFont ?: Minecraft.getMinecraft().fontRendererObj
-            else -> Minecraft.getMinecraft().fontRendererObj
+    private fun drawRoundedRect(ctx: GuiGraphicsExtractor, x: Float, y: Float, w: Float, h: Float, radius: Float, color: Int) {
+        val r = radius.coerceAtMost(w / 2f).coerceAtMost(h / 2f)
+        if (r <= 0.5f) {
+            fillRect(ctx, x, y, x + w, y + h, color)
+            return
+        }
+        val x1 = x
+        val y1 = y
+        val x2 = x + w
+        val y2 = y + h
+        fillRect(ctx, x1 + r, y1, x2 - r, y2, color)
+        fillRect(ctx, x1, y1 + r, x1 + r, y2 - r, color)
+        fillRect(ctx, x2 - r, y1 + r, x2, y2 - r, color)
+        drawCorner(ctx, x1 + r, y1 + r, r, 180f, 270f, color)
+        drawCorner(ctx, x2 - r, y1 + r, r, 270f, 360f, color)
+        drawCorner(ctx, x2 - r, y2 - r, r, 0f, 90f, color)
+        drawCorner(ctx, x1 + r, y2 - r, r, 90f, 180f, color)
+    }
+
+    private fun drawCorner(ctx: GuiGraphicsExtractor, cx: Float, cy: Float, r: Float, start: Float, end: Float, color: Int) {
+        var a = start
+        while (a < end) {
+            val rad1 = Math.toRadians(a.toDouble())
+            val rad2 = Math.toRadians((a + 6f).coerceAtMost(end).toDouble())
+            val px1 = cx + (cos(rad1) * r).toFloat()
+            val py1 = cy + (sin(rad1) * r).toFloat()
+            val px2 = cx + (cos(rad2) * r).toFloat()
+            val py2 = cy + (sin(rad2) * r).toFloat()
+            val minX = cx.coerceAtMost(px1).coerceAtMost(px2).toInt()
+            val maxX = cx.coerceAtLeast(px1).coerceAtLeast(px2).toInt()
+            val minY = cy.coerceAtMost(py1).coerceAtMost(py2).toInt()
+            val maxY = cy.coerceAtLeast(py1).coerceAtLeast(py2).toInt()
+            fillRect(ctx, minX, minY, max(minX + 1, maxX), max(minY + 1, maxY), color)
+            a += 6f
         }
     }
 
-    /**
-     * 模块排序逻辑
-     */
-    private fun sortModules(modules: MutableList<Module>) {
-        when (sortModeValue.get().lowercase()) {
-            "length" -> {
-                modules.sortByDescending { getModuleDisplayName(it).length }
-            }
-            "alphabet" -> {
-                modules.sortBy { getModuleDisplayName(it).lowercase() }
-            }
-            "enabletime" -> {
-                modules.sortByDescending { moduleEnableTimeMap[it.name] ?: 0L }
-            }
-        }
-    }
-
-    // ==================== 模块启用/禁用 ====================
+    // ==================== 模块生命周期 ====================
     override fun onEnable() {
-        // 初始化所有已启用模块的时间戳
-        for (mod in LiquidBounce.moduleManager.modules) {
-            if (mod.state && mod != this) {
-                if (!moduleEnableTimeMap.containsKey(mod.name)) {
-                    moduleEnableTimeMap[mod.name] = System.currentTimeMillis()
-                }
+        // 为所有已启用的模块初始化时间戳
+        ModuleManager.getModules().forEach { mod ->
+            if (mod.enabled && mod != this) {
+                enableTimeMap.putIfAbsent(mod.name, System.currentTimeMillis())
             }
         }
     }
 
     override fun onDisable() {
-        // 清理缓存的平滑位置数据
-        moduleYCache.clear()
+        // 可选的清理，此处保留空实现
     }
-
-    // ==================== 辅助：将设置暴露给右键菜单 ====================
-    // LiquidBounce Nextgen 会自动根据模块内的 Value 实例生成设置面板，
-    // 因此只需要将所有 Value 定义为类成员即可。
-    // 以下显式地覆盖 getValues() 以确保所有设置项被正确识别（若框架需要）
-    override fun getValues(): List<Value<*>> {
-        return listOf(
-            scaleValue, maxDisplayValue, fontColorValue, shadowValue,
-            backgroundColorValue, backgroundBorderValue, borderColorValue,
-            sortModeValue, fontStyleValue, borderRadiusValue, paddingValue,
-            lineSpacingValue, showTotalCountValue, backgroundAlphaValue
-        )
-    }
-
-    // 如果框架要求用 @Value 注解，此处已直接使用 Value 对象，兼容常见版本。
 }
