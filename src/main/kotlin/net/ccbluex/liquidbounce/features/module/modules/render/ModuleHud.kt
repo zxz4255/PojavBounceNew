@@ -18,13 +18,13 @@
  */
 package net.ccbluex.liquidbounce.features.module.modules.render
 
-import com.google.gson.JsonObject
 import net.ccbluex.liquidbounce.config.ConfigSystem
 import net.ccbluex.liquidbounce.config.types.group.ToggleableValueGroup
 import net.ccbluex.liquidbounce.config.types.group.ValueGroup
 import net.ccbluex.liquidbounce.event.EventManager
 import net.ccbluex.liquidbounce.event.events.BrowserReadyEvent
 import net.ccbluex.liquidbounce.event.events.DisconnectEvent
+import net.ccbluex.liquidbounce.event.events.GameRenderEvent
 import net.ccbluex.liquidbounce.event.events.ScreenEvent
 import net.ccbluex.liquidbounce.event.events.SpaceSeperatedNamesChangeEvent
 import net.ccbluex.liquidbounce.event.handler
@@ -39,14 +39,11 @@ import net.ccbluex.liquidbounce.integration.screen.impl.CustomSharedMinecraftScr
 import net.ccbluex.liquidbounce.integration.screen.impl.CustomStandaloneMinecraftScreen
 import net.ccbluex.liquidbounce.integration.screen.impl.CustomOverlay
 import net.ccbluex.liquidbounce.integration.theme.ThemeManager
-import net.ccbluex.liquidbounce.integration.theme.component.NativeComponentRegistry
-import net.ccbluex.liquidbounce.integration.theme.component.HudComponentTweak
-import net.ccbluex.liquidbounce.integration.theme.component.components.ArrayListComponent
 import net.ccbluex.liquidbounce.integration.theme.component.components.minimap.MinimapHudComponent
 import net.ccbluex.liquidbounce.utils.client.chat
 import net.ccbluex.liquidbounce.utils.client.inGame
 import net.ccbluex.liquidbounce.utils.client.markAsError
-import net.ccbluex.liquidbounce.utils.render.Alignment
+import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.screens.DisconnectedScreen
 import net.minecraft.client.gui.screens.LevelLoadingScreen
 import net.minecraft.client.gui.screens.Screen
@@ -99,12 +96,8 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
     )
 
     init {
-    tree(Blur)
-    tree(ModuleList)
-
-    NativeComponentRegistry.register("ArrayList") { name, enabled, alignment, tweaks ->
-        ArrayListComponent(name, enabled, alignment, tweaks)
-    }
+        tree(Blur)
+        tree(ModuleList)   // 添加功能列表配置
     }
 
     object Blur : ToggleableValueGroup(ModuleHud, "Blur", enabled = true) {
@@ -176,6 +169,24 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
     @Suppress("unused")
     private val disconnectHandler = handler<DisconnectEvent> {
         overlay.close()
+    }
+
+    // ========== 功能列表渲染（使用反射自动获取 Graphics）==========
+    @Suppress("unused")
+    private val gameRenderHandler = handler<GameRenderEvent> { event ->
+        // 反射获取类型为 GuiGraphicsExtractor 的字段（自动适配字段名）
+        val graphics = try {
+            val field = event.javaClass.declaredFields.firstOrNull { 
+                GuiGraphicsExtractor::class.java.isAssignableFrom(it.type) 
+            }
+            field?.apply { isAccessible = true }?.get(event) as? GuiGraphicsExtractor
+        } catch (e: Exception) {
+            null
+        }
+
+        if (graphics != null) {
+            ArrayListRenderer.render(graphics)
+        }
     }
 
     fun reopen() {
