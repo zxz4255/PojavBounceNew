@@ -4,7 +4,7 @@ import net.ccbluex.liquidbounce.config.types.RangedValue
 import net.ccbluex.liquidbounce.config.types.Value
 import net.ccbluex.liquidbounce.features.module.ClientModule
 import net.ccbluex.liquidbounce.features.module.ModuleCategory
-import net.ccbluex.liquidbounce.features.module.ModuleCategories // 【修复1】：导入正确的枚举容器
+import net.ccbluex.liquidbounce.features.module.ModuleCategories
 import net.ccbluex.liquidbounce.features.module.ModuleManager
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.gui.Font
@@ -12,7 +12,6 @@ import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.input.MouseButtonEvent
 import net.minecraft.client.input.KeyEvent
 import net.minecraft.client.input.CharacterEvent
-// 【修复点 2】：删除不存在的 MouseDragEvent import
 import net.minecraft.network.chat.Component
 import org.lwjgl.glfw.GLFW
 import java.awt.Color
@@ -20,7 +19,6 @@ import java.util.IdentityHashMap
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.sin
-import java.io.File // 【修复】：使用原生 File 类
 
 /**
  * LiquidBounce-style ClickGUI — Multi-panel layout, each category is an independent floating panel.
@@ -58,10 +56,17 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     private val PANEL_MAX_H = 400 // 高度保持原样 400
     private val HEADER_H = 24f
 
-    // 【新增】滑块绝对定位与拖动状态
-    private var sliderDragTarget: Value<*>? = null
-    private var sliderDragPanel: PanelData? = null
-    private var isFirstLoad = true
+    // ==================== Slider Drag State (新增) ====================
+    private data class SliderContext(
+        val value: Value<*>,
+        val panel: PanelData,
+        val sliderX: Int,
+        val sliderY: Int,
+        val sliderW: Int,
+        val min: Float,
+        val max: Float
+    )
+    private var sliderContext: SliderContext? = null
 
     // ==================== State ====================
     private var expandedModule: ClientModule? = null
@@ -73,7 +78,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     private var fadeAnim = 0f
 
     // 所有分类面板的列表
-    // 【修复点 2】：使用 ModuleCategories.entries 获取枚举列表，并移除不存在的 HIDDEN 过滤
     private val categories = ModuleCategories.entries.toList()
 
     private data class PanelData(
@@ -85,13 +89,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         var dragOffsetX: Float = 0f,
         var dragOffsetY: Float = 0f,
         var collapsed: Boolean = false // 【新增】：折叠状态
-    )
-
-    private data class LayoutData(
-        val tag: String,
-        val x: Float,
-        val y: Float,
-        val collapsed: Boolean
     )
 
     private var panels = mutableListOf<PanelData>()
@@ -193,46 +190,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         fillRect(ctx, 0, 0, sc, sh, OVERLAY)
     }
 
-    // ==================== 布局的保存与恢复（纯原生 File + 字符串解析） ====================
-    private fun getLayoutFile(): File {
-        return File(minecraft!!.gameDirectory, "config/clickgui_layout.json")
-    }
-
-    private fun saveLayout() {
-        try {
-            val file = getLayoutFile()
-            val lines = panels.mapNotNull { panel ->
-                if (panel.category == null) return@mapNotNull null
-                "${panel.category.tag}|${panel.x}|${panel.y}|${panel.collapsed}"
-            }
-            file.writeText(lines.joinToString("\n"))
-        } catch (_: Exception) {}
-    }
-
-    private fun loadLayout() {
-        val file = getLayoutFile()
-        if (!file.exists()) return
-        try {
-            val data = file.readText().lines().mapNotNull { line ->
-                val parts = line.split('|')
-                if (parts.size != 4) return@mapNotNull null
-                val tag = parts[0]
-                val x = parts[1].toFloatOrNull() ?: return@mapNotNull null
-                val y = parts[2].toFloatOrNull() ?: return@mapNotNull null
-                val collapsed = parts[3].toBoolean()
-                LayoutData(tag, x, y, collapsed)
-            }
-            for (panel in panels) {
-                val layout = data.find { it.tag == panel.category?.tag }
-                if (layout != null) {
-                    panel.x = layout.x
-                    panel.y = layout.y
-                    panel.collapsed = layout.collapsed
-                }
-            }
-        } catch (_: Exception) {}
-    }
-
     // ==================== Main render ====================
 
     override fun extractRenderState(ctx: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, delta: Float) {
@@ -286,12 +243,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             // 删除掉没有用到的旧面板
             panels.removeAll { targetPanels.contains(it).not() && it.category != null }
             panels = targetPanels
-        }
-
-        // 【新增】首次加载时恢复布局
-        if (isFirstLoad) {
-            loadLayout()
-            isFirstLoad = false
         }
 
         // 绘制面板循环
@@ -370,7 +321,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     val values = getVisibleValues(mod)
                     val settingBgH = values.size * SETTING_H
                     if (curY + settingBgH >= listAreaY && curY <= listAreaY + listAreaH) {
-                        // 【修改】：背景宽度与列表同宽，不超出面板
                         fillRect(ctx, listAreaX, curY, listAreaX + listAreaW, curY + settingBgH, SETTING_BG)
                     }
 
@@ -445,26 +395,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 drawText(ctx, font, "$arrow ${trimText(font, v.name, labelMaxW)}",
                     labelX, (y + 5f).toInt(), TEXT)
             }
-            isModeValue(v) -> {
-                // 【新增】：模式分组圆形选择器
-                val enumActual = actual as? Enum<*> ?: return
-                val values = enumActual.javaClass.enumConstants
-                val currentIndex = values.indexOf(enumActual)
-
-                val text = trimText(font, "${v.name} :", labelMaxW)
-                drawText(ctx, font, text, labelX, (y + 5f).toInt(), TEXT)
-
-                val dotSize = 5
-                val dotGap = 4
-                val totalDotWidth = values.size * (dotSize + dotGap) - dotGap
-                // 在 valueX 右侧居中渲染
-                val startDrawX = valueX + ((w - 44 - totalDotWidth) / 2).toInt()
-
-                for (i in values.indices) {
-                    val dotColor = if (i == currentIndex) ACCENT else 0xFF444444.toInt()
-                    ctx.fill(startDrawX + i * (dotSize + dotGap), (y + 6f).toInt(), startDrawX + i * (dotSize + dotGap) + dotSize, (y + 6f).toInt() + dotSize, dotColor)
-                }
-            }
             actual is Boolean -> {
                 drawText(ctx, font, trimText(font, v.name, labelMaxW),
                     labelX, (y + 5f).toInt(), TEXT_DIM)
@@ -493,16 +423,15 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     }
                 }
 
-                // 【修改】：滑块更粗更灵敏
-                val sliderW = 40
-                val sliderH = 4
+                val sliderW = 36
                 val sliderX = valueX
-                val sliderY = y.toInt() + 7
+                val sliderY = y.toInt() + 8
                 val progress = if (maxV > minV) ((fv - minV) / (maxV - minV)).coerceIn(0f, 1f) else 0f
 
-                ctx.fill(sliderX, sliderY, sliderX + sliderW, sliderY + sliderH, 0x30FFFFFF.toInt())
-                ctx.fill(sliderX, sliderY, sliderX + (sliderW * progress).toInt(), sliderY + sliderH, ACCENT)
-                ctx.fill(sliderX + (sliderW * progress).toInt() - 1, sliderY - 1, sliderX + (sliderW * progress).toInt() + 1, sliderY + sliderH + 1, TEXT_BRIGHT)
+                fillRect(ctx, sliderX, sliderY, sliderX + sliderW, sliderY + 2, 0x30FFFFFF.toInt())
+                fillRect(ctx, sliderX, sliderY, sliderX + (sliderW * progress).toInt(), sliderY + 2, ACCENT)
+                fillRect(ctx, sliderX + (sliderW * progress).toInt() - 1, sliderY - 1,
+                    sliderX + (sliderW * progress).toInt() + 1, sliderY + 3, TEXT_BRIGHT)
 
                 // 【修复】数值区域长截断
                 val valText = trimText(font, "%.1f".format(fv), (w - 70 - indent).toInt())
@@ -561,7 +490,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             if (my in headerY.toInt()..(headerY + headerH).toInt()) {
                 if (btn == 1) { // 右键：切换折叠状态
                     targetPanel.collapsed = !targetPanel.collapsed
-                    saveLayout() // 状态变更保存
                     return true
                 } else if (btn == 0) { // 左键：拖拽面板
                     targetPanel.draggingPanel = true
@@ -590,12 +518,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             val modules = getModulesForPanel(panel)
             val contentH = getContentHeight(modules)
             if (contentH > listAreaH) {
-                val thumbH = (listAreaH * listAreaH / contentH).coerceAtLeast(12f)
-                val trackH = listAreaH - thumbH
-                // 【新增】：点击滚动条立即跳转到绝对位置
-                val clickRatio = ((my - listAreaY) / trackH).coerceIn(0f, 1f)
-                val maxScroll = contentH - listAreaH
-                panel.targetScroll = clickRatio * maxScroll
                 panel.draggingScroll = true
                 return true
             }
@@ -637,8 +559,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     for ((v, depth) in values) {
                         val settingEndY = curY + SETTING_H
                         if (my in curY.toInt()..settingEndY.toInt()) {
-                            // 【新增】：滑块、圆点点击实时处理
-                            handleSettingClick(v, btn, mx.toFloat(), curY, listAreaW, listAreaX)
+                            handleSettingClick(v, btn, mx.toFloat(), curY, listAreaW, listAreaX, panel)
                             return true
                         }
                         curY += SETTING_H
@@ -650,10 +571,33 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         return true // 【增强】强制拦截所有内部点击，防止掉落物品等原版操作
     }
 
-    // 【新增】鼠标拖拽处理（增强绝对定位滚动和滑块）
+    // 【修复点 2】：方法签名修正为 MouseButtonEvent, dx: Double, dy: Double
     override fun mouseDragged(event: MouseButtonEvent, dx: Double, dy: Double): Boolean {
         val mx = event.x().toFloat()
         val my = event.y().toFloat()
+
+        // ==================== 滑块拖动优先处理 ====================
+        val context = sliderContext
+        if (context != null) {
+            val valueX = context.sliderX
+            val sliderW = context.sliderW
+            val minV = context.min
+            val maxV = context.max
+
+            // 计算新的进度
+            val progress = ((mx.toInt() - valueX).toFloat() / sliderW).coerceIn(0f, 1f)
+            val newValue = minV + (maxV - minV) * progress
+
+            // 根据原值类型设置新值
+            val actual = getActualValue(context.value)
+            when (actual) {
+                is Float -> trySetValue(context.value, newValue)
+                is Double -> trySetValue(context.value, newValue.toDouble())
+                is Int -> trySetValue(context.value, newValue.toInt())
+                is Long -> trySetValue(context.value, newValue.toLong())
+            }
+            return true
+        }
 
         for (panel in panels) {
             // 【新增】面板整体拖拽逻辑
@@ -669,43 +613,29 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 return true
             }
 
-            // 【修改】：大列表滚动条绝对鼠标位置拖动
+            // 保持原滚动条拖拽逻辑
             if (panel.draggingScroll) {
                 val modules = getModulesForPanel(panel)
                 val contentH = getContentHeight(modules)
                 val listAreaH = panel.h - 32f
-                val listAreaY = panel.y + 28f
                 if (contentH > listAreaH) {
-                    val thumbH = (listAreaH * listAreaH / contentH).coerceAtLeast(12f)
-                    val trackH = listAreaH - thumbH
-                    val clickRatio = ((my - listAreaY) / trackH).coerceIn(0f, 1f)
                     val maxScroll = contentH - listAreaH
-                    panel.targetScroll = clickRatio * maxScroll
+                    // 修改为直接使用参数 dx 和 dy 的转换
+                    panel.targetScroll = (panel.targetScroll - dy.toFloat() * 1.2f).coerceIn(0f, maxScroll)
                 }
                 return true
             }
         }
-
-        // 【新增】：滑块绝对鼠标位置拖动
-        if (sliderDragTarget != null) {
-            // 在滑块行时，滑块区域的 X 和 W 需要重新在当前面板中计算，以响应精准移动
-            // 由于我们无法在鼠标拖动时遍历所有面板的滑块列表，为了保持轻量和稳定，我们把绝对拖动逻辑整合到updateSliderFromMouse
-            // 这里仅在dragged时触发进度更新即可， 传入当前的mx和my即可。
-            // 但因为需要滑块区域的上下文，这里采用一种通用的“当前滑块上下文”追踪法。
-            // 我们退一步，安全取巧：在 mouseReleased 时重置滑块状态，保证不会在松开鼠标后滞留。
-        }
-
         return true
     }
 
     override fun mouseReleased(event: MouseButtonEvent): Boolean {
-        // 松开鼠标时，重置所有面板的滚动、拖拽和滑块状态，并保存布局
+        // 松开鼠标时，重置所有面板的滚动、拖拽和滑块状态
         for (panel in panels) {
             panel.draggingScroll = false
             panel.draggingPanel = false
         }
-        sliderDragTarget = null
-        saveLayout()
+        sliderContext = null // 清空滑块上下文
         return true
     }
 
@@ -717,29 +647,9 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         }
     }
 
-    private fun handleSettingClick(v: Value<*>, btn: Int, mx: Float, y: Float, w: Float, x: Float) {
+    private fun handleSettingClick(v: Value<*>, btn: Int, mx: Float, y: Float, w: Float, x: Float, panel: PanelData) {
         if (btn != 0) return // 仅左键交互
-        val actual = getActualValue(v) ?: return // 新增：空值检查防崩溃
-
-        // 【新增】模式切换支持
-        if (isModeValue(v)) {
-            val enumActual = actual as? Enum<*> ?: return
-            val values = enumActual.javaClass.enumConstants
-            val dotSize = 5
-            val dotGap = 4
-            val totalDotWidth = values.size * (dotSize + dotGap) - dotGap
-            val startDrawX = (x + w - 44).toInt() + (44 - totalDotWidth) / 2
-
-            // 如果点击了圆形区域，精准选中对应模式
-            if (mx.toInt() in startDrawX..startDrawX + totalDotWidth) {
-                val idx = ((mx.toInt() - startDrawX) / (dotSize + dotGap)).coerceIn(0, values.size - 1)
-                trySetValue(v, values[idx])
-            } else {
-                // 点击其他区域跳转到下一个模式
-                trySetValue(v, values[(enumActual.ordinal + 1) % values.size])
-            }
-            return
-        }
+        val actual = getActualValue(v) ?: return
 
         if (isGroupValue(v)) {
             if (collapsedGroups.contains(v)) collapsedGroups.remove(v)
@@ -758,15 +668,15 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         }
 
         if (isSliderValue(v)) {
-            val sliderW = 40
-            val sliderX = (x + w - 44).toInt()
-            if (mx.toInt() in sliderX..(sliderX + sliderW)) {
+            val valueX = (x + w - 44).toInt()
+            val sliderW = 36
+            if (mx.toInt() in valueX..(valueX + sliderW)) {
                 var minV = 0f; var maxV = 100f
                 if (actual is Number && v is RangedValue<*>) {
                     minV = (v.range.start as? Number)?.toFloat() ?: 0f
                     maxV = (v.range.endInclusive as? Number)?.toFloat() ?: 100f
                 }
-                val progress = ((mx.toInt() - sliderX).toFloat() / sliderW).coerceIn(0f, 1f)
+                val progress = ((mx.toInt() - valueX).toFloat() / sliderW).coerceIn(0f, 1f)
                 val newValue = minV + (maxV - minV) * progress
 
                 when (actual) {
@@ -775,8 +685,17 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     is Int -> trySetValue(v, newValue.toInt())
                     is Long -> trySetValue(v, newValue.toLong())
                 }
-                // 启用绝对滑块跟踪状态
-                sliderDragTarget = v
+
+                // 【核心修复】：设置滑块上下文，用于鼠标拖动跟踪
+                sliderContext = SliderContext(
+                    value = v,
+                    panel = panel,
+                    sliderX = valueX,
+                    sliderY = y.toInt() + 8,
+                    sliderW = sliderW,
+                    min = minV,
+                    max = maxV
+                )
             }
         }
     }
@@ -889,7 +808,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     }
 
     override fun onClose() {
-        saveLayout() // 关闭时保存布局
         setScreenCompat(null)
         fadeAnim = 0f
     }
@@ -915,13 +833,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
     // ==================== Value helpers (防递归死锁优化版) ====================
 
-    // 【新增】：判断是否为模式选择器（Enum 类型且有 2 个以上选项）
-    private fun isModeValue(v: Value<*>): Boolean {
-        val actual = getActualValue(v) ?: return false
-        if (actual is Enum<*> && actual.javaClass.enumConstants.size > 1) return true
-        return false
-    }
-
     private fun getVisibleValues(module: ClientModule): List<Pair<Value<*>, Int>> {
         val result = mutableListOf<Pair<Value<*>, Int>>()
         val topValues = try {
@@ -930,37 +841,11 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             return emptyList()
         }
 
-        // 【新增】：获取模式列表和当前模式名称
-        val modeValues = topValues.filter { isModeValue(it) }
-        var currentModeName = ""
-        if (modeValues.isNotEmpty()) {
-            val currentModeEnum = getActualValue(modeValues[0]) as? Enum<*>
-            currentModeName = currentModeEnum?.name?.lowercase() ?: ""
-        }
-
-        // 缓存所有其他模式的名称列表
-        val otherModeNames = if (currentModeName.isNotEmpty() && modeValues.isNotEmpty()) {
-            val allModes = (getActualValue(modeValues[0]) as? Enum<*>)?.javaClass?.enumConstants?.map { it.name.lowercase() } ?: emptyList()
-            allModes.filter { it != currentModeName }
-        } else {
-            emptyList()
-        }
-
         val visited = IdentityHashMap<Value<*>, Boolean>() // 核心修复：防止无限递归
 
         fun process(v: Value<*>, depth: Int) {
             if (visited.containsKey(v)) return // 如果已经处理过此对象，直接跳过
             visited[v] = true
-
-            // 【新增】：过滤与当前模式不匹配的设置项
-            if (currentModeName.isNotEmpty() && otherModeNames.isNotEmpty() && !isModeValue(v)) {
-                val lowerName = v.name.lowercase()
-                // 如果当前设置名包含非当前模式的关键词，则跳过渲染
-                if (otherModeNames.any { lowerName.contains(it) }) {
-                    return
-                }
-            }
-
             result.add(Pair(v, depth))
             if (isGroupValue(v) && !collapsedGroups.contains(v)) {
                 getGroupChildren(v).forEach { process(it, depth + 1) }
