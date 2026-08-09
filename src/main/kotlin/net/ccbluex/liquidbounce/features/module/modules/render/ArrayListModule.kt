@@ -1,15 +1,15 @@
 /*
  * LiquidBounce Nextgen - ArrayList Module
- * 独立功能列表，使用 @EventTarget 监听渲染事件，配置项完整。
+ * 独立功能列表，使用 handler 监听渲染事件，配置项完整。
  */
 package net.ccbluex.liquidbounce.features.module.modules.render
 
-import net.ccbluex.liquidbounce.event.EventTarget
+import net.ccbluex.liquidbounce.config.types.*
 import net.ccbluex.liquidbounce.event.Render2DEvent
+import net.ccbluex.liquidbounce.event.handler
 import net.ccbluex.liquidbounce.features.module.ClientModule
 import net.ccbluex.liquidbounce.features.module.ModuleCategory
 import net.ccbluex.liquidbounce.features.module.ModuleManager
-import net.ccbluex.liquidbounce.features.value.*
 import net.ccbluex.liquidbounce.utils.client.mc
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import java.awt.Color
@@ -31,13 +31,12 @@ object ArrayListModule : ClientModule("ArrayList", ModuleCategory.RENDER) {
     private val sortModeValue = ListValue("SortMode", arrayOf("Length", "Alphabet", "EnableTime"), "Length")
     private val showTotalCountValue = BoolValue("ShowTotalCount", false)
 
-    // 记录启用时间
+    // 记录启用时间（用于 EnableTime 排序）
     private val enableTimeMap = mutableMapOf<String, Long>()
     private val lastState = mutableMapOf<String, Boolean>()
 
-    // 渲染事件
-    @EventTarget
-    fun onRender2D(event: Render2DEvent) {
+    // 使用 handler 监听渲染事件
+    private val renderHandler = handler<Render2DEvent> { event ->
         render(event.graphics)
     }
 
@@ -78,6 +77,7 @@ object ArrayListModule : ClientModule("ArrayList", ModuleCategory.RENDER) {
         val lineGap = lineSpacingValue.get() * s
         val radius = cornerRadiusValue.get() * s
 
+        // 计算每行宽度及总尺寸
         val lines = displayModules.map { mod ->
             val displayName = if (showTotalCountValue.get()) {
                 val count = ModuleManager.getModules().count { it.enabled }
@@ -91,13 +91,16 @@ object ArrayListModule : ClientModule("ArrayList", ModuleCategory.RENDER) {
         val boxW = maxWidth + pad * 2
         val boxH = totalHeight + pad * 2
 
+        // 固定在右上角，留边距 4px
         val margin = 4f * s
         val x = scW - boxW - margin
         val y = margin
 
+        // 背景颜色（合并透明度）
         val bgColor = (backgroundColorValue.get().rgb and 0x00FFFFFF) or ((backgroundAlphaValue.get() shl 24) and 0xFF000000.toInt())
         drawRoundedRect(ctx, x, y, boxW, boxH, radius, bgColor)
 
+        // 绘制文字（右对齐）
         var curY = y + pad
         val textColor = textColorValue.get().rgb
         for ((text, width) in lines) {
@@ -107,7 +110,7 @@ object ArrayListModule : ClientModule("ArrayList", ModuleCategory.RENDER) {
         }
     }
 
-    // ==================== 绘图工具（来自 ClickGuiScreen） ====================
+    // ==================== 绘图工具（直接取自 ClickGuiScreen） ====================
     private fun fillRect(ctx: GuiGraphicsExtractor, x1: Int, y1: Int, x2: Int, y2: Int, color: Int) {
         if (x2 <= x1 || y2 <= y1) return
         ctx.fill(x1, y1, x2, y2, color)
@@ -152,7 +155,7 @@ object ArrayListModule : ClientModule("ArrayList", ModuleCategory.RENDER) {
         }
     }
 
-    // 初始化时间戳
+    // ==================== 初始化 ====================
     init {
         ModuleManager.getModules().forEach { mod ->
             if (mod.enabled && mod != this) {
