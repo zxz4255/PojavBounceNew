@@ -19,7 +19,7 @@
 package net.ccbluex.liquidbounce.features.module.modules.render
 
 import net.ccbluex.liquidbounce.config.ConfigSystem
-import net.ccbluex.liquidbounce.config.types.EnumValue // 【修复】：使用标准的 EnumValue 类替代失败的扩展
+import net.ccbluex.liquidbounce.config.types.EnumValue // 【修复】：LiquidBounce 官方标准枚举委托
 import net.ccbluex.liquidbounce.config.types.group.ToggleableValueGroup
 import net.ccbluex.liquidbounce.config.types.group.ValueGroup
 import net.ccbluex.liquidbounce.event.EventManager
@@ -47,12 +47,12 @@ import net.minecraft.client.gui.screens.DisconnectedScreen
 import net.minecraft.client.gui.screens.LevelLoadingScreen
 import net.minecraft.client.gui.screens.Screen
 
-// ================= 【事件与渲染导入】 =================
+// ================= 【26.2 版本标准导入】 =================
 import net.ccbluex.liquidbounce.event.events.GameRenderEvent
 import net.ccbluex.liquidbounce.features.module.ModuleManager
 import net.minecraft.client.gui.Font
-import net.minecraft.client.gui.GuiGraphicsExtractor
-// ========================================================
+import net.minecraft.client.gui.DrawContext // 26.2 下绘图核心类依然是 DrawContext
+// ==========================================================
 
 /**
  * Module HUD
@@ -107,7 +107,7 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
     private val hudSettings = ValueGroup("ArrayList Settings")
     private enum class Position { TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT, CUSTOM }
 
-    // 【修复】：直接使用 EnumValue 类，彻底解决扩展函数找不到的问题
+    // 【修复】：使用 LiquidBounce 标准的 EnumValue 类进行委托
     val position by EnumValue("Position", Position.TOP_RIGHT)
     val posX by float("Offset X", 10f, 0f..1000f)
     val posY by float("Offset Y", 10f, 0f..1000f)
@@ -179,7 +179,7 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
     }
 
     // ==========================================================
-    // 【原生渲染】纯视觉展示
+    // 【原生渲染】26.2 映射下完美适配版
     // ==========================================================
     private fun trimText(font: Font, text: String, maxWidth: Int): String {
         if (font.width(text) <= maxWidth) return text
@@ -194,8 +194,8 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
     private val renderHandler = handler<GameRenderEvent> { event ->
         if (mc.player == null || mc.level == null) return@handler
 
-        // 【修复】：显式声明类型，强制识别正确的 ctx
-        val ctx: GuiGraphicsExtractor = event.ctx
+        // 【最核心修复】：26.2 版本的 Fabric API 中，绘图上下文字段已更名为 drawContext
+        val drawContext: DrawContext = event.drawContext
         val font = mc.font
         val screenWidth = mc.window.guiScaledWidth
         val screenHeight = mc.window.guiScaledHeight
@@ -226,12 +226,10 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         val rawScale = this.scale
         val limitHeightPx = maxHeight
 
-        // 【修复作用域】：在 if 之外声明 finalGlobalScale
         var finalGlobalScale = rawScale
         var finalRenderWidth = maxTextWidth * rawScale
         var finalRenderHeight = totalHeight * rawScale
 
-        // 计算极限高度适配缩放
         if (finalRenderHeight > limitHeightPx) {
             val fitScale = limitHeightPx / finalRenderHeight
             finalGlobalScale = rawScale * fitScale
@@ -250,10 +248,10 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
             Position.CUSTOM -> { baseX = posX; baseY = posY }
         }
 
-        // 矩阵整体变换与渲染
-        ctx.pose().pushPose()
-        ctx.pose().translate(baseX.toDouble(), baseY.toDouble(), 0.0)
-        ctx.pose().scale(finalGlobalScale, finalGlobalScale, 1f)
+        // 【完美适配 26.2】：PoseStack 的方法签名完全一致，传入 Float 即可
+        drawContext.pose().pushPose()
+        drawContext.pose().translate(baseX, baseY, 0f)
+        drawContext.pose().scale(finalGlobalScale, finalGlobalScale, 1f)
 
         var yCursor = 0f
 
@@ -264,13 +262,13 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
 
             if (bgAlpha > 0) {
                 val bgColor = (bgAlpha shl 24) or 0x000000
-                ctx.fill(0, yCursor.toInt(), (textWidth + 4).toInt(), (yCursor + rowHeight).toInt(), bgColor)
+                drawContext.fill(0, yCursor.toInt(), (textWidth + 4).toInt(), (yCursor + rowHeight).toInt(), bgColor)
             }
 
-            ctx.text(font, displayName, 2, yCursor.toInt() + 2, color)
+            drawContext.drawText(font, displayName, 2, yCursor.toInt() + 2, color)
 
             yCursor += rowHeight
         }
-        ctx.pose().popPose()
+        drawContext.pose().popPose()
     }
 }
