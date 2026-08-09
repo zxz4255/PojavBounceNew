@@ -7,63 +7,66 @@ import net.minecraft.client.gui.screens.Screen
 import net.minecraft.network.chat.Component
 
 /**
- * 功能列表 HUD - 显示所有已开启的模块
- * 配置项位于 ModuleHud.ModuleList 中，包括位置、颜色、透明度、圆角、内边距、行间距、最大显示数
- * 模块按名称长度从长到短排序
+ * 透明 HUD Screen，用于显示功能列表
+ * 完全仿照 ClickGuiScreen 的绘制方式，但不绘制背景，不捕获事件
  */
 class HudArrayListScreen : Screen(Component.literal("ArrayList")) {
 
+    // 不暂停游戏
     override fun isPauseScreen() = false
+
+    // 按 ESC 不关闭（由 ModuleHud 控制生命周期）
     override fun shouldCloseOnEsc() = false
+
+    // 不绘制任何背景（透明）
+    override fun renderBackground(ctx: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, delta: Float) {
+        // 故意留空，不绘制背景
+    }
 
     override fun render(ctx: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, delta: Float) {
         drawArrayList(ctx)
     }
 
+    // ========== 所有事件都不消费，让它们传递给游戏 ==========
+    override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean = false
+    override fun mouseReleased(mouseX: Double, mouseY: Double, button: Int): Boolean = false
+    override fun mouseDragged(mouseX: Double, mouseY: Double, button: Int, deltaX: Double, deltaY: Double): Boolean = false
+    override fun keyPressed(keyCode: Int, scanCode: Int, modifiers: Int): Boolean = false
+    override fun keyReleased(keyCode: Int, scanCode: Int, modifiers: Int): Boolean = false
+    override fun charTyped(codePoint: Int, modifiers: Int): Boolean = false
+
+    // ========== 绘制功能列表 ==========
     private fun drawArrayList(ctx: GuiGraphicsExtractor) {
         val config = ModuleHud.ModuleList
         if (!config.enabled) return
 
-        val client = mc
-        val font = client.font
-        val scWidth = client.window.guiScaledWidth
-        val scHeight = client.window.guiScaledHeight
-
-        // 1. 获取所有已启用的模块（排除 HUD 和 ClickGUI）
-        val allModules = ModuleManager.getModules()
+        val modules = ModuleManager.getModules()
             .filter { it.enabled && it.name != "ClickGUI" && it.name != "HUD" }
+            .sortedByDescending { it.name.length }
 
-        // 2. 按名称长度从长到短排序
-        val sortedModules = allModules.sortedByDescending { it.name.length }
-
-        // 3. 限制显示数量
         val maxDisplay = config.maxDisplay
-        val modules = if (maxDisplay > 0) sortedModules.take(maxDisplay) else sortedModules
-        if (modules.isEmpty()) return
+        val displayModules = if (maxDisplay > 0) modules.take(maxDisplay) else modules
+        if (displayModules.isEmpty()) return
 
-        // 4. 读取配置
+        val font = mc.font
         val padding = config.padding
         val lineSpacing = config.lineSpacing
         val cornerRadius = config.cornerRadius.toFloat()
         val textColor = config.textColor
-        val bgColorRaw = config.backgroundColor
         val bgAlpha = config.backgroundAlpha.coerceIn(0, 255)
-        val position = config.position // 0=右上, 1=右下, 2=左上, 3=左下
+        val bgColorRaw = config.backgroundColor
+        val position = config.position
+        val scWidth = mc.window.guiScaledWidth
+        val scHeight = mc.window.guiScaledHeight
 
-        // 5. 计算每一行的文本和宽度
-        val lines = modules.map { module ->
-            val text = module.name
-            val width = font.width(text)
-            Pair(text, width)
-        }
-
-        // 6. 计算整体尺寸
+        // 计算每一行的文本和宽度
+        val lines = displayModules.map { it.name to font.width(it.name) }
         val maxWidth = lines.maxOfOrNull { it.second } ?: 0
         val totalHeight = lines.size * (font.lineHeight + lineSpacing) - lineSpacing
         val boxWidth = maxWidth + padding * 2
         val boxHeight = totalHeight + padding * 2
 
-        // 7. 计算位置
+        // 计算位置
         val xPos = when (position) {
             2, 3 -> padding.toFloat()                         // 左侧
             else -> scWidth - boxWidth - padding           // 右侧
@@ -73,13 +76,12 @@ class HudArrayListScreen : Screen(Component.literal("ArrayList")) {
             else -> scHeight - boxHeight - padding - 30f   // 底部
         }
 
-        // 8. 合成背景颜色（保留 RGB，覆盖 Alpha）
         val bgColor = (bgColorRaw and 0x00FFFFFF) or ((bgAlpha shl 24) and 0xFF000000.toInt())
 
-        // 9. 绘制圆角矩形背景
+        // 绘制圆角矩形背景（完全复用 ClickGuiScreen 的方法）
         drawRoundedRect(ctx, xPos, yPos, boxWidth.toFloat(), boxHeight.toFloat(), cornerRadius, bgColor)
 
-        // 10. 绘制所有模块名称
+        // 绘制文本
         var currentY = yPos + padding
         for ((text, _) in lines) {
             ctx.text(font, text, (xPos + padding).toInt(), currentY.toInt(), textColor)
@@ -87,16 +89,7 @@ class HudArrayListScreen : Screen(Component.literal("ArrayList")) {
         }
     }
 
-    /**
-     * 绘制圆角矩形（完全复制 ClickGuiScreen 的实现）
-     * @param ctx 图形上下文
-     * @param x 左上角 X
-     * @param y 左上角 Y
-     * @param w 宽度
-     * @param h 高度
-     * @param radius 圆角半径
-     * @param color 颜色（ARGB）
-     */
+    // ========== 完全复制 ClickGuiScreen 的 drawRoundedRect ==========
     private fun drawRoundedRect(ctx: GuiGraphicsExtractor, x: Float, y: Float, w: Float, h: Float, radius: Float, color: Int) {
         val r = radius.coerceAtMost(w / 2f).coerceAtMost(h / 2f)
         if (r <= 0.5f) {
@@ -104,29 +97,17 @@ class HudArrayListScreen : Screen(Component.literal("ArrayList")) {
             return
         }
         val x1 = x; val y1 = y; val x2 = x + w; val y2 = y + h
-
-        // 主体矩形
         ctx.fill((x1 + r).toInt(), y1.toInt(), (x2 - r).toInt(), y2.toInt(), color)
         ctx.fill(x1.toInt(), (y1 + r).toInt(), (x1 + r).toInt(), (y2 - r).toInt(), color)
         ctx.fill((x2 - r).toInt(), (y1 + r).toInt(), x2.toInt(), (y2 - r).toInt(), color)
 
-        // 四个角的圆角（通过像素级绘制实现平滑圆角）
+        // 四个角的圆角（完全复制 ClickGuiScreen 的 drawCorner 实现）
         drawCorner(ctx, x1 + r, y1 + r, r, 180f, 270f, color)
         drawCorner(ctx, x2 - r, y1 + r, r, 270f, 360f, color)
         drawCorner(ctx, x2 - r, y2 - r, r, 0f, 90f, color)
         drawCorner(ctx, x1 + r, y2 - r, r, 90f, 180f, color)
     }
 
-    /**
-     * 绘制一个圆角（通过扇形近似）
-     * @param ctx 图形上下文
-     * @param cx 圆心 X
-     * @param cy 圆心 Y
-     * @param r 半径
-     * @param startAngle 起始角度（度）
-     * @param endAngle 结束角度（度）
-     * @param color 颜色（ARGB）
-     */
     private fun drawCorner(ctx: GuiGraphicsExtractor, cx: Float, cy: Float, r: Float, startAngle: Float, endAngle: Float, color: Int) {
         var a = startAngle
         while (a < endAngle) {
