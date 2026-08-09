@@ -18,6 +18,7 @@
  */
 package net.ccbluex.liquidbounce.features.module.modules.render
 
+import com.google.gson.JsonObject
 import net.ccbluex.liquidbounce.config.ConfigSystem
 import net.ccbluex.liquidbounce.config.types.group.ToggleableValueGroup
 import net.ccbluex.liquidbounce.config.types.group.ValueGroup
@@ -38,12 +39,14 @@ import net.ccbluex.liquidbounce.integration.screen.impl.CustomSharedMinecraftScr
 import net.ccbluex.liquidbounce.integration.screen.impl.CustomStandaloneMinecraftScreen
 import net.ccbluex.liquidbounce.integration.screen.impl.CustomOverlay
 import net.ccbluex.liquidbounce.integration.theme.ThemeManager
-import net.ccbluex.liquidbounce.integration.theme.component.components.minimap.MinimapHudComponent
 import net.ccbluex.liquidbounce.integration.theme.component.NativeComponentRegistry
+import net.ccbluex.liquidbounce.integration.theme.component.HudComponentTweak
 import net.ccbluex.liquidbounce.integration.theme.component.components.ArrayListComponent
+import net.ccbluex.liquidbounce.integration.theme.component.components.minimap.MinimapHudComponent
 import net.ccbluex.liquidbounce.utils.client.chat
 import net.ccbluex.liquidbounce.utils.client.inGame
 import net.ccbluex.liquidbounce.utils.client.markAsError
+import net.ccbluex.liquidbounce.utils.render.Alignment
 import net.minecraft.client.gui.screens.DisconnectedScreen
 import net.minecraft.client.gui.screens.LevelLoadingScreen
 import net.minecraft.client.gui.screens.Screen
@@ -97,10 +100,9 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
 
     init {
         tree(Blur)
-        tree(ModuleList)  // ← 添加 ModuleList 配置树
+        tree(ModuleList)
 
-        // 注册 ArrayListComponent
-        NativeComponentRegistry.register("ArrayList") { name, enabled, alignment, tweaks, values ->
+        NativeComponentRegistry.register("ArrayList") { name: String, enabled: Boolean, alignment: Alignment, tweaks: Array<HudComponentTweak>, values: Array<JsonObject> ->
             ArrayListComponent(name, enabled, alignment, tweaks, values)
         }
     }
