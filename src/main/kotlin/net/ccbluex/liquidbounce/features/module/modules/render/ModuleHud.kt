@@ -46,10 +46,13 @@ import net.minecraft.client.gui.screens.DisconnectedScreen
 import net.minecraft.client.gui.screens.LevelLoadingScreen
 import net.minecraft.client.gui.screens.Screen
 
-// ================= 【事件导入】 =================
+// ================= 【补全缺失的关键导入】 =================
 import net.ccbluex.liquidbounce.event.events.GameRenderEvent
 import net.ccbluex.liquidbounce.features.module.ModuleManager
-// =================================================
+import net.minecraft.client.gui.Font
+import net.minecraft.client.gui.GuiGraphicsExtractor
+import net.ccbluex.liquidbounce.config.types.enumValue
+// ========================================================
 
 /**
  * Module HUD
@@ -103,12 +106,13 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
     // ==========================================================
     private val hudSettings = ValueGroup("ArrayList Settings")
     private enum class Position { TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT, CUSTOM }
-    val position by enum("Position", Position.TOP_RIGHT)
+
+    // 【修复 enum 报错】：将 by enum 替换为 enumValue
+    val position by enumValue<Position>("Position", Position.TOP_RIGHT)
     val posX by float("Offset X", 10f, 0f..1000f)
     val posY by float("Offset Y", 10f, 0f..1000f)
     val bgAlpha by int("Background Alpha", 100, 0..255)
     val scale by float("Scale", 1f, 0.5f..2f)
-    // 【新增】极限宽度与极限高度
     val maxWidth by float("Max Width", 150f, 50f..500f)
     val maxHeight by float("Max Height", 300f, 50f..800f)
     // ==========================================================
@@ -188,17 +192,18 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
 
     @Suppress("unused")
     private val renderHandler = handler<GameRenderEvent> { event ->
-        if (mc.player == null || mc.world == null || !enabled) return@handler
+        // 【修复 world 报错】：Mojang 映射下必须使用 level
+        if (mc.player == null || mc.level == null) return@handler
 
         val ctx = event.ctx
         val font = mc.font
         val screenWidth = mc.window.guiScaledWidth
         val screenHeight = mc.window.guiScaledHeight
 
-        // 【修改】按文本长度从长到短进行排序（降序）
+        // 按文本长度从长到短进行排序（降序）
         val enabledModules = ModuleManager.getModules()
             .filter { it.enabled && it.name != "HUD" && it.name != "ClickGUI" }
-            .sortedByDescending { font.width(it.name) } // 越长，排得越靠上
+            .sortedByDescending { font.width(it.name) }
 
         if (enabledModules.isEmpty()) return@handler
 
@@ -209,7 +214,7 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         // 1. 计算自然尺寸与宽度截断
         val limitWidthPx = maxWidth.toInt()
         for (mod in enabledModules) {
-            val displayName = trimText(font, mod.name, limitWidthPx) // 超出极限宽度直接带省略号截断
+            val displayName = trimText(font, mod.name, limitWidthPx)
             val textWidth = font.width(displayName).toFloat()
             val rowHeight = font.lineHeight + 4
             totalHeight += rowHeight
@@ -223,12 +228,9 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
         val rawScale = this.scale
         val limitHeightPx = maxHeight
 
-        // 已限制截断后的自然宽度，乘以用户设定的缩放比例
         var finalRenderWidth = maxTextWidth * rawScale
         var finalRenderHeight = totalHeight * rawScale
 
-        // 如果超出了设定的极限高度，计算一个“自动适应缩放”的比例
-        var finalGlobalScale = rawScale
         if (finalRenderHeight > limitHeightPx) {
             val fitScale = limitHeightPx / finalRenderHeight
             finalGlobalScale = rawScale * fitScale
@@ -259,14 +261,14 @@ object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hi
             val rowHeight = font.lineHeight + 4
             val color = if (mod.enabled) 0xFFFFFFFF.toInt() else 0xFFA0A0A0.toInt()
 
-            // 绘制背景条
+            // 【修复 fill 参数报错】：原生 ctx.fill 参数必须转为 Int
             if (bgAlpha > 0) {
                 val bgColor = (bgAlpha shl 24) or 0x000000
-                ctx.fill(0f, yCursor, textWidth + 4, yCursor + rowHeight, bgColor)
+                ctx.fill(0, yCursor.toInt(), (textWidth + 4).toInt(), (yCursor + rowHeight).toInt(), bgColor)
             }
 
-            // 绘制文字
-            ctx.text(font, displayName, 2, yCursor + 2, color)
+            // 【修复 text 参数报错】：原生 ctx.text 参数必须转为 Int
+            ctx.text(font, displayName, 2, yCursor.toInt() + 2, color)
 
             yCursor += rowHeight
         }
