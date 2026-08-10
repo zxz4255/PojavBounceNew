@@ -6,7 +6,7 @@
 [Bilibili](https://b23.tv/tTuEWKE)
 </div>
 
-PojavBounceNew is a free and open-source mixin-based injection hacked client using the Fabric API for Minecraft.And it based on Rubbishy-Liquidbounce-NextGen For Android.I use DeepSeek and AutoClaw to develop this project.I want the latest LiquidBounce NextGen can work on Android.
+PojavBounceNew is a free and open-source mixin-based injection hacked client using the Fabric API for Minecraft.And it based on Rubbishy-Liquidbounce-NextGen For Android.I(80%) and Geda6(20%) use DeepSeek and AutoClaw to develop this project.And I skid ArrayList and Browserbackend.kt from Rubbishy-Liquidbounce and fix them.Thanks to Rubbishy-Liquidbounce and it provides minecraft src. I want the latest LiquidBounce NextGen can work on Android.
 
 ## Issues
 
