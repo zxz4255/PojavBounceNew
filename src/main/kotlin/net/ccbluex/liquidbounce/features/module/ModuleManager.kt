@@ -186,11 +186,10 @@ import net.ccbluex.liquidbounce.features.module.modules.player.nofall.ModuleNoFa
 import net.ccbluex.liquidbounce.features.module.modules.player.offhand.ModuleOffhand
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleAnimations
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleAntiBlind
-import net.ccbluex.liquidbounce.features.module.modules.render.ModuleArrayList
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleAspect
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleAutoF5
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleBedPlates
-//import net.ccbluex.liquidbounce.features.module.modules.render.ModuleBetterInventory
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleBetterInventory
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleBlockESP
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleBlockOutline
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleBreadcrumbs
@@ -241,6 +240,7 @@ import net.ccbluex.liquidbounce.features.module.modules.render.hitfx.ModuleHitFX
 import net.ccbluex.liquidbounce.features.module.modules.render.murdermystery.ModuleMurderMystery
 import net.ccbluex.liquidbounce.features.module.modules.render.nametags.ModuleNametags
 import net.ccbluex.liquidbounce.features.module.modules.render.trajectories.ModuleTrajectories
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleArrayList
 import net.ccbluex.liquidbounce.features.module.modules.world.ModuleAirPlace
 import net.ccbluex.liquidbounce.features.module.modules.world.ModuleAutoDisable
 import net.ccbluex.liquidbounce.features.module.modules.world.ModuleAutoTool
@@ -625,8 +625,7 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             // Render
             ModuleAnimations,
             ModuleAntiBlind,
-            ModuleArrayList
-            //ModuleBetterInventory,
+            ModuleBetterInventory,
             ModuleBlockESP,
             ModuleBlockOutline,
             ModuleBreadcrumbs,
@@ -679,6 +678,7 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleSkinChanger,
             ModuleProtectionZones,
             ModuleCrosshair,
+            ModuleArrayList
 
             // World
             AutoMobHeal,
