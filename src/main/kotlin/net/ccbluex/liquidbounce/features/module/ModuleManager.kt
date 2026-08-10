@@ -678,7 +678,7 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleSkinChanger,
             ModuleProtectionZones,
             ModuleCrosshair,
-            ModuleArrayList
+            ModuleArrayList,
 
             // World
             AutoMobHeal,
