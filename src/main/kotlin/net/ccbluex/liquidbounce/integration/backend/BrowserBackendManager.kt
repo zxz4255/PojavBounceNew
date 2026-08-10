@@ -15,8 +15,6 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with LiquidBounce. If not, see <https://www.gnu.org/licenses/>.
- It made from Rubbishy-Liquidbounce for android
- It was skided by XiaoDao776.And it works on PojavBounceNew
  */
 package net.ccbluex.liquidbounce.integration.backend
 
@@ -31,7 +29,6 @@ import net.ccbluex.liquidbounce.integration.backend.backends.external.ExternalSy
 import net.ccbluex.liquidbounce.integration.backend.browser.GlobalBrowserSettings
 import net.ccbluex.liquidbounce.integration.interop.persistant.PersistentLocalStorage
 import net.ccbluex.liquidbounce.integration.task.TaskManager
-import net.ccbluex.liquidbounce.utils.kotlin.Platform
 import net.ccbluex.liquidbounce.utils.client.clientLogger
 import net.ccbluex.liquidbounce.utils.client.env
 import net.ccbluex.liquidbounce.utils.client.mc
@@ -52,15 +49,6 @@ object BrowserBackendManager : EventListener {
     var backend: BrowserBackend? = null
 
     fun init() {
-        if (Platform.IS_ANDROID) {
-            logger.warn(
-                "Detected Android runtime (PojavLauncher/ZalithLauncher). " +
-                    "The built-in browser backend (JCEF/CEF) has no Android build and is disabled. " +
-                    "Browser-based UIs (ClickGUI, HUD/theme, marketplace) are unavailable; " +
-                    "use chat commands to configure the client."
-            )
-            isBrowserDisabled = true
-        }
         PersistentLocalStorage
     }
 
@@ -69,31 +57,11 @@ object BrowserBackendManager : EventListener {
      * when the dependencies are available.
      */
     fun makeDependenciesAvailable(taskManager: TaskManager) {
-        if (isBrowserDisabled) {
-            logger.warn("Environment variable 'LB_BROWSER_SKIP' is set to 'true'.")
-            return
-        }
-
-        // Double safety: the browser backend is never available on Android,
-        // even if [init] was not called yet.
-        if (Platform.IS_ANDROID) {
-            logger.warn("Browser backend is not supported on Android; skipping browser initialization.")
-            isBrowserDisabled = true
-            return
-        }
-
-        val browserBackend = when (browserBackend) {
-            "none" -> {
-                logger.warn("Environment variable 'LB_BROWSER_BACKEND' is set to 'none'.")
-                isBrowserDisabled = true
-                return
-            }
-            "cef" -> CefBrowserBackend()
-            "external" -> ExternalSystemBrowserBackend()
-            else -> error("Unknown browser backend: $browserBackend")
-        }
-        this.backend = browserBackend
-        browserBackend.makeDependenciesAvailable(taskManager, ::start)
+    // Android专用版本：直接禁用浏览器后端
+    logger.warn("Android build: disabling browser backend.")
+    isBrowserDisabled = true
+    // 不进行任何初始化
+    return
     }
 
     /**
