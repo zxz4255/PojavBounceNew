@@ -625,6 +625,7 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             // Render
             ModuleAnimations,
             ModuleAntiBlind,
+            ModuleArrayList
             ModuleBetterInventory,
             ModuleBlockESP,
             ModuleBlockOutline,
