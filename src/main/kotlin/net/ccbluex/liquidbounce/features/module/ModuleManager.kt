@@ -190,7 +190,7 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModuleArrayList
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleAspect
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleAutoF5
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleBedPlates
-import net.ccbluex.liquidbounce.features.module.modules.render.ModuleBetterInventory
+//import net.ccbluex.liquidbounce.features.module.modules.render.ModuleBetterInventory
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleBlockESP
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleBlockOutline
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleBreadcrumbs
@@ -626,7 +626,7 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleAnimations,
             ModuleAntiBlind,
             ModuleArrayList
-            ModuleBetterInventory,
+            //ModuleBetterInventory,
             ModuleBlockESP,
             ModuleBlockOutline,
             ModuleBreadcrumbs,
