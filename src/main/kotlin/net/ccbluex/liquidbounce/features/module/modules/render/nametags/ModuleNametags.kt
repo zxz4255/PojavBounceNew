@@ -49,7 +49,7 @@ object ModuleNametags : ClientModule("Nametags", ModuleCategories.RENDER) {
     }
 
     internal val borderWidth by float("BorderWidth", 1f, 0f..8f)
-    internal val backgroundRadius by float("BackgroundRadius", 2f, 0f..16f)
+    internal val backgroundRadius by float("BackgroundRadius", 4f, 0f..16f)
     internal val scale = curve(
         "Scale",
         mutableListOf(Vector2f(0f, 1f), Vector2f(200f, 1f)),
