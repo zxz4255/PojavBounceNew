@@ -8,7 +8,7 @@
  *        使用 drawRoundedRect / drawQuad / fillGradient / mc.font 绘制,
  *        不依赖任何 Web / 浏览器组件。
  *
- *  修改: 按文本长度从长到短排序，纯白色文本，每条模块独立矩形背景
+ *  修改: 按像素宽度从长到短排序，纯白色文本，每条模块独立矩形背景
  * ============================================================================
  */
 package net.ccbluex.liquidbounce.features.module.modules.render
@@ -57,7 +57,7 @@ object ModuleArrayList : ClientModule("OpalArrayList", ModuleCategories.RENDER) 
     private val textShadow by boolean("Text Shadow", true)
     private val background by boolean("Background", true)              // 每条模块独立背景
     private val backgroundAlpha by int("Background Alpha", 80, 0..255)
-    private val backgroundRadius by int("Background Radius", 2, 0..12) // 每条背景圆角，默认更小
+    private val backgroundRadius by int("Background Radius", 1, 0..6)  // 【修改】默认1，最大6
     private val border by boolean("Border", false)
 
     // —— 颜色 ——
@@ -73,6 +73,14 @@ object ModuleArrayList : ClientModule("OpalArrayList", ModuleCategories.RENDER) 
     // —— 动画 ——
     private val animationSpeed by float("Animation Speed", 8f, 0.5f..30f)
     private val slideIn by boolean("Slide In", true)
+
+    // ==================== 新增：水印 ====================
+    private val waterMarkEnabled by boolean("WaterMark", true)
+    private val waterMarkText by text("WaterMark Text", "LiquidBounce0.39")
+    private val waterMarkScale by float("WaterMark Scale", 1.0f, 0.5f..3.0f)
+    private val waterMarkX by int("WaterMark X", 4, 0..2000)
+    private val waterMarkY by int("WaterMark Y", 4, 0..2000)
+    private val waterMarkBgAlpha by int("WaterMark Bg Alpha", 80, 0..255)
 
     /* ============================= 内部状态 ============================= */
 
@@ -103,6 +111,11 @@ object ModuleArrayList : ClientModule("OpalArrayList", ModuleCategories.RENDER) 
         lastFrameNs = now
         val smoothing = (1f - exp(-animationSpeed * frameTime)).coerceIn(0f, 1f)
 
+        // ----- 绘制水印（在列表之前）-----
+        if (waterMarkEnabled) {
+            renderWaterMark(context, font)
+        }
+
         // 收集已启用模块
         var modules = ModuleManager.getModules()
             .filter { it.enabled && !it.hidden && (showSelf || it !== self) }
@@ -110,9 +123,14 @@ object ModuleArrayList : ClientModule("OpalArrayList", ModuleCategories.RENDER) 
 
         animations.keys.retainAll(modules)
 
-        // 排序：按文本长度从长到短（降序）
+        // 【修改】排序：按像素宽度从长到短
         modules = when (sortMode) {
-            SortMode.LENGTH -> modules.sortedByDescending { it.name.length }
+            SortMode.LENGTH -> {
+                modules.sortedByDescending { mod ->
+                    val displayName = if (upperCase) mod.name.uppercase() else mod.name
+                    font.width(displayName)  // 用像素宽度排序
+                }
+            }
             SortMode.ALPHABETICAL -> modules.sortedBy { it.name.lowercase() }
             SortMode.NONE -> modules
         }
@@ -216,6 +234,38 @@ object ModuleArrayList : ClientModule("OpalArrayList", ModuleCategories.RENDER) 
             // 文字 — 纯白色
             context.text(font, d.entry.text, textX.roundToInt(), textY.roundToInt(), WHITE_TEXT.argb, textShadow)
         }
+    }
+
+    /* ============================= 水印渲染 ============================= */
+
+    private fun renderWaterMark(context: GuiGraphicsExtractor, font: net.minecraft.client.gui.Font) {
+        val text = waterMarkText
+        val scale = waterMarkScale
+        val x = waterMarkX.toFloat()
+        val y = waterMarkY.toFloat()
+
+        // 计算缩放后的文字宽度和高度
+        val textWidth = font.width(text) * scale
+        val textHeight = font.lineHeight * scale
+
+        // 背景矩形尺寸（带内边距）
+        val padding = 4f * scale
+        val bgX = x - padding
+        val bgY = y - padding
+        val bgW = textWidth + padding * 2f
+        val bgH = textHeight + padding * 2f
+
+        // 绘制半透明黑色背景（圆角）
+        val bgColor = Color4b(0, 0, 0, waterMarkBgAlpha)
+        context.drawRoundedRect(bgX, bgY, bgX + bgW, bgY + bgH, 2f * scale, bgColor, Color4b.TRANSPARENT, 0f)
+
+        
+        val color = customColor
+
+       
+        val textX = bgX + (bgW - textWidth) / 2f
+        val textY = bgY + (bgH - textHeight) / 2f
+        context.text(font, text, textX.roundToInt(), textY.roundToInt(), color.argb, textShadow = true)
     }
 
     /* ============================= 工具函数 ============================= */
