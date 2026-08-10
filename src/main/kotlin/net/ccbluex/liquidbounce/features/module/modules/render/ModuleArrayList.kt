@@ -26,7 +26,7 @@ import java.awt.Color
 import kotlin.math.exp
 import kotlin.math.roundToInt
 
-object ModuleArrayList : ClientModule("OpalArrayList", ModuleCategories.RENDER) {
+object ModuleArrayList : ClientModule("ArrayList【Skid+fix】", ModuleCategories.RENDER) {
 
     /* ============================= 可调节项 ============================= */
 
