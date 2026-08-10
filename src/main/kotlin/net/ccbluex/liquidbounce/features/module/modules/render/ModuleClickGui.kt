@@ -30,14 +30,24 @@ object ModuleClickGui :
 
     @Suppress("unused")
     private val keyHandler = handler<KeyboardKeyEvent> { event ->
-        if (event.action == 1 &&
-            (event.keyCode == GLFW.GLFW_KEY_RIGHT_SHIFT || event.keyCode == 54)
-        ) {
-            val currentScreen = mc.gui.screen()
-            if (currentScreen == null) {
-                openGui()
-            } else if (currentScreen is ClickGuiScreen) {
-                closeGui()
+        if (event.action == 1) {
+            val key = event.keyCode
+
+            // Right Shift 开/关 ClickGUI
+            if (key == GLFW.GLFW_KEY_RIGHT_SHIFT || key == 54) {
+                val currentScreen = mc.gui.screen()
+                if (currentScreen == null) {
+                    openGui()
+                } else if (currentScreen is ClickGuiScreen) {
+                    closeGui()
+                }
+            }
+            // 【新增】ESC 键关闭 ClickGUI（仅当 GUI 已打开时）
+            else if (key == GLFW.GLFW_KEY_ESCAPE) {
+                val currentScreen = mc.gui.screen()
+                if (currentScreen is ClickGuiScreen) {
+                    closeGui()
+                }
             }
         }
     }
