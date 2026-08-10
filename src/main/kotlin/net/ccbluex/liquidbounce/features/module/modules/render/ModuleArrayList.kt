@@ -8,7 +8,7 @@
  *        使用 drawRoundedRect / drawQuad / fillGradient / mc.font 绘制,
  *        不依赖任何 Web / 浏览器组件。
  *
- *  修改: 按像素宽度从长到短排序，纯白色文本，每条模块独立矩形背景
+ *  修改: 按像素宽度从长到短排序，每条模块独立矩形背景，文字支持彩虹渐变
  * ============================================================================
  */
 package net.ccbluex.liquidbounce.features.module.modules.render
@@ -32,7 +32,7 @@ object ModuleArrayList : ClientModule("ArrayList【Skid+fix】", ModuleCategorie
 
     private enum class Side(override val tag: String) : Tagged { LEFT("Left"), RIGHT("Right") }
     private enum class ColorMode(override val tag: String) : Tagged {
-        CUSTOM("Custom"), RAINBOW("Rainbow"), FADE("Fade"), SKY("Sky")
+        CUSTOM("Custom"), RAINBOW("Rainbow"), FADE("Fade"), SKY("Sky"), RAINBOW_TEXT("RainbowText")
     }
 
     private enum class SortMode(override val tag: String) : Tagged {
@@ -61,17 +61,18 @@ object ModuleArrayList : ClientModule("ArrayList【Skid+fix】", ModuleCategorie
     private val border by boolean("Border", false)
 
     // —— 颜色 ——
-    private val colorMode by enumChoice("Color Mode", ColorMode.CUSTOM)
+    private val colorMode by enumChoice("Color Mode", ColorMode.RAINBOW_TEXT) // 默认改为彩虹文字
     private val customColor by color("Color", Color4b(0, 160, 255))
     private val rainbowSpeed by float("Rainbow Speed", 1f, 0.1f..10f)
     private val rainbowOffset by int("Rainbow Offset", 14, 0..90)
+    private val rainbowTextSpeed by float("Rainbow Text Speed", 2f, 0.1f..20f) // 新增：彩虹文字速度
 
     // —— 装饰条 ——
     private val barMode by enumChoice("Bar Mode", BarMode.GRADIENT)
     private val barWidth by int("Bar Width", 2, 0..8)
 
     // —— 动画 ——
-    private val animationSpeed by float("Animation Speed", 8f, 0.5f..30f)
+    private val animationSpeed by float("Animation Speed", 20f, 1f..40f)
     private val slideIn by boolean("Slide In", true)
 
     // ==================== 新增：水印 ====================
@@ -91,7 +92,7 @@ object ModuleArrayList : ClientModule("ArrayList【Skid+fix】", ModuleCategorie
     private val animations = HashMap<ClientModule, Animation>()
     private var lastFrameNs = 0L
 
-    // 纯白色常量
+    // 纯白色常量（仅用作后备，实际文字颜色已改为动态）
     private val WHITE_TEXT = Color4b(255, 255, 255, 255)
 
     /* =============================== 渲染 =============================== */
@@ -246,8 +247,8 @@ object ModuleArrayList : ClientModule("ArrayList【Skid+fix】", ModuleCategorie
                 }
             }
 
-            // 文字 — 纯白色
-            context.text(font, d.entry.text, textX.roundToInt(), textY.roundToInt(), WHITE_TEXT.argb, textShadow)
+            // 文字 — 使用动态颜色 d.color（支持 RainbowText 模式）
+            context.text(font, d.entry.text, textX.roundToInt(), textY.roundToInt(), d.color.argb, textShadow)
         }
     }
 
@@ -260,6 +261,11 @@ object ModuleArrayList : ClientModule("ArrayList【Skid+fix】", ModuleCategorie
             ColorMode.RAINBOW -> hueColor(time * 36f * rainbowSpeed + index * rainbowOffset)
             ColorMode.FADE -> hueColor(index * rainbowOffset.toFloat())
             ColorMode.SKY -> hueColor(y / 720f * 360f + time * 18f * rainbowSpeed, saturation = 0.65f)
+            ColorMode.RAINBOW_TEXT -> {
+                // 每条文字的色相 = 时间 * 速度 + 条目索引 * 偏移，360° 循环
+                val hue = (time * 60f * rainbowTextSpeed + index * 20f) % 360f
+                hueColor(hue)
+            }
         }
     }
 
