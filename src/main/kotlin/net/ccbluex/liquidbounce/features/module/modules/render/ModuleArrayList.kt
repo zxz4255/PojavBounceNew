@@ -3,18 +3,12 @@
  *  ModuleArrayList —— 仿 Opal v2 风格的模块列表 HUD (原生渲染)
  *
  *  适用: Rubbishy-Liquidbounce-Nextgen-for-Android (LiquidBounce Nextgen 0.39)
- *It was skided by XiaoDao776 and it can works on PojavBounceNew
+ *  It was skided by XiaoDao776 and it can works on PojavBounceNew
  *  渲染: 完全原生 —— 通过 OverlayRenderEvent 拿到 GuiGraphicsExtractor,
  *        使用 drawRoundedRect / drawQuad / fillGradient / mc.font 绘制,
  *        不依赖任何 Web / 浏览器组件。
  *
- *  安装:
- *    1. 本文件放入
- *       src/main/kotlin/net/ccbluex/liquidbounce/features/module/modules/render/ModuleArrayList.kt
- *    2. ModuleManager.kt 中:
- *       - import 区(render 模块 import 附近)添加:
- *           import net.ccbluex.liquidbounce.features.module.modules.render.ModuleArrayList
- *       - builtin 模块列表中添加一行:  ModuleArrayList,
+ *  修改: 按文本长度从长到短排序，纯白色文本，每条模块独立矩形背景
  * ============================================================================
  */
 package net.ccbluex.liquidbounce.features.module.modules.render
@@ -42,7 +36,7 @@ object ModuleArrayList : ClientModule("OpalArrayList", ModuleCategories.RENDER) 
     }
 
     private enum class SortMode(override val tag: String) : Tagged {
-        ALPHABETICAL("Alphabetical"), LENGTH("Length"), NONE("None")
+        LENGTH("Length"), ALPHABETICAL("Alphabetical"), NONE("None")
     }
 
     private enum class BarMode(override val tag: String) : Tagged {
@@ -50,35 +44,35 @@ object ModuleArrayList : ClientModule("OpalArrayList", ModuleCategories.RENDER) 
     }
 
     // —— 布局 ——
-    private val side by enumChoice("Side", Side.RIGHT)                 // 贴左 / 贴右
-    private val offsetX by int("Offset X", 4, 0..500)                  // 水平偏移
-    private val offsetY by int("Offset Y", 4, 0..500)                  // 垂直偏移
-    private val spacing by int("Spacing", 2, 0..12)                    // 条目间距
-    private val padding by int("Padding", 4, 0..16)                    // 面板内边距
-    private val upperCase by boolean("Uppercase", true)                // 模块名大写
-    private val sortMode by enumChoice("Sort Mode", SortMode.ALPHABETICAL)
-    private val showSelf by boolean("Show Self", false)                // 是否显示自身
+    private val side by enumChoice("Side", Side.RIGHT)
+    private val offsetX by int("Offset X", 4, 0..500)
+    private val offsetY by int("Offset Y", 4, 0..500)
+    private val spacing by int("Spacing", 2, 0..12)
+    private val padding by int("Padding", 4, 0..16)
+    private val upperCase by boolean("Uppercase", true)
+    private val sortMode by enumChoice("Sort Mode", SortMode.LENGTH)  // 默认按长度从长到短
+    private val showSelf by boolean("Show Self", false)
 
     // —— 外观 ——
-    private val textShadow by boolean("Text Shadow", true)             // 文字阴影
-    private val background by boolean("Background", true)              // 面板背景
+    private val textShadow by boolean("Text Shadow", true)
+    private val background by boolean("Background", true)              // 每条模块独立背景
     private val backgroundAlpha by int("Background Alpha", 80, 0..255)
-    private val backgroundRadius by int("Background Radius", 5, 0..12)
-    private val border by boolean("Border", false)                     // 面板描边
+    private val backgroundRadius by int("Background Radius", 2, 0..12) // 每条背景圆角，默认更小
+    private val border by boolean("Border", false)
 
     // —— 颜色 ——
     private val colorMode by enumChoice("Color Mode", ColorMode.CUSTOM)
-    private val customColor by color("Color", Color4b(0, 160, 255))    // 自定义主题色
-    private val rainbowSpeed by float("Rainbow Speed", 1f, 0.1f..10f)  // 彩虹速度
-    private val rainbowOffset by int("Rainbow Offset", 14, 0..90)      // 逐条色相差
+    private val customColor by color("Color", Color4b(0, 160, 255))
+    private val rainbowSpeed by float("Rainbow Speed", 1f, 0.1f..10f)
+    private val rainbowOffset by int("Rainbow Offset", 14, 0..90)
 
-    // —— 装饰条(Opal 风格侧边条) ——
+    // —— 装饰条 ——
     private val barMode by enumChoice("Bar Mode", BarMode.GRADIENT)
     private val barWidth by int("Bar Width", 2, 0..8)
 
     // —— 动画 ——
     private val animationSpeed by float("Animation Speed", 8f, 0.5f..30f)
-    private val slideIn by boolean("Slide In", true)                   // 边缘滑入动画
+    private val slideIn by boolean("Slide In", true)
 
     /* ============================= 内部状态 ============================= */
 
@@ -87,9 +81,10 @@ object ModuleArrayList : ClientModule("OpalArrayList", ModuleCategories.RENDER) 
     private data class Drawn(val entry: Entry, val y: Float, val x: Float, val color: Color4b)
 
     private val animations = HashMap<ClientModule, Animation>()
-    private var panelWidth = 0f
-    private var panelHeight = 0f
     private var lastFrameNs = 0L
+
+    // 纯白色常量
+    private val WHITE_TEXT = Color4b(255, 255, 255, 255)
 
     /* =============================== 渲染 =============================== */
 
@@ -99,7 +94,6 @@ object ModuleArrayList : ClientModule("OpalArrayList", ModuleCategories.RENDER) 
         val font = mc.font
         val self = this
 
-        // 帧间隔(秒), 保证动画与帧率无关
         val now = mc.getFrameTimeNs()
         val frameTime = if (lastFrameNs != 0L) {
             ((now - lastFrameNs) / 1e9f).coerceIn(0f, 0.05f)
@@ -109,25 +103,21 @@ object ModuleArrayList : ClientModule("OpalArrayList", ModuleCategories.RENDER) 
         lastFrameNs = now
         val smoothing = (1f - exp(-animationSpeed * frameTime)).coerceIn(0f, 1f)
 
-        // 收集已启用模块(默认不显示自身, 隐藏模块也不显示)
+        // 收集已启用模块
         var modules = ModuleManager.getModules()
             .filter { it.enabled && !it.hidden && (showSelf || it !== self) }
             .toList()
 
-        // 清理已禁用模块的动画状态
         animations.keys.retainAll(modules)
 
-        // 排序 (getModules() 本身已按名称排序)
-        if (sortMode == SortMode.LENGTH) {
-            modules = modules.sortedByDescending { it.name.length }
+        // 排序：按文本长度从长到短（降序）
+        modules = when (sortMode) {
+            SortMode.LENGTH -> modules.sortedByDescending { it.name.length }
+            SortMode.ALPHABETICAL -> modules.sortedBy { it.name.lowercase() }
+            SortMode.NONE -> modules
         }
 
-        // 没有启用模块时, 面板平滑收起
-        if (modules.isEmpty()) {
-            panelWidth += (0f - panelWidth) * smoothing
-            panelHeight += (0f - panelHeight) * smoothing
-            return@handler
-        }
+        if (modules.isEmpty()) return@handler
 
         val screenWidth = context.guiWidth()
         val fontHeight = font.lineHeight
@@ -141,20 +131,9 @@ object ModuleArrayList : ClientModule("OpalArrayList", ModuleCategories.RENDER) 
         val barEnabled = barMode != BarMode.NONE && barWidth > 0
         val barGap = if (barEnabled) barWidth + 3f else 0f
 
-        // 面板目标尺寸
-        val contentWidth = entries.maxOf { it.width }
-        val targetPanelWidth = contentWidth + barGap + padding * 2f
-
-        var cursorY = offsetY.toFloat() + padding
-        entries.forEach { cursorY += it.height + spacing }
-        val targetPanelHeight = cursorY - spacing + padding - offsetY
-
-        panelWidth += (targetPanelWidth - panelWidth) * smoothing
-        panelHeight += (targetPanelHeight - panelHeight) * smoothing
-
         // 逐条目计算动画位置与颜色
         val drawn = mutableListOf<Drawn>()
-        cursorY = offsetY.toFloat() + padding
+        var cursorY = offsetY.toFloat()
         entries.forEachIndexed { index, entry ->
             val targetY = cursorY
             cursorY += entry.height + spacing
@@ -163,10 +142,11 @@ object ModuleArrayList : ClientModule("OpalArrayList", ModuleCategories.RENDER) 
             anim.y += (targetY - anim.y) * smoothing
             anim.slide += (1f - anim.slide) * smoothing
 
-            val itemWidth = entry.width + barGap + padding
+            // 每条模块的宽度 = 文本宽度 + barGap + padding*2
+            val itemWidth = entry.width + barGap + padding * 2f
             val baseX = when (side) {
-                Side.RIGHT -> screenWidth - offsetX - padding - itemWidth
-                Side.LEFT -> offsetX.toFloat() + padding
+                Side.RIGHT -> screenWidth - offsetX - itemWidth
+                Side.LEFT -> offsetX.toFloat()
             }
             val x = if (slideIn) {
                 val slideDistance = itemWidth + 24f
@@ -182,42 +162,39 @@ object ModuleArrayList : ClientModule("OpalArrayList", ModuleCategories.RENDER) 
             drawn += Drawn(entry, anim.y, x, resolveColor(index, anim.y))
         }
 
-        // 面板位置
-        val panelX = if (side == Side.RIGHT) screenWidth - offsetX - panelWidth else offsetX.toFloat()
-        val panelY = offsetY.toFloat()
-
-        // 背景 + 边框
-        if (background || border) {
-            val fill = if (background) Color4b(0, 0, 0, backgroundAlpha) else Color4b.TRANSPARENT
-            val outline = if (border) {
-                val first = drawn.first().color
-                Color4b(first.r, first.g, first.b, 160)
-            } else {
-                Color4b.TRANSPARENT
-            }
-
-            if (backgroundRadius > 0) {
-                context.drawRoundedRect(
-                    panelX, panelY,
-                    panelX + panelWidth, panelY + panelHeight,
-                    backgroundRadius.toFloat(), fill, outline, 1f
-                )
-            } else {
-                context.drawQuad(panelX, panelY, panelX + panelWidth, panelY + panelHeight, fill, outline)
-            }
-        }
-
-        // 条目
+        // 绘制每条模块（独立矩形背景 + 文字）
         drawn.forEach { d ->
             val barX = when (side) {
-                Side.RIGHT -> (screenWidth - offsetX - padding - barWidth).toFloat()
+                Side.RIGHT -> (d.x + d.entry.width + barGap + padding * 2f - barWidth - padding + padding).let {
+                    // bar 在最右侧
+                    d.x + d.entry.width + barGap + padding * 2f - padding - barWidth
+                }
                 Side.LEFT -> d.x
             }
             val textX = when (side) {
                 Side.RIGHT -> d.x + padding
-                Side.LEFT -> d.x + barWidth + 3f
+                Side.LEFT -> d.x + barWidth + 3f + padding
             }
             val textY = d.y + (d.entry.height - fontHeight) / 2f
+
+            // 每条模块的独立背景矩形
+            val bgX = d.x
+            val bgY = d.y
+            val bgW = d.entry.width + barGap + padding * 2f
+            val bgH = d.entry.height.toFloat()
+
+            if (background) {
+                val bgColor = Color4b(0, 0, 0, backgroundAlpha)
+                if (backgroundRadius > 0) {
+                    context.drawRoundedRect(
+                        bgX, bgY,
+                        bgX + bgW, bgY + bgH,
+                        backgroundRadius.toFloat(), bgColor, Color4b.TRANSPARENT, 0f
+                    )
+                } else {
+                    context.drawQuad(bgX, bgY, bgX + bgW, bgY + bgH, bgColor, Color4b.TRANSPARENT)
+                }
+            }
 
             // 侧边装饰条
             if (barEnabled) {
@@ -236,8 +213,8 @@ object ModuleArrayList : ClientModule("OpalArrayList", ModuleCategories.RENDER) 
                 }
             }
 
-            // 文字
-            context.text(font, d.entry.text, textX.roundToInt(), textY.roundToInt(), d.color.argb, textShadow)
+            // 文字 — 纯白色
+            context.text(font, d.entry.text, textX.roundToInt(), textY.roundToInt(), WHITE_TEXT.argb, textShadow)
         }
     }
 
