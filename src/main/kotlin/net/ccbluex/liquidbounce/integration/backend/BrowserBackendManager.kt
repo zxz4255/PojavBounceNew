@@ -31,7 +31,7 @@ import net.ccbluex.liquidbounce.integration.backend.backends.external.ExternalSy
 import net.ccbluex.liquidbounce.integration.backend.browser.GlobalBrowserSettings
 import net.ccbluex.liquidbounce.integration.interop.persistant.PersistentLocalStorage
 import net.ccbluex.liquidbounce.integration.task.TaskManager
-import net.ccbluex.liquidbounce.utils.client.Platform
+import net.ccbluex.liquidbounce.utils.kotlin.Platform
 import net.ccbluex.liquidbounce.utils.client.clientLogger
 import net.ccbluex.liquidbounce.utils.client.env
 import net.ccbluex.liquidbounce.utils.client.mc
