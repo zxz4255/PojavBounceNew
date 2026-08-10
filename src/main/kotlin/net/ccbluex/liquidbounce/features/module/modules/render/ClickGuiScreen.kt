@@ -29,8 +29,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     // ==================== Colors (大幅降低透明度，按用户表格修改) ====================
     private val ACCENT = 0xFF56B4E9.toInt()
     private val ACCENT_DARK = 0xFF3A7CA5.toInt()
-    private val BG = 0x90101014.toInt()
-    private val PANEL_BG = 0xA816161A.toInt()
+    private val BG = 0x73101014.toInt()
+    private val SETTING_BG = 0x4D080810.toInt()
     private val TAB_BG = 0x8025252E.toInt()
     private val TAB_ACTIVE = 0xFF33333D.toInt()
     private val TEXT = 0xFFE8E8E8.toInt()
@@ -47,13 +47,13 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
     // ==================== Layout ====================
     private val CORNER = 4f
-    private val ITEM_H = 18f
-    private val SETTING_H = 18f
+    private val ITEM_H = 16f
+    private val SETTING_H = 16f
     private val SCROLL_W = 4f
     private val PADDING = 5f
     private val SETTING_INDENT = 8f
-    private val PANEL_GAP = 12f
-    private val PANEL_MIN_W = 120
+    private val PANEL_GAP = 0f
+    private val PANEL_MIN_W = 125
     private val PANEL_MAX_H = 400
     private val HEADER_H = 24f
 
