@@ -19,6 +19,7 @@ import java.util.IdentityHashMap
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.sin
+import java.io.File  // 新增导入
 
 /**
  * LiquidBounce-style ClickGUI — Multi-panel layout, each category is an independent floating panel.
@@ -76,6 +77,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     private val collapsedGroups = mutableSetOf<Value<*>>()
 
     private var fadeAnim = 0f
+    private var isFirstLoad = true  // 新增：首次加载标志
 
     // 所有分类面板的列表
     private val categories = ModuleCategories.entries.toList()
@@ -248,6 +250,20 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             panels = targetPanels
         }
 
+        // 首次加载时恢复保存的布局
+        if (isFirstLoad) {
+            val saved = loadLayout()
+            for (panel in panels) {
+                val tag = panel.category?.tag ?: continue
+                saved[tag]?.let { (x, y, collapsed) ->
+                    panel.x = x
+                    panel.y = y
+                    panel.collapsed = collapsed
+                }
+            }
+            isFirstLoad = false
+        }
+
         // 绘制面板循环
         for (panel in panels) {
             val px = panel.x; val py = panel.y; val pw = panel.w; val ph = panel.h
@@ -323,8 +339,12 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 if (isExpanded) {
                     val values = getVisibleValues(mod)
                     val settingBgH = values.size * SETTING_H
-                    if (curY + settingBgH >= listAreaY && curY <= listAreaY + listAreaH) {
-                        fillRect(ctx, listAreaX, curY, listAreaX + listAreaW, curY + settingBgH, SETTING_BG)
+
+                    // 裁剪背景高度，不超出列表区域底部
+                    val bgStart = curY.coerceAtLeast(listAreaY)
+                    val bgEnd = (curY + settingBgH).coerceAtMost(listAreaY + listAreaH)
+                    if (bgEnd > bgStart && bgStart < listAreaY + listAreaH) {
+                        fillRect(ctx, listAreaX, bgStart, listAreaX + listAreaW, bgEnd, SETTING_BG)
                     }
 
                     for ((v, depth) in values) {
@@ -577,6 +597,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             if (my in headerY.toInt()..(headerY + headerH).toInt()) {
                 if (btn == 1) { // 右键：切换折叠状态
                     targetPanel.collapsed = !targetPanel.collapsed
+                    saveLayout()  // 新增：保存布局
                     return true
                 } else if (btn == 0) { // 左键：拖拽面板
                     targetPanel.draggingPanel = true
@@ -683,45 +704,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val nameGap = 4
         val indent = 8f
 
-        // 和 renderModeList 完全一致的计算
-        // 注意：这里我们假定 x 起始为 0，实际 x 由 rightEdge 和 w 决定，但为了简单我们沿用原逻辑的 labelX 计算
-        // 实际上为了精确，我们需要知道 x 和 w，但此重载未传 x，只传 rightEdge，我们通过 rightEdge 反推
-        // 但我们沿用原有计算方式：labelX = 6 + indent，因为 x 起始为 0，但实际上 renderModeList 的 x 是 listAreaX
-        // 为了保持一致，我们使用和 renderModeList 相同的计算，但需要 x 起始，这里我们假设 x = 0 是不对的。
-        // 因此我们改用新版 handleModeClick（带 x, w, depth），此旧版保留但不再使用，我们仅做类型修正。
-        // 为保持编译通过，我们保留旧版并仅做类型修正，实际点击检测由新版处理。
-        // 所以此方法保持空实现或简单返回，避免逻辑错误。
-        // 但为了安全，我们保留之前的注释内容，不实际执行。
-        // 实际调用中，mouseClicked 里调用的就是旧版，但旧版计算有误，所以我们将旧版实现改为调用新版（通过构造参数）。
-        // 但为了简单，我们修改 mouseClicked 里的调用，让它使用新版 handleModeClick（带 x, w, depth）。
-        // 但用户要求不要改动调用处，所以我们只能修正旧版算法。
-        // 由于旧版没有 x 和 depth，我们无法准确计算 labelX，但我们可以从 rightEdge 和 constants 推算 drawX？
-        // 实际上，我们可以从 rightEdge 和 v 的名字宽度推算，但需要知道 indent，而 depth 未知。
-        // 所以我们放弃旧版，强制使用新版。但用户说不要删减功能，所以我们保留旧版但改为调用新版。
-        // 最稳妥：在旧版中根据 constants 和 current 直接循环切换，而不依赖坐标检测（因为坐标检测不准）。
-        // 我们实现一个简易版本：如果点击位置在右半部分，则循环。
-        // 但为了完全符合教程，我们按照教程重写旧版，使其与 renderModeList 一致，但需要知道 x 起始。
-        // 我们可以从 rightEdge - w 反推 x，但 w 未知。
-        // 为了简化，我们不实现旧版的具体逻辑，而是让旧版循环到下一个模式（类似于点击空白区域行为）。
-        // 这样至少保证点击能切换。
-        // 但用户可能希望精确点击，所以最好修改 mouseClicked 调用新版。
-        // 我决定修改 mouseClicked 中的调用，使用新版 handleModeClick 并传入 listAreaX, listAreaW, depth。
-        // 这样旧版就不被调用了，我们只需保留旧版为空实现。
-        // 由于用户强调“不要删减”，我们保留旧版方法体，但内容为空，不执行任何操作。
-        // 实际上，用户可能希望旧版也能工作，但鉴于无法准确计算，我们让旧版也调用新版。
-        // 但我们无法获取 depth，所以我们让旧版简单循环。
-        // 我这里采用：旧版只做循环切换（点击空白区域行为），不进行精确点检测。
-        // 这样既保留功能，又避免计算错误。
-        // 但教程给出了详细的旧版修复，我们按教程实现。
-        // 我们重写旧版，使用和 renderModeList 相同的计算方式，但需要 x 起始，我们可以从 rightEdge 减去一个估计的 w。
-        // 但 w 未知，所以我们只能假设 w = rightEdge - x，x 未知。
-        // 所以我们放弃旧版，强制使用新版。
-        // 在 mouseClicked 中，我们改为调用新版。
-        // 因此旧版我们保留为空方法。
-        // 为完全符合教程，我们按教程重写旧版，但需要传入 x 和 w，所以我们不实现。
-        // 最终决定：在 mouseClicked 中调用新版，旧版保留但不调用。
-        // 这样既保留了方法，又保证功能正确。
-        // 下面我们实现一个空方法。
+        // 此重载保留但不再使用，实际使用新版
     }
 
     // 重新定义 handleModeClick，接受必要参数（新版）
@@ -773,9 +756,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             trySetValue(v, constants[nextIdx])
         }
     }
-
-    // 由于上述修改，mouseClicked 中调用 handleModeClick 时需传入 x, w, depth
-    // 但当前 mouseClicked 中调用的是旧版重载，新版未被调用，我们修改 mouseClicked 使用新版。
 
     // 【修复点 2】：方法签名修正为 MouseButtonEvent, dx: Double, dy: Double
     override fun mouseDragged(event: MouseButtonEvent, dx: Double, dy: Double): Boolean {
@@ -842,6 +822,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             panel.draggingPanel = false
         }
         sliderContext = null // 清空滑块上下文
+        saveLayout()  // 新增：保存布局
         return true
     }
 
@@ -1014,6 +995,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     }
 
     override fun onClose() {
+        saveLayout()  // 新增：保存布局
         setScreenCompat(null)
         fadeAnim = 0f
     }
@@ -1227,5 +1209,41 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         if (actual is Enum<*>) return actual.name
         if (actual is Boolean) return if (actual) "ON" else "OFF"
         return actual.toString().take(15)
+    }
+
+    // ==================== 位置缓存 ====================
+    private fun getLayoutFile(): File {
+        return File(minecraft?.gameDirectory ?: File("."), "config/clickgui_layout.json")
+    }
+
+    private fun saveLayout() {
+        try {
+            val sb = StringBuilder()
+            sb.append("[")
+            val parts = panels.filter { it.category != null }.map { p ->
+                val tag = p.category?.tag ?: ""
+                "{\"tag\":\"$tag\",\"x\":${p.x},\"y\":${p.y},\"collapsed\":${p.collapsed}}"
+            }
+            sb.append(parts.joinToString(","))
+            sb.append("]")
+            val file = getLayoutFile()
+            file.parentFile?.mkdirs()
+            file.writeText(sb.toString())
+        } catch (_: Exception) {}
+    }
+
+    private fun loadLayout(): Map<String, Triple<Float, Float, Boolean>> {
+        return try {
+            val file = getLayoutFile()
+            if (!file.exists()) return emptyMap()
+            val content = file.readText()
+            val result = mutableMapOf<String, Triple<Float, Float, Boolean>>()
+            val regex = Regex("""\{"tag":"([^"]+)","x":([0-9.-]+),"y":([0-9.-]+),"collapsed":(true|false)\}""")
+            for (match in regex.findAll(content)) {
+                val (tag, x, y, collapsed) = match.destructured
+                result[tag] = Triple(x.toFloat(), y.toFloat(), collapsed.toBoolean())
+            }
+            result
+        } catch (_: Exception) { emptyMap() }
     }
 }
