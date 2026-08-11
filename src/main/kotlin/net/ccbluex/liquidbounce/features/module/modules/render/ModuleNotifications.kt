@@ -47,7 +47,7 @@ import net.ccbluex.liquidbounce.utils.client.mc
 import kotlin.math.exp
 import kotlin.math.roundToInt
 
-object ModuleNotifications : ClientModule("Notifications", ModuleCategories.RENDER) {
+object ModuleNotifications : ClientModule("Notifications【skid】", ModuleCategories.RENDER) {
 
     /* ============================= 通知类型 ============================= */
     // 图标使用 ASCII 字符 (mc.font 保证渲染), 颜色对应 Opal 的类型色
