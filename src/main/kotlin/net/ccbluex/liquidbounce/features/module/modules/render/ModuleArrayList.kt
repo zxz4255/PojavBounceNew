@@ -3,12 +3,13 @@
  *  ModuleArrayList —— 仿 Opal v2 风格的模块列表 HUD (原生渲染)
  *
  *  适用: Rubbishy-Liquidbounce-Nextgen-for-Android (LiquidBounce Nextgen 0.39)
- *  It was skided by XiaoDao776 and it can works on PojavBounceNew
+ *  It was skided by XiaoDao776 and it works on PojavBounceNew
  *  渲染: 完全原生 —— 通过 OverlayRenderEvent 拿到 GuiGraphicsExtractor,
  *        使用 drawRoundedRect / drawQuad / fillGradient / mc.font 绘制,
  *        不依赖任何 Web / 浏览器组件。
  *
  *  修改: 按像素宽度从长到短排序，每条模块独立矩形背景，文字支持彩虹渐变
+ *  修复: 时间精度问题，现在 Rainbow / Sky / RainbowText 会平滑流动
  * ============================================================================
  */
 package net.ccbluex.liquidbounce.features.module.modules.render
@@ -255,14 +256,14 @@ object ModuleArrayList : ClientModule("ArrayList【Skid+fix】", ModuleCategorie
     /* ============================= 工具函数 ============================= */
 
     private fun resolveColor(index: Int, y: Float): Color4b {
-        val time = System.currentTimeMillis() / 1000f
+        // 【修复】使用取模后的时间，避免浮点精度丢失，让颜色真正流动
+        val time = (System.currentTimeMillis() % 100000) / 1000f   // 每 100 秒循环一次，精度足够平滑
         return when (colorMode) {
             ColorMode.CUSTOM -> customColor
             ColorMode.RAINBOW -> hueColor(time * 36f * rainbowSpeed + index * rainbowOffset)
             ColorMode.FADE -> hueColor(index * rainbowOffset.toFloat())
             ColorMode.SKY -> hueColor(y / 720f * 360f + time * 18f * rainbowSpeed, saturation = 0.65f)
             ColorMode.RAINBOW_TEXT -> {
-                // 每条文字的色相 = 时间 * 速度 + 条目索引 * 偏移，360° 循环
                 val hue = (time * 60f * rainbowTextSpeed + index * 20f) % 360f
                 hueColor(hue)
             }

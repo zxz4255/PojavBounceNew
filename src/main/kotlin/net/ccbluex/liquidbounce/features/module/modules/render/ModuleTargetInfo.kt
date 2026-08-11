@@ -2,32 +2,8 @@
  * ============================================================================
  *  ModuleTargetInfo —— 仿 Opal v2 TargetInfoElement 的目标信息 HUD (原生渲染)
  *
- *  适用: Rubbishy-Liquidbounce-Nextgen-for-Android (LiquidBounce Nextgen 0.39,
- *        Mojang 映射, Android SDK v30)
- *
- *  功能: 实时显示当前攻击目标 / KillAura 目标的信息:
- *        - 头像 (玩家皮肤 / 骷髅·僵尸·苦力怕·猪灵贴图, 受伤闪红)
- *        - 名称 + 生命值数字
- *        - 带延迟动画的生命条 (渐变 / 纯色)
- *        - 装备栏 (主手 + 头盔 + 胸甲 + 护腿 + 靴子) + 附魔缩写
- *        - 进出场动画 / 整体缩放
- *
- *  可调节项 (20+): 位置 X/Y、缩放、背景、背景透明度、圆角、描边、
- *        目标来源 (KillAura / 最后攻击 / 两者)、聊天界面显示自己、
- *        名称/头部/血量文字/血条/装备/附魔/受伤闪红 开关、
- *        文字阴影、名称颜色、血量文字颜色、血条样式、主题双色、动画速度等。
- *
- *  渲染: 完全原生 —— OverlayRenderEvent + GuiGraphicsExtractor
- *        (drawRoundedRect / drawQuad / fillGradient / blit / item / drawCircle / mc.font),
- *        不依赖任何 Web / 浏览器组件。
- *
- *  安装:
- *    1. 本文件放入
- *       src/main/kotlin/net/ccbluex/liquidbounce/features/module/modules/render/ModuleTargetInfo.kt
- *    2. ModuleManager.kt 中:
- *       - import 区 (render 模块 import 附近) 添加:
- *           import net.ccbluex.liquidbounce.features.module.modules.render.ModuleTargetInfo
- *       - builtin 模块列表中添加一行:  ModuleTargetInfo,
+ *  适用: Rubbishy-Liquidbounce-Nextgen-for-Android (LiquidBounce Nextgen 0.39)
+ *  修改: 默认位置居中偏右下，自定义 X/Y 坐标，背景不透明度独立控制并修复闪烁
  * ============================================================================
  */
 package net.ccbluex.liquidbounce.features.module.modules.render
@@ -73,17 +49,19 @@ object ModuleTargetInfo : ClientModule("TargetInfo", ModuleCategories.RENDER) {
     }
 
     // —— 布局 ——
-    private val offsetX by int("Offset X", 4, 0..2000)          // 面板 X
-    private val offsetY by int("Offset Y", 4, 0..1200)          // 面板 Y
-    private val scaleValue by float("Scale", 1f, 0.5f..2f)      // 整体缩放
-    private val background by boolean("Background", true)       // 面板背景
+    // 默认位置：屏幕中心偏右下方（1920x1080 参考：X≈960, Y≈540）
+    private val targetInfoX by int("Position X", 480, 0..2000)       // 自定义 X 坐标，默认居中偏右
+    private val targetInfoY by int("Position Y", 280, 0..1200)       // 自定义 Y 坐标，默认居中偏下
+    private val scaleValue by float("Scale", 1f, 0.5f..2f)            // 整体缩放
+    private val background by boolean("Background", true)              // 面板背景
+    // 背景不透明度独立设置，不受进出场动画影响（修复闪烁问题）
     private val backgroundAlpha by int("Background Alpha", 90, 0..255)
     private val backgroundRadius by int("Background Radius", 5, 0..12)
-    private val border by boolean("Border", false)              // 面板描边
+    private val border by boolean("Border", false)                     // 面板描边
 
     // —— 目标来源 ——
     private val targetMode by enumChoice("Target Mode", TargetMode.BOTH)
-    private val showSelfInChat by boolean("Show Self In Chat", true)  // 打开聊天界面时显示自己
+    private val showSelfInChat by boolean("Show Self In Chat", true)
 
     // —— 内容 ——
     private val showName by boolean("Show Name", true)
@@ -92,7 +70,7 @@ object ModuleTargetInfo : ClientModule("TargetInfo", ModuleCategories.RENDER) {
     private val showHealthBar by boolean("Show Health Bar", true)
     private val showEquipment by boolean("Show Equipment", true)
     private val showEnchantments by boolean("Show Enchantments", true)
-    private val damageTint by boolean("Hurt Flash", true)       // 头部受伤闪红
+    private val damageTint by boolean("Hurt Flash", true)
 
     // —— 外观 ——
     private val textShadow by boolean("Text Shadow", true)
@@ -109,9 +87,9 @@ object ModuleTargetInfo : ClientModule("TargetInfo", ModuleCategories.RENDER) {
     /* ============================= 内部状态 ============================= */
 
     private val hpFormat = DecimalFormat("0.#")
-    private var displayEntity: LivingEntity? = null  // 淡出动画期间保留的上一目标
-    private var targetAnim = 0f                      // 进出场动画 0..1
-    private var healthAnim = 0f                      // 血条延迟动画 0..1
+    private var displayEntity: LivingEntity? = null
+    private var targetAnim = 0f
+    private var healthAnim = 0f
     private var lastFrameNs = 0L
 
     /* =============================== 渲染 =============================== */
@@ -121,7 +99,6 @@ object ModuleTargetInfo : ClientModule("TargetInfo", ModuleCategories.RENDER) {
         val context = event.context
         val font = mc.font
 
-        // 帧间隔(秒), 保证动画与帧率无关
         val now = mc.getFrameTimeNs()
         val frameTime = if (lastFrameNs != 0L) {
             ((now - lastFrameNs) / 1e9f).coerceIn(0f, 0.05f)
@@ -152,7 +129,7 @@ object ModuleTargetInfo : ClientModule("TargetInfo", ModuleCategories.RENDER) {
         val hpTextWidth = font.width(hpText).toFloat()
         val heartWidth = 5f
 
-        // 面板尺寸 (参照 Opal 的比例, 适配 9px 原生字体)
+        // 面板尺寸
         val padding = 4f
         val headSize = 20f
         val headOffset = 24f
@@ -163,15 +140,19 @@ object ModuleTargetInfo : ClientModule("TargetInfo", ModuleCategories.RENDER) {
         val panelWidth = padding * 2 + contentWidth + headOffset + 1f
         val panelHeight = 41f
 
-        // 整体缩放渲染(所有内容相对面板原点, 与 Opal 的 NVG scale 一致)
+        // 使用自定义 X/Y 坐标
+        val posX = targetInfoX.toFloat()
+        val posY = targetInfoY.toFloat()
+
         context.pose().withPush {
-            translate(offsetX.toFloat(), offsetY.toFloat())
+            translate(posX, posY)
             scale(scaleValue, scaleValue)
 
             // —— 背景 + 边框 ——
+            // 关键修复：背景不透明度使用固定的 backgroundAlpha，不乘以 alphaOf（不再闪烁）
             if (background || border) {
-                val fill = if (background) Color4b(0, 0, 0, alphaOf(backgroundAlpha)) else Color4b.TRANSPARENT
-                val outline = if (border) Color4b(255, 255, 255, alphaOf(120)) else Color4b.TRANSPARENT
+                val fill = if (background) Color4b(0, 0, 0, backgroundAlpha) else Color4b.TRANSPARENT
+                val outline = if (border) Color4b(255, 255, 255, 120) else Color4b.TRANSPARENT
                 if (backgroundRadius > 0) {
                     context.drawRoundedRect(
                         0f, 0f, panelWidth, panelHeight,
@@ -182,14 +163,13 @@ object ModuleTargetInfo : ClientModule("TargetInfo", ModuleCategories.RENDER) {
                 }
             }
 
-            // —— 头部 (玩家皮肤 / 怪物贴图, 受伤闪红) ——
+            // —— 头部 ——
             if (showHead) {
                 val texture = headTexture(entity)
                 if (texture != null) {
                     val headX = (padding + 0.5f).roundToInt()
                     val headY = padding.roundToInt()
                     val size = headSize.roundToInt()
-                    // 64x64 皮肤纹理中头部区域为 8..16 像素 (归一化 UV)
                     context.blit(
                         texture,
                         headX, headY, headX + size, headY + size,
@@ -222,14 +202,13 @@ object ModuleTargetInfo : ClientModule("TargetInfo", ModuleCategories.RENDER) {
                     hpX, 10,
                     healthTextColor.alpha(alphaOf(255)).argb, textShadow
                 )
-                // 金色圆点生命图标 (替代 Opal 的 Material Icons 心形, 避免字形缺失)
                 context.drawCircle(
                     hpX - heartWidth - 2f, 7f, 2.5f,
                     colorGetter = { Color4b(255, 194, 71).alpha(alphaOf(255)).argb }
                 )
             }
 
-            // —— 生命条 (带延迟动画) ——
+            // —— 生命条 ——
             if (showHealthBar && healthBarMode != HealthBarMode.NONE) {
                 val maxHp = entity.maxHealth + entity.absorptionAmount
                 val curHp = entity.health + entity.absorptionAmount
@@ -262,7 +241,7 @@ object ModuleTargetInfo : ClientModule("TargetInfo", ModuleCategories.RENDER) {
                 }
             }
 
-            // —— 装备栏 (主手 + 头盔 + 胸甲 + 护腿 + 靴子) + 附魔缩写 ——
+            // —— 装备栏 ——
             if (showEquipment) {
                 val slots = EquipmentSlot.VALUES
                     .filter { it.type == EquipmentSlot.Type.HUMANOID_ARMOR } + EquipmentSlot.MAINHAND
@@ -312,18 +291,15 @@ object ModuleTargetInfo : ClientModule("TargetInfo", ModuleCategories.RENDER) {
                 }
             }
         }
-        // 过滤已死亡实体
         if (target != null && target.isDeadOrDying) {
             target = null
         }
-        // 打开聊天界面时显示自己 (Opal 原版行为)
         if (target == null && showSelfInChat && mc.gui.screen() is ChatScreen) {
             target = mc.player
         }
         return target
     }
 
-    /** 头部纹理: 玩家取皮肤, 常见怪物取原版贴图, 其余返回 null (不画头) */
     private fun headTexture(entity: LivingEntity): Identifier? = when (entity) {
         is AbstractClientPlayer -> entity.skin.body().texturePath()
         is Skeleton -> Identifier.withDefaultNamespace("textures/entity/skeleton/skeleton.png")
@@ -333,13 +309,10 @@ object ModuleTargetInfo : ClientModule("TargetInfo", ModuleCategories.RENDER) {
         else -> null
     }
 
-    /** 附魔缩写: 描述首字母(至多 2 个词) + 等级, 如 Sharpness V -> "S5" */
     private fun enchantShort(stack: ItemStack): String? {
         for (entry in EnchantmentHelper.getEnchantmentsForCrafting(stack).entrySet()) {
             val level = entry.intValue
-            if (level <= 0) {
-                continue
-            }
+            if (level <= 0) continue
             val description = entry.key.value().description().string
             val abbr = description.split(' ')
                 .mapNotNull { it.firstOrNull() }

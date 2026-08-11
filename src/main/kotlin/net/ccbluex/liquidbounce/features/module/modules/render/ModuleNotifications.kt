@@ -35,6 +35,7 @@
  */
 package net.ccbluex.liquidbounce.features.module.modules.render
 
+import net.ccbluex.liquidbounce.event.events.ModuleToggleEvent
 import net.ccbluex.liquidbounce.event.events.OverlayRenderEvent
 import net.ccbluex.liquidbounce.event.handler
 import net.ccbluex.liquidbounce.features.module.ClientModule
@@ -47,7 +48,7 @@ import net.ccbluex.liquidbounce.utils.client.mc
 import kotlin.math.exp
 import kotlin.math.roundToInt
 
-object ModuleNotifications : ClientModule("Notifications【skid】", ModuleCategories.RENDER) {
+object ModuleNotifications : ClientModule("Notifications", ModuleCategories.RENDER) {
 
     /* ============================= 通知类型 ============================= */
     // 图标使用 ASCII 字符 (mc.font 保证渲染), 颜色对应 Opal 的类型色
@@ -101,11 +102,16 @@ object ModuleNotifications : ClientModule("Notifications【skid】", ModuleCateg
     private val defaultDuration by int("Default Duration", 3000, 500..10000)  // 毫秒
     private val welcomeNotification by boolean("Welcome Notification", true)   // 启用时发送欢迎通知
 
+    // —— 模块开关通知 ——
+    private val moduleToggleNotifications by boolean("Module Toggle Notifications", true)
+    private val notifyHiddenModules by boolean("Notify Hidden Modules", false)  // 隐藏模块(如 HUD)开关也通知
+
     /* ============================= 内部状态 ============================= */
 
     private val notifications = ArrayList<Notification>()   // index 0 为最新(显示在底部)
     private val animations = HashMap<Notification, AnimState>()
     private var lastFrameNs = 0L
+    private var startupTime = 0L                            // 模块启用时刻 (用于过滤启动加载通知)
 
     /* =========================== 通知发送 API =========================== */
 
@@ -135,9 +141,39 @@ object ModuleNotifications : ClientModule("Notifications【skid】", ModuleCateg
 
     /** 模块启用时发送欢迎通知, 便于验证效果 (可通过 "Welcome Notification" 关闭) */
     override suspend fun enabledEffect() {
+        startupTime = System.currentTimeMillis()
         if (welcomeNotification) {
             notify("Notifications", "通知系统已启用", NotificationType.SUCCESS)
         }
+    }
+
+    /**
+     * 监听模块开关事件: 任意模块被启用/禁用时发送通知。
+     * 过滤: 自身开关、隐藏模块(可配置)、启动加载时自动启用的模块(3 秒内)。
+     */
+    @Suppress("unused")
+    private val moduleToggleHandler = handler<ModuleToggleEvent> { event ->
+        if (!moduleToggleNotifications) {
+            return@handler
+        }
+        // 忽略自身开关, 避免自我通知
+        if (event.moduleName == name) {
+            return@handler
+        }
+        // 隐藏模块 (如 HUD 等) 可选通知
+        if (event.hidden && !notifyHiddenModules) {
+            return@handler
+        }
+        // 启动加载: 加入世界时配置中已启用的模块会触发 onToggled, 3 秒内忽略
+        if (System.currentTimeMillis() - startupTime < 3000) {
+            return@handler
+        }
+
+        notify(
+            event.moduleName,
+            if (event.enabled) "已启用" else "已禁用",
+            if (event.enabled) NotificationType.SUCCESS else NotificationType.ERROR,
+        )
     }
 
     /* =============================== 渲染 =============================== */
