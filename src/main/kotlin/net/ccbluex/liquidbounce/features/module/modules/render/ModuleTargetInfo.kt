@@ -53,12 +53,12 @@ init {
 
     // —— 布局 ——
     // 默认位置：屏幕中心偏右下方（1920x1080 参考：X≈960, Y≈540）
-    private val targetInfoX by int("Position X", 480, 0..2000)       // 自定义 X 坐标，默认居中偏右
+    private val targetInfoX by int("Position X", 611, 0..2000)       // 自定义 X 坐标，默认居中偏右
     private val targetInfoY by int("Position Y", 280, 0..1200)       // 自定义 Y 坐标，默认居中偏下
-    private val scaleValue by float("Scale", 1f, 0.5f..2f)            // 整体缩放
+    private val scaleValue by float("Scale", 1.2f, 0.5f..2f)            // 整体缩放
     private val background by boolean("Background", true)              // 面板背景
     // 背景不透明度独立设置，不受进出场动画影响（修复闪烁问题）
-    private val backgroundAlpha by int("Background Alpha", 90, 0..255)
+    private val backgroundAlpha by int("Background Alpha", 75, 0..255)
     private val backgroundRadius by int("Background Radius", 5, 0..12)
     private val border by boolean("Border", false)                     // 面板描边
 
@@ -84,8 +84,8 @@ init {
     private val accentColor2 by color("Accent Color 2", Color4b(0, 255, 170))
 
     // —— 动画 ——
-    private val animationSpeed by float("Animation Speed", 8f, 0.5f..40f)
-    private val healthAnimSpeed by float("Health Anim Speed", 4f, 0.5f..20f)
+    private val animationSpeed by float("Animation Speed", 40f, 0.5f..40f)
+    private val healthAnimSpeed by float("Health Anim Speed", 20f, 0.5f..20f)
 
     /* ============================= 内部状态 ============================= */
 

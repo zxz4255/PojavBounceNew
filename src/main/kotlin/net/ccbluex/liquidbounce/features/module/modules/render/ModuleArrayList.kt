@@ -82,9 +82,9 @@ object ModuleArrayList : ClientModule("ArrayList【Skid+fix】", ModuleCategorie
     // —— 颜色 ——
     private val colorMode by enumChoice("Color Mode", ColorMode.RAINBOW_TEXT)
     private val customColor by color("Color", Color4b(0, 160, 255))
-    private val rainbowSpeed by float("Rainbow Speed", 1f, 0.1f..10f)
-    private val rainbowOffset by int("Rainbow Offset", 14, 0..90)
-    private val rainbowTextSpeed by float("Rainbow Text Speed", 2f, 0.1f..20f)
+    private val rainbowSpeed by float("Rainbow Speed", 6f, 0.1f..10f)
+    private val rainbowOffset by int("Rainbow Offset", 5, 0..90)
+    private val rainbowTextSpeed by float("Rainbow Text Speed", 6f, 0.1f..20f)
 
     // —— 装饰条 ——
     private val barMode by enumChoice("Bar Mode", BarMode.FOLLOW)
@@ -92,7 +92,7 @@ object ModuleArrayList : ClientModule("ArrayList【Skid+fix】", ModuleCategorie
     private val barCustomColor by color("Bar Color", Color4b.WHITE)
 
     // —— 动画 ——
-    private val animationSpeed by float("Animation Speed", 30f, 1f..50f)
+    private val animationSpeed by float("Animation Speed", 50f, 1f..50f)
     private val slideIn by boolean("Slide In", true)
 
     // ==================== 水印 ====================

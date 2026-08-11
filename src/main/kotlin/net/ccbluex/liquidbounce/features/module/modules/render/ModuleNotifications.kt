@@ -81,15 +81,15 @@ init {
     // —— 布局 ——
     private val offsetX by int("Offset X", 4, 0..500)             // 距右边缘
     private val offsetY by int("Offset Y", 4, 0..500)             // 距底边缘
-    private val scaleValue by float("Scale", 1f, 0.5f..2f)        // 整体缩放
-    private val notificationHeight by int("Height", 26, 18..40)   // 单条高度
+    private val scaleValue by float("Scale", 1.1f, 0.5f..2f)        // 整体缩放
+    private val notificationHeight by int("Height", 30, 18..40)   // 单条高度
     private val spacing by int("Spacing", 3, 0..10)               // 条间距
-    private val maxNotifications by int("Max Notifications", 5, 1..10)
+    private val maxNotifications by int("Max Notifications", 6, 1..10)
 
     // —— 外观 ——
     private val background by boolean("Background", true)
-    private val backgroundAlpha by int("Background Alpha", 128, 0..255)
-    private val backgroundRadius by int("Background Radius", 2, 0..12)
+    private val backgroundAlpha by int("Background Alpha", 80, 0..255)
+    private val backgroundRadius by int("Background Radius", 3, 0..12)
     private val border by boolean("Border", false)
     private val showIcon by boolean("Show Icon", true)
     private val iconBackground by boolean("Icon Background", true)
@@ -100,8 +100,8 @@ init {
     private val textShadow by boolean("Text Shadow", true)
 
     // —— 动画 / 时长 ——
-    private val animationSpeed by float("Animation Speed", 20f, 0.5f..40f)
-    private val defaultDuration by int("Default Duration", 2000, 500..10000)  // 毫秒
+    private val animationSpeed by float("Animation Speed", 40f, 0.5f..40f)
+    private val defaultDuration by int("Default Duration", 2600, 500..10000)  // 毫秒
     private val welcomeNotification by boolean("Welcome Notification", true)   // 启用时发送欢迎通知
 
     // —— 模块开关通知 ——
