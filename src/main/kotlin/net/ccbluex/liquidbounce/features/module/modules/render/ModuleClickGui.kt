@@ -36,14 +36,6 @@ object ModuleClickGui :
                 closeGui()
             }
         }
-        // 【新增】ESC 键关闭 ClickGUI（仅当 GUI 已打开时）
-            else if (key == GLFW.GLFW_KEY_ESCAPE) {
-                val currentScreen = mc.gui.screen()
-                if (currentScreen is ClickGuiScreen) {
-                    closeGui()
-                }
-            }
-        }
     }
 
     // 从模块列表启用 ClickGUI 时立即打开 (用 enabledEffect 替代不存在的 onEnabled)
