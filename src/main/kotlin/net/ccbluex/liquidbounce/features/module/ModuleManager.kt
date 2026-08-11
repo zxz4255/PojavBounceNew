@@ -238,6 +238,7 @@ import net.ccbluex.liquidbounce.features.module.modules.render.esp.ModuleESP
 import net.ccbluex.liquidbounce.features.module.modules.render.hats.ModuleHats
 import net.ccbluex.liquidbounce.features.module.modules.render.hitfx.ModuleHitFX
 import net.ccbluex.liquidbounce.features.module.modules.render.murdermystery.ModuleMurderMystery
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleNotifications
 import net.ccbluex.liquidbounce.features.module.modules.render.nametags.ModuleNametags
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleArrayList
 import net.ccbluex.liquidbounce.features.module.modules.render.trajectories.ModuleTrajectories
@@ -676,6 +677,7 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleItemChams,
             ModuleCrystalView,
             ModuleSkinChanger,
+            ModuleNotifications,
             ModuleProtectionZones,
             ModuleArrayList,
             ModuleCrosshair,
