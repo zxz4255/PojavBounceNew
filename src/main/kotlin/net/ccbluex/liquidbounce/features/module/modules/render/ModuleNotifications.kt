@@ -99,6 +99,7 @@ object ModuleNotifications : ClientModule("Notifications【skid】", ModuleCateg
     // —— 动画 / 时长 ——
     private val animationSpeed by float("Animation Speed", 8f, 0.5f..30f)
     private val defaultDuration by int("Default Duration", 3000, 500..10000)  // 毫秒
+    private val welcomeNotification by boolean("Welcome Notification", true)   // 启用时发送欢迎通知
 
     /* ============================= 内部状态 ============================= */
 
@@ -130,6 +131,13 @@ object ModuleNotifications : ClientModule("Notifications【skid】", ModuleCateg
     fun clearNotifications() {
         notifications.clear()
         animations.clear()
+    }
+
+    /** 模块启用时发送欢迎通知, 便于验证效果 (可通过 "Welcome Notification" 关闭) */
+    override suspend fun enabledEffect() {
+        if (welcomeNotification) {
+            notify("Notifications", "通知系统已启用", NotificationType.SUCCESS)
+        }
     }
 
     /* =============================== 渲染 =============================== */
