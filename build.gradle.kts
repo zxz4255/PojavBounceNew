@@ -396,14 +396,14 @@ tasks.register<Copy>("copyZipInclude") {
     from("zip_include/")
     into("build/libs/zip")
 }
-/*
+
 tasks.named<Jar>("sourcesJar") {
     dependsOn("buildTheme", "generateGitProperties")
     from("src-theme/dist") {
         into("resources/liquidbounce/themes/liquidbounce")
     }
 }
-*/
+
 tasks.named("build") {
     dependsOn("copyZipInclude")
 }
