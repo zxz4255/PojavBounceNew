@@ -30,7 +30,7 @@ import kotlin.math.exp
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
-object ArrayList : ClientModule("ArrayList【Skid+fix】", ModuleCategories.RENDER) {
+object ModuleArrayList : ClientModule("ArrayList【Skid+fix】", ModuleCategories.RENDER) {
     init { enabled = true }
 
     /* ============================= 可调节项 ============================= */
@@ -270,7 +270,7 @@ object ArrayList : ClientModule("ArrayList【Skid+fix】", ModuleCategories.REND
 
     private fun renderWaterMark(context: Any, font: Any) {
         @Suppress("UNCHECKED_CAST")
-        val ctx = context as? net.ccbluex.liquidbounce.render.engine.GuiGraphicsExtractor ?: return
+        val ctx = context as? net.minecraft.client.gui.GuiGraphicsExtractor ?: return
         @Suppress("UNCHECKED_CAST")
         val f = font as? net.minecraft.client.gui.Font ?: return
 
