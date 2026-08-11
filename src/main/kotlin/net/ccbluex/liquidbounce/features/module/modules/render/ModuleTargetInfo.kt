@@ -37,6 +37,9 @@ import kotlin.math.exp
 import kotlin.math.roundToInt
 
 object ModuleTargetInfo : ClientModule("TargetInfo", ModuleCategories.RENDER) {
+init {
+    enabled = true
+}
 
     /* ============================= 可调节项 ============================= */
 
@@ -81,7 +84,7 @@ object ModuleTargetInfo : ClientModule("TargetInfo", ModuleCategories.RENDER) {
     private val accentColor2 by color("Accent Color 2", Color4b(0, 255, 170))
 
     // —— 动画 ——
-    private val animationSpeed by float("Animation Speed", 8f, 0.5f..30f)
+    private val animationSpeed by float("Animation Speed", 8f, 0.5f..40f)
     private val healthAnimSpeed by float("Health Anim Speed", 4f, 0.5f..20f)
 
     /* ============================= 内部状态 ============================= */

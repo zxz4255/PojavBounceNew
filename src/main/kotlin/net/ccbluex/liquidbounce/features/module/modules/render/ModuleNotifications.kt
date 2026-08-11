@@ -49,7 +49,9 @@ import kotlin.math.exp
 import kotlin.math.roundToInt
 
 object ModuleNotifications : ClientModule("Notifications", ModuleCategories.RENDER) {
-
+init {
+    enabled = true
+}
     /* ============================= 通知类型 ============================= */
     // 图标使用 ASCII 字符 (mc.font 保证渲染), 颜色对应 Opal 的类型色
 
@@ -87,19 +89,19 @@ object ModuleNotifications : ClientModule("Notifications", ModuleCategories.REND
     // —— 外观 ——
     private val background by boolean("Background", true)
     private val backgroundAlpha by int("Background Alpha", 128, 0..255)
-    private val backgroundRadius by int("Background Radius", 4, 0..12)
+    private val backgroundRadius by int("Background Radius", 2, 0..12)
     private val border by boolean("Border", false)
     private val showIcon by boolean("Show Icon", true)
     private val iconBackground by boolean("Icon Background", true)
     private val showProgressBar by boolean("Show Progress Bar", true)
-    private val progressBarHeight by int("Progress Bar Height", 4, 1..8)
+    private val progressBarHeight by int("Progress Bar Height", 3, 1..8)
     private val titleColor by color("Title Color", Color4b.WHITE)
     private val descriptionColor by color("Description Color", Color4b(170, 170, 170))
     private val textShadow by boolean("Text Shadow", true)
 
     // —— 动画 / 时长 ——
-    private val animationSpeed by float("Animation Speed", 8f, 0.5f..30f)
-    private val defaultDuration by int("Default Duration", 3000, 500..10000)  // 毫秒
+    private val animationSpeed by float("Animation Speed", 20f, 0.5f..40f)
+    private val defaultDuration by int("Default Duration", 2000, 500..10000)  // 毫秒
     private val welcomeNotification by boolean("Welcome Notification", true)   // 启用时发送欢迎通知
 
     // —— 模块开关通知 ——

@@ -203,14 +203,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
         val isSearching = searchText.isNotEmpty()
 
-        // 首次加载布局
-        if (isFirstLoad) {
-            val saved = loadLayout()
-            // 先创建面板，再应用保存的位置（在面板创建后再应用，因为此时 panels 可能还未填充）
-            // 我们将在面板列表构建完成后应用，所以这里先保存到临时变量，后面使用
-            // 这里只标记，实际应用在 panels 构建之后
-        }
-
+        // 首次加载：先读取缓存坐标
+        val savedLayout = if (isFirstLoad) loadLayout() else emptyMap()
         // 计算面板布局
         val targetPanels = mutableListOf<PanelData>()
 
@@ -237,39 +231,36 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 val panelX = startX + (panelW + PANEL_GAP) * idx
                 val existingPanel = panels.find { it.category == cat }
                 if (existingPanel != null) {
+                    // 首次加载时应用缓存坐标
+                    if (isFirstLoad) {
+                        savedLayout[cat.tag]?.let {
+                            existingPanel.x = it.first.toFloat()
+                            existingPanel.y = it.second.toFloat()
+                            existingPanel.collapsed = it.third
+                        }
+                    }
                     existingPanel.w = panelW
                     existingPanel.h = panelH
                     targetPanels.add(existingPanel)
                 } else {
-                    // 创建新面板，位置稍后会被缓存覆盖
+                    // 创建新面板，优先使用缓存坐标
+                    val saved = savedLayout[cat.tag]
+                    val savedX = saved?.first?.toFloat() ?: panelX
+                    val savedY = saved?.second?.toFloat() ?: panelY
+                    val savedCollapsed = saved?.third ?: false
                     val newPanel = PanelData(
                         cat,
-                        panelX,
-                        panelY,
+                        savedX,
+                        savedY,
                         panelW, panelH,
-                        collapsed = false
+                        collapsed = savedCollapsed
                     )
                     targetPanels.add(newPanel)
                 }
             }
             panels.removeAll { targetPanels.contains(it).not() && it.category != null }
             panels = targetPanels
-        }
-
-        // 加载缓存到已创建的面板（首次加载）
-        if (isFirstLoad) {
-            val saved = loadLayout()
-            for (panel in panels) {
-                val tag = panel.category?.tag
-                if (tag != null) {
-                    saved[tag]?.let { (x, y, collapsed) ->
-                        panel.x = x.toFloat()
-                        panel.y = y.toFloat()
-                        panel.collapsed = collapsed
-                    }
-                }
-            }
-            isFirstLoad = false
+            if (isFirstLoad) isFirstLoad = false
         }
 
         // 绘制面板循环
