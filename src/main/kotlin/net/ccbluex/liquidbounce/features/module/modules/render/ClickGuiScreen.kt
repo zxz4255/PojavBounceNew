@@ -42,6 +42,9 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     private val SCROLL_THUMB = 0x44FFFFFF.toInt()
     private val SCROLL_THUMB_HOVER = 0x80FFFFFF.toInt()
     private val EXPANDED_BG = 0x0A56B4E9.toInt()
+    private val GROUP_BG = 0x1456B4E9.toInt()      // 组头背景 (ACCENT 8%)
+    private val GROUP_LINE = 0x1856B4E9.toInt()    // 子项层级竖线
+    private val SETTING_CHILD_BG = 0x06FFFFFF.toInt() // 子项浅色背景
     private val OVERLAY = 0x20000000
     private val SETTING_BG = 0x60080810.toInt()
 
@@ -203,8 +206,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
         val isSearching = searchText.isNotEmpty()
 
-        // 首次加载：先读取缓存坐标
-        val savedLayout = if (isFirstLoad) loadLayout() else emptyMap()
+        // 首次加载：先读取缓存状态 (面板坐标/折叠/滚动 + 展开模块 + 折叠分组)
+        val savedLayout = if (isFirstLoad) loadLayout() else LayoutState(emptyMap(), null, emptyList())
         // 计算面板布局
         val targetPanels = mutableListOf<PanelData>()
 
@@ -231,12 +234,14 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 val panelX = startX + (panelW + PANEL_GAP) * idx
                 val existingPanel = panels.find { it.category == cat }
                 if (existingPanel != null) {
-                    // 首次加载时应用缓存坐标
+                    // 首次加载时应用缓存坐标/滚动/折叠
                     if (isFirstLoad) {
-                        savedLayout[cat.tag]?.let {
-                            existingPanel.x = it.first.toFloat()
-                            existingPanel.y = it.second.toFloat()
-                            existingPanel.collapsed = it.third
+                        savedLayout.panels[cat.tag]?.let {
+                            existingPanel.x = it.x.toFloat()
+                            existingPanel.y = it.y.toFloat()
+                            existingPanel.collapsed = it.collapsed
+                            existingPanel.targetScroll = it.scroll
+                            existingPanel.scrollOffset = it.scroll
                         }
                     }
                     existingPanel.w = panelW
@@ -244,10 +249,10 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     targetPanels.add(existingPanel)
                 } else {
                     // 创建新面板，优先使用缓存坐标
-                    val saved = savedLayout[cat.tag]
-                    val savedX = saved?.first?.toFloat() ?: panelX
-                    val savedY = saved?.second?.toFloat() ?: panelY
-                    val savedCollapsed = saved?.third ?: false
+                    val saved = savedLayout.panels[cat.tag]
+                    val savedX = saved?.x?.toFloat() ?: panelX
+                    val savedY = saved?.y?.toFloat() ?: panelY
+                    val savedCollapsed = saved?.collapsed ?: false
                     val newPanel = PanelData(
                         cat,
                         savedX,
@@ -255,12 +260,32 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                         panelW, panelH,
                         collapsed = savedCollapsed
                     )
+                    newPanel.targetScroll = saved?.scroll ?: 0f
+                    newPanel.scrollOffset = newPanel.targetScroll
                     targetPanels.add(newPanel)
                 }
             }
             panels.removeAll { targetPanels.contains(it).not() && it.category != null }
             panels = targetPanels
-            if (isFirstLoad) isFirstLoad = false
+            if (isFirstLoad) {
+                // 恢复展开的模块
+                savedLayout.expandedModule?.let { name ->
+                    expandedModule = ModuleManager.getModuleByName(name)
+                }
+                // 恢复折叠的分组 ("模块名:分组名")
+                for (key in savedLayout.collapsedGroups) {
+                    val idx = key.indexOf(':')
+                    if (idx <= 0) continue
+                    val mod = ModuleManager.getModuleByName(key.substring(0, idx)) ?: continue
+                    val groupName = key.substring(idx + 1)
+                    for ((v, _) in getVisibleValues(mod)) {
+                        if (v.name == groupName && isGroupValue(v)) {
+                            collapsedGroups.add(v)
+                        }
+                    }
+                }
+                isFirstLoad = false
+            }
         }
 
         // 绘制面板循环
@@ -382,6 +407,52 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         }
     }
 
+    // ==================== 滑条布局计算 ====================
+    /**
+     * 滑条 + 数值的布局: 数值右对齐面板右边界, 滑条紧贴数值左侧。
+     * 渲染 / 点击 / 拖动统一使用, 保证滑条与数值不超出面板。
+     */
+    private data class SliderLayout(
+        val sliderX: Int,
+        val sliderW: Int,
+        val valText: String,
+        val valX: Int,
+        val fv: Float,
+        val minV: Float,
+        val maxV: Float
+    )
+
+    private fun computeSliderLayout(
+        font: Font,
+        v: Value<*>,
+        actual: Any?,
+        x: Float, w: Float, indent: Float
+    ): SliderLayout {
+        var fv = 0f
+        var minV = 0f
+        var maxV = 100f
+        if (actual is Number) {
+            fv = actual.toFloat()
+            if (v is RangedValue<*>) {
+                minV = (v.range.start as? Number)?.toFloat() ?: 0f
+                maxV = (v.range.endInclusive as? Number)?.toFloat() ?: 100f
+            }
+        }
+
+        val rightEdge = (x + w - 2).toInt()               // 面板内容右边界 (留 2px)
+        val sliderW = 36
+        // 滑条左侧不能压过 label 区域 (label 起点 + 名字最小宽度)
+        val minSliderX = (x + 6 + indent).toInt() + 40
+        // 数值可用宽度 (右边界 - 滑条区域), 面板过窄时收缩数值文本
+        val maxValW = (rightEdge - minSliderX - 3 - sliderW).coerceIn(16, 70)
+        val valText = trimText(font, "%.1f".format(fv), maxValW)
+        val valW = font.width(valText).coerceAtMost(maxValW)
+        val valX = rightEdge - valW                       // 数值右对齐
+        val sliderX = valX - 3 - sliderW                  // 滑条紧贴数值左侧
+
+        return SliderLayout(sliderX, sliderW, valText, valX, fv, minV, maxV)
+    }
+
     // ==================== Setting row renderer ====================
     private fun renderSetting(
         ctx: GuiGraphicsExtractor, v: Value<*>, depth: Int,
@@ -390,6 +461,14 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     ) {
         val font = minecraft!!.font
         val indent = depth * SETTING_INDENT
+
+        // 子项视觉: 浅色背景 + 左侧层级竖线 (depth > 0), 强化分组层次
+        if (depth > 0) {
+            fillRect(ctx, x, y, x + w, y + SETTING_H, SETTING_CHILD_BG)
+            val lineX = (x + 4f + indent).toInt()
+            fillRect(ctx, lineX, y.toInt() + 1, lineX + 1, y.toInt() + SETTING_H.toInt() - 1, GROUP_LINE)
+        }
+
         val actual = getActualValue(v)
         val isGroup = isGroupValue(v)
         val labelX = (x + 6 + indent).toInt()
@@ -426,8 +505,12 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             isGroup -> {
                 val isCollapsed = collapsedGroups.contains(v)
                 val arrow = if (isCollapsed) "▶" else "▼"
-                drawText(ctx, font, "$arrow ${trimText(font, v.name, labelMaxW)}",
-                    labelX, (y + 5f).toInt(), TEXT)
+                // 组头背景色块, 强化分组视觉
+                fillRect(ctx, x, y, x + w, y + SETTING_H, GROUP_BG)
+                // 组名使用高亮色, 全宽显示 (不受右侧值区域限制)
+                val groupMaxW = (w - 16 - indent).toInt().coerceAtLeast(10)
+                drawText(ctx, font, "$arrow ${trimText(font, v.name, groupMaxW)}",
+                    labelX, (y + 5f).toInt(), if (isCollapsed) TEXT_DIM else ACCENT)
             }
             actual is Boolean -> {
                 drawText(ctx, font, trimText(font, v.name, labelMaxW),
@@ -447,27 +530,18 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 drawText(ctx, font, trimText(font, v.name, labelMaxW),
                     labelX, (y + 3f).toInt(), TEXT_DIM)
 
-                var fv = 0f; var minV = 0f; var maxV = 100f
-                if (actual is Number) {
-                    fv = actual.toFloat()
-                    if (v is RangedValue<*>) {
-                        minV = (v.range.start as? Number)?.toFloat() ?: 0f
-                        maxV = (v.range.endInclusive as? Number)?.toFloat() ?: 100f
-                    }
-                }
-
-                val sliderW = 36
-                val sliderX = valueX
+                val layout = computeSliderLayout(font, v, actual, x, w, indent)
                 val sliderY = y.toInt() + 8
-                val progress = if (maxV > minV) ((fv - minV) / (maxV - minV)).coerceIn(0f, 1f) else 0f
+                val progress = if (layout.maxV > layout.minV) {
+                    ((layout.fv - layout.minV) / (layout.maxV - layout.minV)).coerceIn(0f, 1f)
+                } else 0f
 
-                fillRect(ctx, sliderX, sliderY, sliderX + sliderW, sliderY + 2, 0x30FFFFFF.toInt())
-                fillRect(ctx, sliderX, sliderY, sliderX + (sliderW * progress).toInt(), sliderY + 2, ACCENT)
-                fillRect(ctx, sliderX + (sliderW * progress).toInt() - 1, sliderY - 1,
-                    sliderX + (sliderW * progress).toInt() + 1, sliderY + 3, TEXT_BRIGHT)
+                fillRect(ctx, layout.sliderX, sliderY, layout.sliderX + layout.sliderW, sliderY + 2, 0x30FFFFFF.toInt())
+                fillRect(ctx, layout.sliderX, sliderY, layout.sliderX + (layout.sliderW * progress).toInt(), sliderY + 2, ACCENT)
+                fillRect(ctx, layout.sliderX + (layout.sliderW * progress).toInt() - 1, sliderY - 1,
+                    layout.sliderX + (layout.sliderW * progress).toInt() + 1, sliderY + 3, TEXT_BRIGHT)
 
-                val valText = trimText(font, "%.1f".format(fv), (w - 70 - indent).toInt())
-                drawText(ctx, font, valText, sliderX + sliderW + 3, (y + 3f).toInt(), TEXT_DIM)
+                drawText(ctx, font, layout.valText, layout.valX, (y + 3f).toInt(), TEXT_DIM)
             }
             isColorValue(v) -> {
                 drawText(ctx, font, trimText(font, v.name, labelMaxW),
@@ -632,7 +706,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                                     return true
                                 }
                             }
-                            handleSettingClick(v, btn, mx.toFloat(), curY, listAreaW, listAreaX, panel)
+                            handleSettingClick(v, btn, mx.toFloat(), curY, listAreaW, listAreaX, panel, depth * SETTING_INDENT)
                             return true
                         }
                         curY += SETTING_H
@@ -770,7 +844,10 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     }
 
     // ==================== 设置点击处理 ====================
-    private fun handleSettingClick(v: Value<*>, btn: Int, mx: Float, y: Float, w: Float, x: Float, panel: PanelData) {
+    private fun handleSettingClick(
+        v: Value<*>, btn: Int, mx: Float, y: Float, w: Float, x: Float, panel: PanelData,
+        indent: Float = 0f
+    ) {
         if (btn != 0) return
         val actual = getActualValue(v) ?: return
 
@@ -791,18 +868,13 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         }
 
         if (isSliderValue(v)) {
-            val valueX = (x + w - 44).toInt()
-            val sliderW = 36
-            val hitStart = valueX - 4
-            val hitEnd = valueX + sliderW + 4
+            val font = minecraft!!.font
+            val layout = computeSliderLayout(font, v, actual, x, w, indent)
+            val hitStart = layout.sliderX - 4
+            val hitEnd = layout.sliderX + layout.sliderW + 4
             if (mx.toInt() in hitStart..hitEnd) {
-                var minV = 0f; var maxV = 100f
-                if (actual is Number && v is RangedValue<*>) {
-                    minV = (v.range.start as? Number)?.toFloat() ?: 0f
-                    maxV = (v.range.endInclusive as? Number)?.toFloat() ?: 100f
-                }
-                val progress = ((mx.toInt() - valueX).toFloat() / sliderW).coerceIn(0f, 1f)
-                val newValue = minV + (maxV - minV) * progress
+                val progress = ((mx.toInt() - layout.sliderX).toFloat() / layout.sliderW).coerceIn(0f, 1f)
+                val newValue = layout.minV + (layout.maxV - layout.minV) * progress
 
                 when (actual) {
                     is Float -> trySetValue(v, newValue)
@@ -814,11 +886,11 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 sliderContext = SliderContext(
                     value = v,
                     panel = panel,
-                    sliderX = valueX,
+                    sliderX = layout.sliderX,
                     sliderY = y.toInt() + 8,
-                    sliderW = sliderW,
-                    min = minV,
-                    max = maxV
+                    sliderW = layout.sliderW,
+                    min = layout.minV,
+                    max = layout.maxV
                 )
             }
         }
@@ -1142,34 +1214,87 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         return File(minecraft?.gameDirectory ?: File("."), "config/liquidbounce_clickgui_panels.json")
     }
 
+    // ==================== UI 状态缓存数据结构 ====================
+    private data class PanelState(val x: Int, val y: Int, val collapsed: Boolean, val scroll: Float)
+
+    private data class LayoutState(
+        val panels: Map<String, PanelState>,
+        val expandedModule: String?,
+        val collapsedGroups: List<String>
+    )
+
+    /**
+     * 保存完整 UI 状态:
+     *   - 各面板坐标 / 折叠 / 滚动位置
+     *   - 当前展开的模块
+     *   - 所有折叠的分组 ("模块名:分组名")
+     * 文件格式: {"panels":[{...}],"expanded":"...","groups":["..."]}
+     */
     private fun saveLayout() {
         try {
-            val sb = StringBuilder()
-            sb.append("[")
-            val parts = panels.filter { it.category != null }.map { p ->
+            val panelsJson = panels.filter { it.category != null }.joinToString(",") { p ->
                 val tag = p.category?.tag ?: ""
-                "{\"tag\":\"$tag\",\"x\":${p.x.toInt()},\"y\":${p.y.toInt()},\"collapsed\":${p.collapsed}}"
+                """{"tag":"$tag","x":${p.x.toInt()},"y":${p.y.toInt()},"collapsed":${p.collapsed},"scroll":${p.scrollOffset}}"""
             }
-            sb.append(parts.joinToString(","))
-            sb.append("]")
+
+            val expandedName = expandedModule?.name ?: ""
+            val groups = mutableListOf<String>()
+            for (mod in ModuleManager.getModules()) {
+                for ((v, _) in getVisibleValues(mod)) {
+                    if (collapsedGroups.contains(v)) {
+                        groups += "${mod.name}:${v.name}"
+                    }
+                }
+            }
+            val groupsJson = groups.joinToString(",") { "\"$it\"" }
+
+            val sb = StringBuilder()
+            sb.append("{\"panels\":[").append(panelsJson).append("],")
+            sb.append("\"expanded\":\"").append(expandedName).append("\",")
+            sb.append("\"groups\":[").append(groupsJson).append("]}")
+
             val file = getLayoutFile()
             file.parentFile?.mkdirs()
             file.writeText(sb.toString())
         } catch (_: Exception) {}
     }
 
-    private fun loadLayout(): Map<String, Triple<Int, Int, Boolean>> {
+    /**
+     * 读取 UI 状态缓存。兼容旧版 (仅面板坐标) 的文件格式。
+     */
+    private fun loadLayout(): LayoutState {
         return try {
             val file = getLayoutFile()
-            if (!file.exists()) return emptyMap()
+            if (!file.exists()) return LayoutState(emptyMap(), null, emptyList())
             val content = file.readText()
-            val result = mutableMapOf<String, Triple<Int, Int, Boolean>>()
-            val regex = Regex("""\{"tag":"([^"]+)","x":(-?[0-9]+),"y":(-?[0-9]+),"collapsed":(true|false)\}""")
-            for (match in regex.findAll(content)) {
-                val (tag, x, y, collapsed) = match.destructured
-                result[tag] = Triple(x.toInt(), y.toInt(), collapsed.toBoolean())
+
+            // 面板 (scroll 为可选字段, 兼容旧格式)
+            val panels = mutableMapOf<String, PanelState>()
+            val panelRegex = Regex(
+                """\{"tag":"([^"]+)","x":(-?[0-9]+),"y":(-?[0-9]+),"collapsed":(true|false)(,"scroll":(-?[0-9.]+))?\}"""
+            )
+            for (match in panelRegex.findAll(content)) {
+                val tag = match.groupValues[1]
+                val x = match.groupValues[2].toInt()
+                val y = match.groupValues[3].toInt()
+                val collapsed = match.groupValues[4].toBoolean()
+                val scroll = match.groupValues[6].takeIf { it.isNotEmpty() }?.toFloat() ?: 0f
+                panels[tag] = PanelState(x, y, collapsed, scroll)
             }
-            result
-        } catch (_: Exception) { emptyMap() }
+
+            // 展开的模块
+            val expanded = Regex(""""expanded":"([^"]*)"""").find(content)
+                ?.groupValues?.get(1)?.takeIf { it.isNotEmpty() }
+
+            // 折叠的分组
+            val groups = mutableListOf<String>()
+            Regex(""""groups":\[(.*?)\]""").find(content)?.groupValues?.get(1)?.let { gs ->
+                Regex(""""([^"]+)"""").findAll(gs).forEach { groups.add(it.groupValues[1]) }
+            }
+
+            LayoutState(panels, expanded, groups)
+        } catch (_: Exception) {
+            LayoutState(emptyMap(), null, emptyList())
+        }
     }
 }
