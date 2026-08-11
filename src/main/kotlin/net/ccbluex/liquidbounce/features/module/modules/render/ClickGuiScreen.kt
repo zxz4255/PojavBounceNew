@@ -26,11 +26,11 @@ import java.io.File
  */
 class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
-    // ==================== Colors (大幅降低透明度，按用户表格修改) ====================
+    // ==================== Colors (降低透明度) ====================
     private val ACCENT = 0xFF56B4E9.toInt()
     private val ACCENT_DARK = 0xFF3A7CA5.toInt()
-    private val BG = 0x90101014.toInt()               // 面板背景从 0xB0 → 0x90 (56%)
-    private val PANEL_BG = 0xA816161A.toInt()         // 面板内部从 0xCC → 0xA8 (66%)
+    private val BG = 0x80101014.toInt()          // 面板背景降低至 0x80 (50%)
+    private val PANEL_BG = 0x9016161A.toInt()     // 面板内部降低至 0x90 (56%)
     private val TAB_BG = 0x8025252E.toInt()
     private val TAB_ACTIVE = 0xFF33333D.toInt()
     private val TEXT = 0xFFE8E8E8.toInt()
@@ -47,8 +47,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
     // ==================== Layout ====================
     private val CORNER = 4f
-    private val ITEM_H = 16f
-    private val SETTING_H = 16f
+    private val ITEM_H = 18f
+    private val SETTING_H = 18f
     private val SCROLL_W = 4f
     private val PADDING = 5f
     private val SETTING_INDENT = 8f
@@ -77,8 +77,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     private val collapsedGroups = mutableSetOf<Value<*>>()
 
     private var fadeAnim = 0f
-    private var isFirstLoad = true
-    private var savedLayout: Map<String, Triple<Float, Float, Boolean>>? = null // 缓存加载的布局
+    private var isFirstLoad = true   // 标记首次加载，用于读取缓存
 
     private val categories = ModuleCategories.entries.toList()
 
@@ -206,8 +205,10 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
         // 首次加载布局
         if (isFirstLoad) {
-            savedLayout = loadLayout()
-            isFirstLoad = false
+            val saved = loadLayout()
+            // 先创建面板，再应用保存的位置（在面板创建后再应用，因为此时 panels 可能还未填充）
+            // 我们将在面板列表构建完成后应用，所以这里先保存到临时变量，后面使用
+            // 这里只标记，实际应用在 panels 构建之后
         }
 
         // 计算面板布局
@@ -240,20 +241,35 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     existingPanel.h = panelH
                     targetPanels.add(existingPanel)
                 } else {
-                    // 创建新面板，若已保存布局则使用保存的位置
-                    val saved = savedLayout?.get(cat.tag)
+                    // 创建新面板，位置稍后会被缓存覆盖
                     val newPanel = PanelData(
                         cat,
-                        saved?.first ?: panelX,
-                        saved?.second ?: panelY,
+                        panelX,
+                        panelY,
                         panelW, panelH,
-                        collapsed = saved?.third ?: false
+                        collapsed = false
                     )
                     targetPanels.add(newPanel)
                 }
             }
             panels.removeAll { targetPanels.contains(it).not() && it.category != null }
             panels = targetPanels
+        }
+
+        // 加载缓存到已创建的面板（首次加载）
+        if (isFirstLoad) {
+            val saved = loadLayout()
+            for (panel in panels) {
+                val tag = panel.category?.tag
+                if (tag != null) {
+                    saved[tag]?.let { (x, y, collapsed) ->
+                        panel.x = x.toFloat()
+                        panel.y = y.toFloat()
+                        panel.collapsed = collapsed
+                    }
+                }
+            }
+            isFirstLoad = false
         }
 
         // 绘制面板循环
@@ -621,7 +637,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                                     (actual.javaClass.enumConstants?.toList() ?: emptyList()) as List<Any>
                                 } catch (_: Exception) { emptyList() }
                                 if (constants.size >= 2) {
-                                    // 【修复】调用新版 handleModeClick，传入 x, w, indent（这里 indent = 8f 为默认）
                                     handleModeClick(v, mx.toFloat(), listAreaX, listAreaW, 8f, constants, actual)
                                     return true
                                 }
@@ -706,7 +721,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             val minV = context.min
             val maxV = context.max
 
-            // 【修复】使用 coerceIn 确保进度在 0~1 之间，即使鼠标移出滑块区域也能正常更新
             val progress = ((mx.toInt() - valueX).toFloat() / sliderW).coerceIn(0f, 1f)
             val newValue = minV + (maxV - minV) * progress
 
@@ -788,7 +802,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         if (isSliderValue(v)) {
             val valueX = (x + w - 44).toInt()
             val sliderW = 36
-            // 【修复】扩大点击命中区域 4px，方便点击值为 0 的滑块
             val hitStart = valueX - 4
             val hitEnd = valueX + sliderW + 4
             if (mx.toInt() in hitStart..hitEnd) {
@@ -816,7 +829,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     min = minV,
                     max = maxV
                 )
-                // 不需要额外 return，函数结束即可
             }
         }
     }
@@ -928,6 +940,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         saveLayout()
         setScreenCompat(null)
         fadeAnim = 0f
+        isFirstLoad = true   // 下次打开重新加载缓存
     }
 
     // ==========================================================
@@ -1133,9 +1146,9 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         return actual.toString().take(15)
     }
 
-    // ==================== 位置缓存 ====================
+    // ==================== 面板位置缓存 ====================
     private fun getLayoutFile(): File {
-        return File(minecraft?.gameDirectory ?: File("."), "config/clickgui_layout.json")
+        return File(minecraft?.gameDirectory ?: File("."), "config/liquidbounce_clickgui_panels.json")
     }
 
     private fun saveLayout() {
@@ -1144,7 +1157,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             sb.append("[")
             val parts = panels.filter { it.category != null }.map { p ->
                 val tag = p.category?.tag ?: ""
-                "{\"tag\":\"$tag\",\"x\":${p.x},\"y\":${p.y},\"collapsed\":${p.collapsed}}"
+                "{\"tag\":\"$tag\",\"x\":${p.x.toInt()},\"y\":${p.y.toInt()},\"collapsed\":${p.collapsed}}"
             }
             sb.append(parts.joinToString(","))
             sb.append("]")
@@ -1154,16 +1167,16 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         } catch (_: Exception) {}
     }
 
-    private fun loadLayout(): Map<String, Triple<Float, Float, Boolean>> {
+    private fun loadLayout(): Map<String, Triple<Int, Int, Boolean>> {
         return try {
             val file = getLayoutFile()
             if (!file.exists()) return emptyMap()
             val content = file.readText()
-            val result = mutableMapOf<String, Triple<Float, Float, Boolean>>()
-            val regex = Regex("""\{"tag":"([^"]+)","x":([0-9.-]+),"y":([0-9.-]+),"collapsed":(true|false)\}""")
+            val result = mutableMapOf<String, Triple<Int, Int, Boolean>>()
+            val regex = Regex("""\{"tag":"([^"]+)","x":(-?[0-9]+),"y":(-?[0-9]+),"collapsed":(true|false)\}""")
             for (match in regex.findAll(content)) {
                 val (tag, x, y, collapsed) = match.destructured
-                result[tag] = Triple(x.toFloat(), y.toFloat(), collapsed.toBoolean())
+                result[tag] = Triple(x.toInt(), y.toInt(), collapsed.toBoolean())
             }
             result
         } catch (_: Exception) { emptyMap() }
