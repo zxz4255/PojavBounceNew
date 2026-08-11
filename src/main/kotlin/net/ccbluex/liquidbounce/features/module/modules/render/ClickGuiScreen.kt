@@ -6,6 +6,7 @@ import net.ccbluex.liquidbounce.features.module.ClientModule
 import net.ccbluex.liquidbounce.features.module.ModuleCategory
 import net.ccbluex.liquidbounce.features.module.ModuleCategories
 import net.ccbluex.liquidbounce.features.module.ModuleManager
+import net.ccbluex.liquidbounce.render.engine.type.Color4b
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.gui.Font
 import net.minecraft.client.gui.GuiGraphicsExtractor
@@ -78,6 +79,33 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     private var searchFocused = false
     private var listeningValue: Value<*>? = null
     private val collapsedGroups = mutableSetOf<Value<*>>()
+
+    // ==================== 调色板 (color 选项) ====================
+    private var activeColorValue: Value<*>? = null      // 当前打开的调色板对应的 Value
+    private var colorPickerX = 0f
+    private var colorPickerY = 0f
+    private val PALETTE_ROWS = 9
+    private val PALETTE_COLS = 5
+    private val PALETTE_CELL = 10f
+    private val PALETTE_GAP = 2f
+    private val PALETTE_PAD = 4f
+    private val PALETTE_W = PALETTE_COLS * (PALETTE_CELL + PALETTE_GAP) - PALETTE_GAP + PALETTE_PAD * 2
+    private val PALETTE_H = PALETTE_ROWS * (PALETTE_CELL + PALETTE_GAP) - PALETTE_GAP + PALETTE_PAD * 2
+
+    /** 预生成调色板: 8 行色相 × 5 档亮度 + 1 行灰阶 = 45 色 */
+    private val paletteColors: List<Color4b> = buildList {
+        for (row in 0 until 8) {
+            val hue = row * 45f / 360f
+            for (col in 0 until 5) {
+                val brightness = 0.95f - col * 0.2f
+                add(Color4b.ofHSB(hue, 0.9f, brightness))
+            }
+        }
+        for (col in 0 until 5) {
+            val brightness = 0.95f - col * 0.2f
+            add(Color4b.ofHSB(0f, 0f, brightness))
+        }
+    }
 
     private var fadeAnim = 0f
     private var isFirstLoad = true   // 标记首次加载，用于读取缓存
@@ -405,6 +433,40 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 if (blink) fillRect(ctx, cursorX, searchY.toInt() + 2, cursorX + 1, searchY.toInt() + 14, TEXT_BRIGHT)
             }
         }
+
+        // ==================== 调色板 (color 选项) ====================
+        val colorVal = activeColorValue
+        if (colorVal != null) {
+            val px = colorPickerX.coerceIn(0f, sc - PALETTE_W)
+            val py = colorPickerY.coerceIn(0f, sh - PALETTE_H)
+
+            // 背景 + 边框
+            drawRoundedRect(ctx, px, py, PALETTE_W, PALETTE_H, 4f, BG)
+            fillRect(ctx, px.toInt(), py.toInt(), (px + PALETTE_W).toInt(), py.toInt() + 1, SCROLL_THUMB)
+            fillRect(ctx, px.toInt(), (py + PALETTE_H - 1).toInt(), (px + PALETTE_W).toInt(), (py + PALETTE_H).toInt(), SCROLL_THUMB)
+            fillRect(ctx, px.toInt(), py.toInt(), px.toInt() + 1, (py + PALETTE_H).toInt(), SCROLL_THUMB)
+            fillRect(ctx, (px + PALETTE_W - 1).toInt(), py.toInt(), (px + PALETTE_W).toInt(), (py + PALETTE_H).toInt(), SCROLL_THUMB)
+
+            // 当前颜色 (用于高亮匹配)
+            val currentRgb = extractColor(colorVal).rgb and 0xFFFFFF
+
+            // 色格网格
+            for (index in paletteColors.indices) {
+                val row = index / PALETTE_COLS
+                val col = index % PALETTE_COLS
+                val cx = px + PALETTE_PAD + col * (PALETTE_CELL + PALETTE_GAP)
+                val cy = py + PALETTE_PAD + row * (PALETTE_CELL + PALETTE_GAP)
+                val color4b = paletteColors[index]
+                fillRect(ctx, cx.toInt(), cy.toInt(), (cx + PALETTE_CELL).toInt(), (cy + PALETTE_CELL).toInt(), color4b.argb)
+                // 当前颜色对应的色格加白色高亮边框
+                if ((color4b.argb and 0xFFFFFF) == currentRgb) {
+                    fillRect(ctx, (cx - 1).toInt(), (cy - 1).toInt(), (cx + PALETTE_CELL + 1).toInt(), cy.toInt(), TEXT_BRIGHT)
+                    fillRect(ctx, (cx - 1).toInt(), (cy + PALETTE_CELL).toInt(), (cx + PALETTE_CELL + 1).toInt(), (cy + PALETTE_CELL + 1).toInt(), TEXT_BRIGHT)
+                    fillRect(ctx, (cx - 1).toInt(), (cy - 1).toInt(), cx.toInt(), (cy + PALETTE_CELL + 1).toInt(), TEXT_BRIGHT)
+                    fillRect(ctx, (cx + PALETTE_CELL).toInt(), (cy - 1).toInt(), (cx + PALETTE_CELL + 1).toInt(), (cy + PALETTE_CELL + 1).toInt(), TEXT_BRIGHT)
+                }
+            }
+        }
     }
 
     // ==================== 滑条布局计算 ====================
@@ -548,6 +610,13 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     labelX, (y + 5f).toInt(), TEXT_DIM)
                 val color = extractColor(v)
                 fillRect(ctx, valueX, y.toInt() + 4, valueX + 10, y.toInt() + 14, color.rgb)
+                // 调色板打开时给颜色块加白色激活边框
+                if (activeColorValue == v) {
+                    fillRect(ctx, valueX - 1, y.toInt() + 3, valueX + 11, y.toInt() + 4, TEXT_BRIGHT)
+                    fillRect(ctx, valueX - 1, y.toInt() + 14, valueX + 11, y.toInt() + 15, TEXT_BRIGHT)
+                    fillRect(ctx, valueX - 1, y.toInt() + 3, valueX, y.toInt() + 15, TEXT_BRIGHT)
+                    fillRect(ctx, valueX + 10, y.toInt() + 3, valueX + 11, y.toInt() + 15, TEXT_BRIGHT)
+                }
             }
             else -> {
                 drawText(ctx, font, trimText(font, v.name, labelMaxW),
@@ -620,6 +689,27 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             return true
         }
         searchFocused = false
+
+        // 调色板点击优先 (最上层)
+        val colorVal = activeColorValue
+        if (colorVal != null) {
+            val px = colorPickerX.coerceIn(0f, sc - PALETTE_W)
+            val py = colorPickerY.coerceIn(0f, sh - PALETTE_H)
+            if (mx in px.toInt()..(px + PALETTE_W).toInt() &&
+                my in py.toInt()..(py + PALETTE_H).toInt()) {
+                // 点击色格 → 选择颜色
+                val col = ((mx - px - PALETTE_PAD) / (PALETTE_CELL + PALETTE_GAP)).toInt()
+                val row = ((my - py - PALETTE_PAD) / (PALETTE_CELL + PALETTE_GAP)).toInt()
+                val index = row * PALETTE_COLS + col
+                if (index in paletteColors.indices) {
+                    trySetValue(colorVal, paletteColors[index])
+                    activeColorValue = null
+                }
+                return true
+            }
+            // 点击调色板外部 → 关闭
+            activeColorValue = null
+        }
 
         var targetPanel: PanelData? = null
         for (panel in panels) {
@@ -867,6 +957,19 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             return
         }
 
+        if (isColorValue(v)) {
+            // 点击颜色块 → 切换调色板显示
+            if (activeColorValue == v) {
+                activeColorValue = null
+            } else {
+                activeColorValue = v
+                // 调色板定位在颜色块下方 (渲染时 clamp 到屏幕内)
+                colorPickerX = x + w - PALETTE_W - 2f
+                colorPickerY = y + SETTING_H + 2f
+            }
+            return
+        }
+
         if (isSliderValue(v)) {
             val font = minecraft!!.font
             val layout = computeSliderLayout(font, v, actual, x, w, indent)
@@ -1004,6 +1107,14 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         setScreenCompat(null)
         fadeAnim = 0f
         isFirstLoad = true   // 下次打开重新加载缓存
+    }
+
+    /**
+     * 屏幕被替换/关闭时必定调用 (ESC 的 onClose 路径 与 右 Shift 的 setScreen(null) 路径都会触发)。
+     * 保证无论以何种方式关闭 ClickGUI, UI 状态都会被保存。
+     */
+    override fun removed() {
+        saveLayout()
     }
 
     // ==========================================================
@@ -1181,6 +1292,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     private fun extractColor(v: Value<*>): Color {
         val actual = getActualValue(v) ?: return Color.WHITE
         if (actual is Color) return actual
+        if (actual is Color4b) return Color(actual.argb, true)
         if (actual is Number) return Color(actual.toInt(), true)
         return Color.WHITE
     }
@@ -1232,6 +1344,10 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
      */
     private fun saveLayout() {
         try {
+            // 搜索模式下 panels 被替换为搜索面板 (category=null), 保存会清空缓存, 直接跳过
+            if (searchText.isNotEmpty()) {
+                return
+            }
             val panelsJson = panels.filter { it.category != null }.joinToString(",") { p ->
                 val tag = p.category?.tag ?: ""
                 """{"tag":"$tag","x":${p.x.toInt()},"y":${p.y.toInt()},"collapsed":${p.collapsed},"scroll":${p.scrollOffset}}"""
@@ -1239,12 +1355,16 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
             val expandedName = expandedModule?.name ?: ""
             val groups = mutableListOf<String>()
-            for (mod in ModuleManager.getModules()) {
-                for ((v, _) in getVisibleValues(mod)) {
-                    if (collapsedGroups.contains(v)) {
-                        groups += "${mod.name}:${v.name}"
+            // 分组收集独立保护: 任一模块异常不影响面板/展开状态保存
+            try {
+                for (mod in ModuleManager.getModules()) {
+                    for ((v, _) in getVisibleValues(mod)) {
+                        if (collapsedGroups.contains(v)) {
+                            groups += "${mod.name}:${v.name}"
+                        }
                     }
                 }
+            } catch (_: Exception) {
             }
             val groupsJson = groups.joinToString(",") { "\"$it\"" }
 
