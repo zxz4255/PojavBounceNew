@@ -36,6 +36,12 @@ object ModuleClickGui :
                 closeGui()
             }
         }
+        // ESC 关闭 ClickGUI（仅关闭，不打开）
+        if (event.action == 1 && event.keyCode == GLFW.GLFW_KEY_ESCAPE) {
+            if (mc.gui.screen() is ClickGuiScreen) {
+                closeGui()
+             }
+         }
     }
 
     // 从模块列表启用 ClickGUI 时立即打开 (用 enabledEffect 替代不存在的 onEnabled)
