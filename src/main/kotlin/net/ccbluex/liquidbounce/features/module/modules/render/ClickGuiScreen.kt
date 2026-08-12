@@ -1218,3 +1218,71 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         if (actual is Boolean) return if (actual) "ON" else "OFF"
         return actual.toString().take(15)
     }
+
+    // ==================== 面板位置缓存 ====================
+    private fun getLayoutFile(): File {
+        return File(minecraft?.gameDirectory ?: File("."), "config/liquidbounce_clickgui_panels.json")
+    }
+
+    private data class PanelState(val x: Int, val y: Int, val collapsed: Boolean, val scroll: Float)
+    private data class LayoutState(
+        val panels: Map<String, PanelState>,
+        val expandedModule: String?,
+        val collapsedGroups: List<String>
+    )
+
+    private fun saveLayout() {
+        try {
+            if (searchText.isNotEmpty()) return
+            val panelsJson = panels.filter { it.category != null }.joinToString(",") { p ->
+                val tag = p.category?.tag ?: ""
+                """{"tag":"$tag","x":${p.x.toInt()},"y":${p.y.toInt()},"collapsed":${p.collapsed},"scroll":${p.scrollOffset}}"""
+            }
+            val expandedName = expandedModule?.name ?: ""
+            val groups = mutableListOf<String>()
+            try {
+                for (mod in ModuleManager.getModules()) {
+                    for ((v, _) in getVisibleValues(mod)) {
+                        if (collapsedGroups.contains(v)) groups += "${mod.name}:${v.name}"
+                    }
+                }
+            } catch (_: Exception) { }
+            val groupsJson = groups.joinToString(",") { "\"$it\"" }
+            val sb = StringBuilder()
+            sb.append("{\"panels\":[").append(panelsJson).append("],")
+            sb.append("\"expanded\":\"").append(expandedName).append("\",")
+            sb.append("\"groups\":[").append(groupsJson).append("]}")
+            val file = getLayoutFile()
+            file.parentFile?.mkdirs()
+            file.writeText(sb.toString())
+        } catch (_: Exception) {}
+    }
+
+    private fun loadLayout(): LayoutState {
+        return try {
+            val file = getLayoutFile()
+            if (!file.exists()) return LayoutState(emptyMap(), null, emptyList())
+            val content = file.readText()
+            val panels = mutableMapOf<String, PanelState>()
+            val panelRegex = Regex(
+                """\{"tag":"([^"]+)","x":(-?[0-9]+),"y":(-?[0-9]+),"collapsed":(true|false)(,"scroll":(-?[0-9.]+))?\}"""
+            )
+            for (match in panelRegex.findAll(content)) {
+                val tag = match.groupValues[1]
+                val x = match.groupValues[2].toInt()
+                val y = match.groupValues[3].toInt()
+                val collapsed = match.groupValues[4].toBoolean()
+                val scroll = match.groupValues[6].takeIf { it.isNotEmpty() }?.toFloat() ?: 0f
+                panels[tag] = PanelState(x, y, collapsed, scroll)
+            }
+            val expanded = Regex(""""expanded":"([^"]*)"""").find(content)?.groupValues?.get(1)?.takeIf { it.isNotEmpty() }
+            val groups = mutableListOf<String>()
+            Regex(""""groups":\[(.*?)\]""").find(content)?.groupValues?.get(1)?.let { gs ->
+                Regex(""""([^"]+)"""").findAll(gs).forEach { groups.add(it.groupValues[1]) }
+            }
+            LayoutState(panels, expanded, groups)
+        } catch (_: Exception) {
+            LayoutState(emptyMap(), null, emptyList())
+        }
+    }
+}
