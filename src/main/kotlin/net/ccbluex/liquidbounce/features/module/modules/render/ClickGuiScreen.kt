@@ -17,9 +17,7 @@ import net.minecraft.network.chat.Component
 import org.lwjgl.glfw.GLFW
 import java.awt.Color
 import java.util.IdentityHashMap
-import kotlin.math.cos
 import kotlin.math.max
-import kotlin.math.sin
 import java.io.File
 
 /**
@@ -28,32 +26,24 @@ import java.io.File
  */
 class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
-    // ==================== Colors (从 ModuleClickGui 动态读取) ====================
-    // 激活文字/分类标题/蓝点
+    // ==================== Colors (纯黑风 — 无蓝色) ====================
     private val ACCENT get() = ModuleClickGui.getActiveTextColor()
-    private val ACCENT_DARK get() = (ModuleClickGui.getActiveTextColor() and 0x00FFFFFF) or 0x66000000
-    // 面板背景 (颜色+不透明度来自模块设置)
-    private val BG get() = ModuleClickGui.getBgColor()
-    private val PANEL_BG get() = ModuleClickGui.getBgColor()
-    // 未激活模块名 浅灰白
-    private val TEXT get() = ModuleClickGui.getTextColor()
-    // 激活文字 天蓝
-    private val TEXT_BRIGHT get() = ModuleClickGui.getActiveTextColor()
-    // 次要文字: 从 TEXT 降低亮度
-    private val TEXT_DIM get() = 0xFF000000.toInt() or (ModuleClickGui.getTextColor() and 0x00FFFFFF)
-    private val TAB_BG = 0x8025252E.toInt()
-    private val TAB_ACTIVE = 0xFF33333D.toInt()
-    private val BORDER = 0x20FFFFFF.toInt()
-    private val HOVER = 0x15FFFFFF.toInt()
-    private val SCROLL_TRACK = 0x18FFFFFF.toInt()
-    private val SCROLL_THUMB = 0x50FFFFFF.toInt()
-    private val SCROLL_THUMB_HOVER = 0x78FFFFFF.toInt()
-    private val EXPANDED_BG = 0x0A56B4E9.toInt()
-    private val GROUP_BG = 0x0C56B4E9.toInt()
-    private val GROUP_LINE = 0x1456B4E9.toInt()
-    private val SETTING_CHILD_BG = 0x06FFFFFF.toInt()
-    private val OVERLAY = 0x28000000
-    private val SETTING_BG = 0x50080810.toInt()
+    private val BG = 0xCC0C0C14.toInt()
+    private val PANEL_BG = 0xDD10101A.toInt()
+    private val TEXT = 0xFFE0E0E0.toInt()
+    private val TEXT_BRIGHT = 0xFFFFFFFF.toInt()
+    private val TEXT_DIM = 0xFF777777.toInt()
+    private val BORDER = 0x12FFFFFF.toInt()
+    private val HOVER = 0x10FFFFFF.toInt()
+    private val SCROLL_TRACK = 0x10FFFFFF.toInt()
+    private val SCROLL_THUMB = 0x40FFFFFF.toInt()
+    private val SCROLL_THUMB_HOVER = 0x60FFFFFF.toInt()
+    private val EXPANDED_BG = 0x08FFFFFF.toInt()
+    private val GROUP_BG = 0x08FFFFFF.toInt()
+    private val GROUP_LINE = 0x10FFFFFF.toInt()
+    private val SETTING_CHILD_BG = 0x04FFFFFF.toInt()
+    private val OVERLAY = 0x30000000
+    private val SETTING_BG = 0x40080810.toInt()
 
     // ==================== Layout ====================
     private val CORNER = 5f                           // 圆角稍大, 更圆润
@@ -85,33 +75,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     private var searchFocused = false
     private var listeningValue: Value<*>? = null
     private val collapsedGroups = mutableSetOf<Value<*>>()
-
-    // ==================== 调色板 (color 选项) ====================
-    private var activeColorValue: Value<*>? = null
-    private var colorPickerX = 0f
-    private var colorPickerY = 0f
-    private val PALETTE_ROWS = 9
-    private val PALETTE_COLS = 5
-    private val PALETTE_CELL = 10f
-    private val PALETTE_GAP = 2f
-    private val PALETTE_PAD = 4f
-    private val PALETTE_W = PALETTE_COLS * (PALETTE_CELL + PALETTE_GAP) - PALETTE_GAP + PALETTE_PAD * 2
-    private val PALETTE_H = PALETTE_ROWS * (PALETTE_CELL + PALETTE_GAP) - PALETTE_GAP + PALETTE_PAD * 2
-
-    /** 预生成调色板 */
-    private val paletteColors: List<Color4b> = buildList {
-        for (row in 0 until 8) {
-            val hue = row * 45f / 360f
-            for (col in 0 until 5) {
-                val brightness = 0.95f - col * 0.2f
-                add(Color4b.ofHSB(hue, 0.9f, brightness))
-            }
-        }
-        for (col in 0 until 5) {
-            val brightness = 0.95f - col * 0.2f
-            add(Color4b.ofHSB(0f, 0f, brightness))
-        }
-    }
 
     private var fadeAnim = 0f
     private var isFirstLoad = true
@@ -153,38 +116,20 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         ctx.text(font, text, x, y, color)
     }
 
+    /** 轻量圆角矩形 —— 用 4 个小方块模拟圆角，避免逐像素循环 */
     private fun drawRoundedRect(ctx: GuiGraphicsExtractor, x: Float, y: Float, w: Float, h: Float, radius: Float, color: Int) {
-        val r = radius.coerceAtMost(w / 2f).coerceAtMost(h / 2f)
-        if (r <= 0.5f) {
-            fillRect(ctx, x, y, x + w, y + h, color)
-            return
-        }
-        val x1 = x; val y1 = y; val x2 = x + w; val y2 = y + h
-        fillRect(ctx, x1 + r, y1, x2 - r, y2, color)
-        fillRect(ctx, x1, y1 + r, x1 + r, y2 - r, color)
-        fillRect(ctx, x2 - r, y1 + r, x2, y2 - r, color)
-        drawCorner(ctx, x1 + r, y1 + r, r, 180f, 270f, color)
-        drawCorner(ctx, x2 - r, y1 + r, r, 270f, 360f, color)
-        drawCorner(ctx, x2 - r, y2 - r, r, 0f, 90f, color)
-        drawCorner(ctx, x1 + r, y2 - r, r, 90f, 180f, color)
-    }
-
-    private fun drawCorner(ctx: GuiGraphicsExtractor, cx: Float, cy: Float, r: Float, start: Float, end: Float, color: Int) {
-        var a = start
-        while (a < end) {
-            val rad1 = Math.toRadians(a.toDouble())
-            val rad2 = Math.toRadians((a + 6f).coerceAtMost(end).toDouble())
-            val px1 = cx + (cos(rad1) * r).toFloat()
-            val py1 = cy + (sin(rad1) * r).toFloat()
-            val px2 = cx + (cos(rad2) * r).toFloat()
-            val py2 = cy + (sin(rad2) * r).toFloat()
-            val minX = cx.coerceAtMost(px1).coerceAtMost(px2).toInt()
-            val maxX = cx.coerceAtLeast(px1).coerceAtLeast(px2).toInt()
-            val minY = cy.coerceAtMost(py1).coerceAtMost(py2).toInt()
-            val maxY = cy.coerceAtLeast(py1).coerceAtLeast(py2).toInt()
-            fillRect(ctx, minX, minY, max(minX + 1, maxX), max(minY + 1, maxY), color)
-            a += 6f
-        }
+        if (w <= 0 || h <= 0) return
+        val r = radius.coerceAtMost(w / 2f).coerceAtMost(h / 2f).coerceAtMost(6f)
+        if (r <= 0.5f) { fillRect(ctx, x, y, x + w, y + h, color); return }
+        val ri = r.toInt()
+        // 主体（跳过四角）
+        fillRect(ctx, x + r, y, x + w - r, y + h, color)          // 中间竖条
+        fillRect(ctx, x, y + r, x + w, y + h - r, color)           // 中间横条
+        // 四角各一个像素块（不是逐度循环，只 4 次 fill）
+        fillRect(ctx, x.toInt(), (y + r - 1).toInt(), (x + r).toInt(), (y + r).toInt(), color)      // 左上
+        fillRect(ctx, (x + w - r).toInt(), (y + r - 1).toInt(), (x + w).toInt(), (y + r).toInt(), color)  // 右上
+        fillRect(ctx, (x + w - r).toInt(), (y + h - r).toInt(), (x + w).toInt(), (y + h - r + 1).toInt(), color)  // 右下
+        fillRect(ctx, x.toInt(), (y + h - r).toInt(), (x + r).toInt(), (y + h - r + 1).toInt(), color)   // 左下
     }
 
     private fun trimText(font: Font, text: String, maxWidth: Int): String {
@@ -341,7 +286,7 @@ private fun getCategoryModules(category: ModuleCategory): List<ClientModule> {
                 val arrow = if (panel.collapsed) "▶ " else "▼ "
                 drawText(ctx, font, "§l$arrow${category.tag}", (px + 8f).toInt(), (py + 5f).toInt(), ACCENT)
                 val lineWidth = font.width(category.tag) + 10f
-                fillRect(ctx, px + 8f, py + 18f, px + 8f + lineWidth, py + 19f, ACCENT_DARK)
+                fillRect(ctx, px + 8f, py + 18f, px + 8f + lineWidth, py + 19f, 0x30FFFFFF.toInt())
             }
 
             if (panel.collapsed) continue
@@ -467,33 +412,6 @@ private fun getCategoryModules(category: ModuleCategory): List<ClientModule> {
             }
         }
 
-        // 调色板
-        val colorVal = activeColorValue
-        if (colorVal != null) {
-            val px = colorPickerX.coerceIn(0f, sc - PALETTE_W)
-            val py = colorPickerY.coerceIn(0f, sh - PALETTE_H)
-            drawRoundedRect(ctx, px, py, PALETTE_W, PALETTE_H, 4f, BG)
-            fillRect(ctx, px.toInt(), py.toInt(), (px + PALETTE_W).toInt(), py.toInt() + 1, SCROLL_THUMB)
-            fillRect(ctx, px.toInt(), (py + PALETTE_H - 1).toInt(), (px + PALETTE_W).toInt(), (py + PALETTE_H).toInt(), SCROLL_THUMB)
-            fillRect(ctx, px.toInt(), py.toInt(), px.toInt() + 1, (py + PALETTE_H).toInt(), SCROLL_THUMB)
-            fillRect(ctx, (px + PALETTE_W - 1).toInt(), py.toInt(), (px + PALETTE_W).toInt(), (py + PALETTE_H).toInt(), SCROLL_THUMB)
-
-            val currentRgb = extractColor(colorVal).rgb and 0xFFFFFF
-            for (index in paletteColors.indices) {
-                val row = index / PALETTE_COLS
-                val col = index % PALETTE_COLS
-                val cx = px + PALETTE_PAD + col * (PALETTE_CELL + PALETTE_GAP)
-                val cy = py + PALETTE_PAD + row * (PALETTE_CELL + PALETTE_GAP)
-                val color4b = paletteColors[index]
-                fillRect(ctx, cx.toInt(), cy.toInt(), (cx + PALETTE_CELL).toInt(), (cy + PALETTE_CELL).toInt(), color4b.argb)
-                if ((color4b.argb and 0xFFFFFF) == currentRgb) {
-                    fillRect(ctx, (cx - 1).toInt(), (cy - 1).toInt(), (cx + PALETTE_CELL + 1).toInt(), cy.toInt(), TEXT_BRIGHT)
-                    fillRect(ctx, (cx - 1).toInt(), (cy + PALETTE_CELL).toInt(), (cx + PALETTE_CELL + 1).toInt(), (cy + PALETTE_CELL + 1).toInt(), TEXT_BRIGHT)
-                    fillRect(ctx, (cx - 1).toInt(), (cy - 1).toInt(), cx.toInt(), (cy + PALETTE_CELL + 1).toInt(), TEXT_BRIGHT)
-                    fillRect(ctx, (cx + PALETTE_CELL).toInt(), (cy - 1).toInt(), (cx + PALETTE_CELL + 1).toInt(), (cy + PALETTE_CELL + 1).toInt(), TEXT_BRIGHT)
-                }
-            }
-        }
     }
 
     // ==================== 滑条布局计算 ====================
@@ -596,13 +514,6 @@ private fun getCategoryModules(category: ModuleCategory): List<ClientModule> {
                 drawText(ctx, font, trimText(font, v.name, labelMaxW), labelX, (y + 4f).toInt(), TEXT_DIM)
                 val color = extractColor(v)
                 fillRect(ctx, valueX, y.toInt() + 4, valueX + 10, y.toInt() + 14, color.rgb)
-                if (activeColorValue == v) {
-                    val bx = valueX - 1; val by = y.toInt() + 3
-                    fillRect(ctx, bx, by, bx + 12, by + 1, TEXT_BRIGHT)
-                    fillRect(ctx, bx, by + 11, bx + 12, by + 12, TEXT_BRIGHT)
-                    fillRect(ctx, bx, by, bx + 1, by + 12, TEXT_BRIGHT)
-                    fillRect(ctx, bx + 11, by, bx + 12, by + 12, TEXT_BRIGHT)
-                }
             }
             else -> {
                 drawText(ctx, font, trimText(font, v.name, labelMaxW), labelX, (y + 4f).toInt(), TEXT_DIM)
@@ -696,25 +607,6 @@ private fun getCategoryModules(category: ModuleCategory): List<ClientModule> {
             return true
         }
         searchFocused = false
-
-        // 调色板
-        val colorVal = activeColorValue
-        if (colorVal != null) {
-            val px = colorPickerX.coerceIn(0f, sc - PALETTE_W)
-            val py = colorPickerY.coerceIn(0f, sh - PALETTE_H)
-            if (mx in px.toInt()..(px + PALETTE_W).toInt() &&
-                my in py.toInt()..(py + PALETTE_H).toInt()) {
-                val col = ((mx - px - PALETTE_PAD) / (PALETTE_CELL + PALETTE_GAP)).toInt()
-                val row = ((my - py - PALETTE_PAD) / (PALETTE_CELL + PALETTE_GAP)).toInt()
-                val index = row * PALETTE_COLS + col
-                if (index in paletteColors.indices) {
-                    trySetValue(colorVal, paletteColors[index])
-                    activeColorValue = null
-                }
-                return true
-            }
-            activeColorValue = null
-        }
 
         var targetPanel: PanelData? = null
         for (panel in panels) {
@@ -849,13 +741,7 @@ private fun getCategoryModules(category: ModuleCategory): List<ClientModule> {
         }
 
         if (isColorValue(v)) {
-            if (activeColorValue == v) {
-                activeColorValue = null
-            } else {
-                activeColorValue = v
-                colorPickerX = x + w - PALETTE_W - 2f
-                colorPickerY = y + SETTING_H + 2f
-            }
+            // Color value — no palette popup (removed)
             return
         }
 
