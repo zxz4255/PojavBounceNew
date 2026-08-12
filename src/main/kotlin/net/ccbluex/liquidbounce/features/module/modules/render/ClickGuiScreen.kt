@@ -24,37 +24,37 @@ import java.io.File
 
 /**
  * LiquidBounce-style ClickGUI — Multi-panel layout, each category is an independent floating panel.
- * Vape-style white theme with lower opacity.
+ * Dark glass theme matching reference screenshot.
  */
 class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
-    // ==================== Colors (纯白主题, 降低透明度) ====================
-    private val ACCENT = 0xFF56B4E9.toInt()
+    // ==================== Colors (深色毛玻璃主题, 接近参考图) ====================
+    private val ACCENT = 0xFF56B4E9.toInt()           // 分类标题 / 激活文字 / 蓝点 — 天蓝
     private val ACCENT_DARK = 0xFF3A7CA5.toInt()
-    private val BG = 0x60F0F0F0.toInt()          // 面板背景 白色 38%
-    private val PANEL_BG = 0x40FFFFFF.toInt()     // 面板内部 白色 25%
-    private val TAB_BG = 0x50E0E0E0.toInt()       // 搜索框背景 白色 31%
-    private val TAB_ACTIVE = 0x80C8C8C8.toInt()
-    private val TEXT = 0xFF404040.toInt()          // 主文字 深灰
-    private val TEXT_DIM = 0xFF808080.toInt()       // 次要文字 中灰
-    private val TEXT_BRIGHT = 0xFF56B4E9.toInt()   // 高亮文字 天蓝
-    private val BORDER = 0x30C0C0C0.toInt()         // 边框 浅灰 19%
-    private val HOVER = 0x12C0C0C0.toInt()          // 悬停 灰 7%
-    private val SCROLL_TRACK = 0x18FFFFFF.toInt()   // 滚动条轨道 白 9%
-    private val SCROLL_THUMB = 0x55FFFFFF.toInt()   // 滚动条滑块 白 33%
-    private val SCROLL_THUMB_HOVER = 0x90FFFFFF.toInt() // 滚动条滑块悬停 白 56%
+    private val BG = 0xB00D0D12.toInt()              // 面板背景 深色半透明 ~69%
+    private val PANEL_BG = 0xA8101016.toInt()         // 面板内部 稍亮 ~66%
+    private val TAB_BG = 0x8025252E.toInt()           // 搜索框背景
+    private val TAB_ACTIVE = 0xFF33333D.toInt()
+    private val TEXT = 0xFFC8C8CC.toInt()             // 未激活模块名 浅灰白 (接近图中未激活色)
+    private val TEXT_DIM = 0xFF808088.toInt()          // 次要文字 中灰
+    private val TEXT_BRIGHT = 0xFF56B4E9.toInt()      // 激活文字 天蓝 (与蓝点一致)
+    private val BORDER = 0x20FFFFFF.toInt()            // 边框 极淡
+    private val HOVER = 0x15FFFFFF.toInt()             // 悬停
+    private val SCROLL_TRACK = 0x18FFFFFF.toInt()     // 滚动条轨道
+    private val SCROLL_THUMB = 0x50FFFFFF.toInt()     // 滚动条滑块
+    private val SCROLL_THUMB_HOVER = 0x78FFFFFF.toInt() // 滑块悬停
     private val EXPANDED_BG = 0x0A56B4E9.toInt()
     private val GROUP_BG = 0x0C56B4E9.toInt()
     private val GROUP_LINE = 0x1456B4E9.toInt()
-    private val SETTING_CHILD_BG = 0x06C0C0C0.toInt()
-    private val OVERLAY = 0x10000000               // 遮罩进一步降低
-    private val SETTING_BG = 0x30E0E0E0.toInt()     // 设置区域背景 白 19%
+    private val SETTING_CHILD_BG = 0x06FFFFFF.toInt()
+    private val OVERLAY = 0x28000000                   // 遮罩 加深模拟模糊感
+    private val SETTING_BG = 0x50080810.toInt()        // 设置区域背景
 
     // ==================== Layout ====================
-    private val CORNER = 4f
-    private val ITEM_H = 18f
-    private val SETTING_H = 18f
-    private val SCROLL_W = 5f              // 加宽滚动条, 方便点击
+    private val CORNER = 5f                           // 圆角稍大, 更圆润
+    private val ITEM_H = 17f                          // 行高稍紧凑
+    private val SETTING_H = 17f
+    private val SCROLL_W = 4f                         // 滚动条宽度
     private val PADDING = 5f
     private val SETTING_INDENT = 8f
     private val PANEL_GAP = 0f
@@ -93,7 +93,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     private val PALETTE_W = PALETTE_COLS * (PALETTE_CELL + PALETTE_GAP) - PALETTE_GAP + PALETTE_PAD * 2
     private val PALETTE_H = PALETTE_ROWS * (PALETTE_CELL + PALETTE_GAP) - PALETTE_GAP + PALETTE_PAD * 2
 
-    /** 预生成调色板: 8 行色相 × 5 档亮度 + 1 行灰阶 = 45 色 */
+    /** 预生成调色板 */
     private val paletteColors: List<Color4b> = buildList {
         for (row in 0 until 8) {
             val hue = row * 45f / 360f
@@ -226,7 +226,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         return h
     }
 
-    // ==================== Background ====================
+    // ==================== Background (加深遮罩模拟模糊) ====================
     override fun extractBackground(ctx: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, delta: Float) {
         val sc = minecraft!!.window.guiScaledWidth
         val sh = minecraft!!.window.guiScaledHeight
@@ -319,9 +319,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             val px = panel.x; val py = panel.y; val pw = panel.w; val ph = panel.h
             val actualHeight = if (panel.collapsed) HEADER_H + 2f else ph
 
+            // 面板背景 — 深色半透明
             drawRoundedRect(ctx, px, py, pw, actualHeight, CORNER, BG)
-            drawRoundedRect(ctx, px, py, pw, 1f, CORNER, BORDER)
-            drawRoundedRect(ctx, px, py + actualHeight - 1f, pw, 1f, CORNER, BORDER)
 
             var panelModules: List<ClientModule>
             if (isSearching) {
@@ -330,6 +329,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             } else {
                 val category = panel.category ?: continue
                 panelModules = getCategoryModules(category)
+                // 分类标题 — 保持原天蓝色不变
                 val arrow = if (panel.collapsed) "▶ " else "▼ "
                 drawText(ctx, font, "§l$arrow${category.tag}", (px + 8f).toInt(), (py + 5f).toInt(), ACCENT)
                 val lineWidth = font.width(category.tag) + 10f
@@ -349,12 +349,17 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             panel.targetScroll = panel.targetScroll.coerceIn(0f, maxScroll)
             panel.scrollOffset += (panel.targetScroll - panel.scrollOffset) * 0.3f
 
+            // 【修复】裁剪区域：防止文字超出面板上下方
+            val clipTop = listAreaY.toInt().coerceAtLeast(0)
+            val clipBottom = (listAreaY + listAreaH).toInt().coerceAtMost(sh.toInt())
+
             var curY = listAreaY - panel.scrollOffset
 
             for (mod in panelModules) {
                 val isExpanded = expandedModule == mod
                 val modEndY = curY + ITEM_H
 
+                // 【修复】只在可视区域内渲染
                 if (modEndY >= listAreaY && curY <= listAreaY + listAreaH) {
                     val isHover = mouseX in listAreaX.toInt()..(listAreaX + listAreaW).toInt() &&
                             mouseY in curY.toInt()..modEndY.toInt()
@@ -362,14 +367,15 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     if (isHover) fillRect(ctx, listAreaX, curY, listAreaX + listAreaW, modEndY, HOVER)
                     if (isExpanded) fillRect(ctx, listAreaX, curY, listAreaX + listAreaW, modEndY, EXPANDED_BG)
 
-                    val nameColor = if (mod.enabled) TEXT else TEXT_DIM
+                    // 【修改】激活文字=天蓝(TEXT_BRIGHT), 未激活=浅灰白(TEXT)
+                    val nameColor = if (mod.enabled) TEXT_BRIGHT else TEXT
                     val nameMaxW = (listAreaW - 16).toInt()
                     drawText(ctx, font, trimText(font, mod.name, nameMaxW),
-                        (listAreaX + 4f).toInt(), (curY + 5f).toInt(), nameColor)
+                        (listAreaX + 4f).toInt(), (curY + 4f).toInt(), nameColor)
 
-                    // 开关圆点 — 始终在右侧
+                    // 蓝点开关 — 保持不变
                     val dotX = (listAreaX + listAreaW - 4f).toInt()
-                    val dotY = curY.toInt() + 7
+                    val dotY = curY.toInt() + 6
                     fillRect(ctx, dotX, dotY, dotX + 4, dotY + 4,
                         if (mod.enabled) ACCENT else 0x40808080.toInt())
                 }
@@ -389,21 +395,22 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                         }
                     }
 
+                    // 【修复】设置区域背景严格限制在列表区域内
                     val bgStart = curY.coerceAtLeast(listAreaY)
                     val bgEnd = (curY + totalSettingH).coerceAtMost(listAreaY + listAreaH)
-                    if (bgEnd > bgStart && bgStart < listAreaY + listAreaH) {
+                    if (bgEnd > bgStart) {
                         fillRect(ctx, listAreaX, bgStart, listAreaX + listAreaW, bgEnd, SETTING_BG)
                     }
 
                     for ((v, depth) in values) {
                         val actual = getActualValue(v)
                         if (isEnumWithMultiple(actual)) {
-                            // Mode 竖排渲染：标题行 + 每行一个常量
                             val rowCount = renderModeListVertical(ctx, font, v, getEnumConstants(actual),
                                 actual as Enum<*>, listAreaX, curY, listAreaW, depth, mouseX, mouseY)
                             curY += rowCount * SETTING_H
                         } else {
                             val settingEndY = curY + SETTING_H
+                            // 【修复】只渲染在可视区域内的设置行
                             if (settingEndY >= listAreaY && curY <= listAreaY + listAreaH) {
                                 val isSettingHover = mouseX in listAreaX.toInt()..(listAreaX + listAreaW).toInt() &&
                                         mouseY in curY.toInt()..settingEndY.toInt()
@@ -416,13 +423,14 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 }
             }
 
-            // 滚动条 — 纯白色, 加宽可点击
+            // 滚动条
             if (contentH > listAreaH) {
                 fillRect(ctx, listAreaX + listAreaW, listAreaY, listAreaX + listAreaW + SCROLL_W, listAreaY + listAreaH, SCROLL_TRACK)
-                val thumbH = (listAreaH * listAreaH / contentH).coerceAtLeast(16f)
+                val thumbH = (listAreaH * listAreaH / contentH).coerceAtLeast(12f)
                 val thumbY = listAreaY + if (maxScroll > 0f) (panel.scrollOffset / maxScroll) * (listAreaH - thumbH) else 0f
-                val isScrollHover = mouseX in (listAreaX + listAreaW - 2).toInt()..(listAreaX + listAreaW + SCROLL_W + 2).toInt() &&
-                        mouseY in thumbY.toInt()..(thumbY + thumbH).toInt()
+                // 【修复】扩大滚动条命中区域到整个轨道
+                val isScrollHover = mouseX in (listAreaX + listAreaW - 4).toInt()..(listAreaX + listAreaW + SCROLL_W + 4).toInt() &&
+                        mouseY in listAreaY.toInt()..(listAreaY + listAreaH).toInt()
                 val thumbColor = if (isScrollHover || panel.draggingScroll) SCROLL_THUMB_HOVER else SCROLL_THUMB
                 fillRect(ctx, listAreaX + listAreaW, thumbY, listAreaX + listAreaW + SCROLL_W, thumbY + thumbH, thumbColor)
             }
@@ -526,7 +534,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val font = minecraft!!.font
         val indent = depth * SETTING_INDENT
 
-        // 子项视觉: 浅色背景 + 左侧层级竖线
         if (depth > 0) {
             fillRect(ctx, x, y, x + w, y + SETTING_H, SETTING_CHILD_BG)
             val lineX = (x + 4f + indent).toInt()
@@ -536,7 +543,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val actual = getActualValue(v)
         val isGroup = isGroupValue(v)
         val labelX = (x + 6 + indent).toInt()
-        // ON/OFF 按钮放在最右边
         val toggleX = (x + w - 16).toInt()
         val valueX = (x + w - 44).toInt()
         val labelMaxW = (valueX - labelX - 4).coerceAtLeast(10)
@@ -548,21 +554,20 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 fillRect(ctx, x, y, x + w, y + SETTING_H, GROUP_BG)
                 val groupMaxW = (w - 16 - indent).toInt().coerceAtLeast(10)
                 drawText(ctx, font, "$arrow ${trimText(font, v.name, groupMaxW)}",
-                    labelX, (y + 5f).toInt(), if (isCollapsed) TEXT_DIM else ACCENT)
+                    labelX, (y + 4f).toInt(), if (isCollapsed) TEXT_DIM else ACCENT)
             }
             actual is Boolean -> {
-                // ON/OFF 移到最右边, 文字留空间
                 val nameMaxW = (toggleX - labelX - 6).coerceAtLeast(10)
-                drawText(ctx, font, trimText(font, v.name, nameMaxW), labelX, (y + 5f).toInt(), TEXT_DIM)
+                drawText(ctx, font, trimText(font, v.name, nameMaxW), labelX, (y + 4f).toInt(), TEXT_DIM)
                 val status = if (actual) "§aON" else "§cOFF"
-                drawText(ctx, font, status, toggleX, (y + 5f).toInt(), if (actual) ACCENT else TEXT_DIM)
+                drawText(ctx, font, status, toggleX, (y + 4f).toInt(), if (actual) ACCENT else TEXT_DIM)
             }
             isBindValue(v) -> {
-                drawText(ctx, font, trimText(font, v.name, labelMaxW), labelX, (y + 5f).toInt(), TEXT_DIM)
+                drawText(ctx, font, trimText(font, v.name, labelMaxW), labelX, (y + 4f).toInt(), TEXT_DIM)
                 val isListening = listeningValue == v
                 val bindStr = trimText(font, formatBindValue(v), (w - 60 - indent).toInt())
                 val display = if (isListening) "§e[...]" else "§7$bindStr"
-                drawText(ctx, font, display, valueX, (y + 5f).toInt(), if (isListening) ACCENT else TEXT_DIM)
+                drawText(ctx, font, display, valueX, (y + 4f).toInt(), if (isListening) ACCENT else TEXT_DIM)
             }
             isSliderValue(v) -> {
                 drawText(ctx, font, trimText(font, v.name, labelMaxW), labelX, (y + 3f).toInt(), TEXT_DIM)
@@ -579,7 +584,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 drawText(ctx, font, layout.valText, layout.valX, (y + 3f).toInt(), TEXT_DIM)
             }
             isColorValue(v) -> {
-                drawText(ctx, font, trimText(font, v.name, labelMaxW), labelX, (y + 5f).toInt(), TEXT_DIM)
+                drawText(ctx, font, trimText(font, v.name, labelMaxW), labelX, (y + 4f).toInt(), TEXT_DIM)
                 val color = extractColor(v)
                 fillRect(ctx, valueX, y.toInt() + 4, valueX + 10, y.toInt() + 14, color.rgb)
                 if (activeColorValue == v) {
@@ -591,19 +596,19 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 }
             }
             else -> {
-                drawText(ctx, font, trimText(font, v.name, labelMaxW), labelX, (y + 5f).toInt(), TEXT_DIM)
+                drawText(ctx, font, trimText(font, v.name, labelMaxW), labelX, (y + 4f).toInt(), TEXT_DIM)
                 val valMaxW = (x + w - valueX - 2).toInt().coerceAtLeast(10)
-                drawText(ctx, font, "§7${trimText(font, getDisplayValue(v), valMaxW)}", valueX, (y + 5f).toInt(), TEXT_DIM)
+                drawText(ctx, font, "§7${trimText(font, getDisplayValue(v), valMaxW)}", valueX, (y + 4f).toInt(), TEXT_DIM)
             }
         }
 
-        // 子模块开关: 如果该设置不在 Mode 列表中但属于可 toggle 的子值, 最右边加蓝点
+        // 子模块蓝点开关
         if (depth > 0 && getActualValue(v) !is Boolean && !isEnumWithMultiple(getActualValue(v)) &&
             !isGroup && !isSliderValue(v) && !isColorValue(v) && !isBindValue(v)) {
             val va = getActualValue(v)
             if (va is Enum<*>) {
                 val dotX2 = (x + w - 4f).toInt()
-                val dotY2 = y.toInt() + 7
+                val dotY2 = y.toInt() + 6
                 val isActive = getDisplayValue(v) == va.name
                 fillRect(ctx, dotX2, dotY2, dotX2 + 4, dotY2 + 4,
                     if (isActive) ACCENT else 0x40808080.toInt())
@@ -611,7 +616,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         }
     }
 
-    // ==================== Mode 竖排渲染（返回行数：标题 + 常量数） ====================
+    // ==================== Mode 竖排渲染 ====================
     private fun renderModeListVertical(
         ctx: GuiGraphicsExtractor, font: Font,
         v: Value<*>, constants: List<Any>, current: Enum<*>,
@@ -621,32 +626,28 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val indent = depth * SETTING_INDENT
         val labelX = (x + 6 + indent).toInt()
         val nameMaxW = 50
-        // 标题行：Mode 名称
-        drawText(ctx, font, trimText(font, v.name, nameMaxW), labelX, (curY + 5f).toInt(), TEXT)
+        drawText(ctx, font, trimText(font, v.name, nameMaxW), labelX, (curY + 4f).toInt(), TEXT)
         var yOff = curY + SETTING_H
 
         val dotSize = 4
         val dotGap = 2
         val nameX = labelX
-        // 每个常量一行
         for (const in constants) {
             val displayName = const.toString()
             val isActive = displayName == current.name
             val dotX = nameX + 4
-            val dotY = yOff.toInt() + 7
+            val dotY = yOff.toInt() + 6
 
-            // 圆点
             fillRect(ctx, dotX, dotY, dotX + dotSize, dotY + dotSize,
                 if (isActive) ACCENT else 0x40808080.toInt())
-            // 名称
             val textX = dotX + dotSize + dotGap
             val maxTextW = (x + w - 8 - textX).toInt().coerceAtLeast(10)
-            drawText(ctx, font, trimText(font, displayName, maxTextW), textX, (yOff + 5f).toInt(),
+            drawText(ctx, font, trimText(font, displayName, maxTextW), textX, (yOff + 4f).toInt(),
                 if (isActive) TEXT_BRIGHT else TEXT_DIM)
 
             yOff += SETTING_H
         }
-        return 1 + constants.size  // 标题 + 每个常量
+        return 1 + constants.size
     }
 
     // ==================== Enum 辅助 ====================
@@ -736,12 +737,16 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val listAreaY = panel.y + 28f
         val listAreaH = panel.h - 32f
 
-        // 滚动条点击 — 加宽命中区域
-        if (mx in (listAreaX + listAreaW - 2).toInt()..(listAreaX + listAreaW + SCROLL_W + 2).toInt() &&
+        // 【修复】滚动条点击 — 扩大命中范围到整个轨道区域
+        if (mx in (listAreaX + listAreaW - 6).toInt()..(listAreaX + listAreaW + SCROLL_W + 6).toInt() &&
             my in listAreaY.toInt()..(listAreaY + listAreaH).toInt()) {
             val modules = getModulesForPanel(panel)
             val contentH = getContentHeight(modules)
             if (contentH > listAreaH) {
+                // 【修复】点击时直接跳转到对应位置
+                val clickRatio = (my - listAreaY) / listAreaH
+                val maxScroll = contentH - listAreaH
+                panel.targetScroll = clickRatio * maxScroll
                 panel.draggingScroll = true
                 return true
             }
@@ -778,9 +783,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
                         if (isEnumWithMultiple(actual)) {
                             val constants = getEnumConstants(actual)
-                            // 跳过标题行
                             curY += SETTING_H
-                            // 每行 Mode
                             for (const in constants) {
                                 val settingEndY = curY + SETTING_H
                                 if (my in curY.toInt()..settingEndY.toInt()) {
@@ -844,8 +847,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         if (isSliderValue(v)) {
             val font = minecraft!!.font
             val layout = computeSliderLayout(font, v, actual, x, w, indent)
-            val hitStart = layout.sliderX - 4
-            val hitEnd = layout.sliderX + layout.sliderW + 4
+            val hitStart = layout.sliderX - 6
+            val hitEnd = layout.sliderX + layout.sliderW + 6
             if (mx.toInt() in hitStart..hitEnd) {
                 val progress = ((mx.toInt() - layout.sliderX).toFloat() / layout.sliderW).coerceIn(0f, 1f)
                 val newValue = layout.minV + (layout.maxV - layout.minV) * progress
@@ -860,23 +863,19 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 sliderContext = SliderContext(
                     value = v, panel = panel,
                     sliderX = layout.sliderX, sliderY = y.toInt() + 8,
-                    sliderW = layout.sliderW, min = layout.minV, max = layout.maxV
+                    sliderW = layout.sliderW, min = layout.min, max = layout.maxV
                 )
             }
         }
     }
 
-    // 旧版模式点击（保留兼容）
     @Suppress("UNUSED_PARAMETER")
     private fun handleModeClick(v: Value<*>, mx: Float, x: Float, w: Float, indent: Float,
-                                constants: List<Any>, current: Enum<*>) {
-        // 竖排模式不再使用水平点击逻辑; 保留兼容
-    }
+                                constants: List<Any>, current: Enum<*>) {}
 
     @Suppress("UNUSED_PARAMETER")
     private fun handleModeClick(v: Value<*>, mx: Float, rightEdge: Float,
-                                constants: List<Any>, current: Enum<*>) {
-    }
+                                constants: List<Any>, current: Enum<*>) {}
 
     private fun trySetValue(v: Value<*>, value: Any) {
         try {
@@ -892,6 +891,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val mx = event.x().toFloat()
         val my = event.y().toFloat()
 
+        // 滑块拖动
         val context = sliderContext
         if (context != null) {
             val progress = ((mx.toInt() - context.sliderX).toFloat() / context.sliderW).coerceIn(0f, 1f)
@@ -917,13 +917,14 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 }
                 return true
             }
+            // 【修复】滚动条拖拽 — 确保 dy 正确传递
             if (panel.draggingScroll) {
                 val modules = getModulesForPanel(panel)
                 val contentH = getContentHeight(modules)
                 val listAreaH = panel.h - 32f
                 if (contentH > listAreaH) {
                     val maxScroll = contentH - listAreaH
-                    panel.targetScroll = (panel.targetScroll - dy.toFloat() * 1.2f).coerceIn(0f, maxScroll)
+                    panel.targetScroll = (panel.targetScroll - dy.toFloat() * 1.5f).coerceIn(0f, maxScroll)
                 }
                 return true
             }
@@ -946,7 +947,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             if (panel.collapsed) continue
             if (mouseX in panel.x.toDouble()..(panel.x + panel.w).toDouble() &&
                 mouseY in panel.y.toDouble()..(panel.y + panel.h).toDouble()) {
-                panel.targetScroll = (panel.targetScroll - vertical.toFloat() * 20f).coerceAtLeast(0f)
+                panel.targetScroll = (panel.targetScroll - vertical.toFloat() * 22f).coerceAtLeast(0f)
                 return true
             }
         }

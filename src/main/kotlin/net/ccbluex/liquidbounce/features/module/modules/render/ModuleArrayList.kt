@@ -80,7 +80,7 @@ object ModuleArrayList : ClientModule("ArrayList【Skid+fix】", ModuleCategorie
     private val border by boolean("Border", false)
 
     // —— 颜色 ——
-    private val colorMode by enumChoice("Color Mode", ColorMode.RAINBOW_TEXT)
+    private val colorMode by enumChoice("Color Mode", ColorMode.Sky)
     private val customColor by color("Color", Color4b(0, 160, 255))
     private val rainbowSpeed by float("Rainbow Speed", 6f, 0.1f..10f)
     private val rainbowOffset by int("Rainbow Offset", 5, 0..90)

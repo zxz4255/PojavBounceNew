@@ -95,26 +95,26 @@ object ModuleNotifications : ClientModule("Notifications", ModuleCategories.REND
     // —— 布局 ——
     private val offsetX by int("Offset X", 4, 0..500)             // 距右边缘
     private val offsetY by int("Offset Y", 4, 0..500)             // 距底边缘
-    private val scaleValue by float("Scale", 1f, 0.5f..2f)        // 整体缩放
-    private val notificationHeight by int("Height", 26, 18..40)   // 单条高度
+    private val scaleValue by float("Scale", 1.1f, 0.5f..2f)        // 整体缩放
+    private val notificationHeight by int("Height", 30, 18..40)   // 单条高度
     private val spacing by int("Spacing", 3, 0..10)               // 条间距
-    private val maxNotifications by int("Max Notifications", 5, 1..10)
+    private val maxNotifications by int("Max Notifications", 6, 1..10)
 
     // —— 外观 ——
     private val background by boolean("Background", true)
-    private val backgroundAlpha by int("Background Alpha", 128, 0..255)
-    private val backgroundRadius by int("Background Radius", 4, 0..12)
+    private val backgroundAlpha by int("Background Alpha", 80, 0..255)
+    private val backgroundRadius by int("Background Radius", 5, 0..12)
     private val border by boolean("Border", false)
     private val showIcon by boolean("Show Icon", true)
     private val iconBackground by boolean("Icon Background", true)
     private val showProgressBar by boolean("Show Progress Bar", true)
-    private val progressBarHeight by int("Progress Bar Height", 4, 1..8)
+    private val progressBarHeight by int("Progress Bar Height", 2, 1..8)
     private val titleColor by color("Title Color", Color4b.WHITE)
     private val descriptionColor by color("Description Color", Color4b(170, 170, 170))
     private val textShadow by boolean("Text Shadow", true)
 
     // —— 动画 / 时长 ——
-    private val animationSpeed by float("Animation Speed", 8f, 0.5f..30f)
+    private val animationSpeed by float("Animation Speed", 30f, 0.5f..40f)
     private val defaultDuration by int("Default Duration", 3000, 500..10000)  // 毫秒
     private val welcomeNotification by boolean("Welcome Notification", true)   // 启用时发送欢迎通知
 
