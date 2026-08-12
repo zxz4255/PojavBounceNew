@@ -71,8 +71,8 @@ init {
     private val showHead by boolean("Show Head", true)
     private val showHealthText by boolean("Show Health Text", true)
     private val showHealthBar by boolean("Show Health Bar", true)
-    private val showEquipment by boolean("Show Equipment", true)
-    private val showEnchantments by boolean("Show Enchantments", true)
+    private val showEquipment by boolean("Show Equipment", false)
+    private val showEnchantments by boolean("Show Enchantments", false)
     private val damageTint by boolean("Hurt Flash", true)
 
     // —— 外观 ——
