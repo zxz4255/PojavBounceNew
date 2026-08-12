@@ -863,7 +863,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 sliderContext = SliderContext(
                     value = v, panel = panel,
                     sliderX = layout.sliderX, sliderY = y.toInt() + 8,
-                    sliderW = layout.sliderW, min = layout.min, max = layout.maxV
+                    sliderW = layout.sliderW, min = layout.minV, max = layout.maxV
                 )
             }
         }
