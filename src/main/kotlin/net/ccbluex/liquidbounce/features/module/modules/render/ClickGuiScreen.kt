@@ -26,7 +26,7 @@ import java.io.File
  * LiquidBounce-style ClickGUI — Multi-panel layout, each category is an independent floating panel.
  * Dark glass theme matching reference screenshot.
  */
-class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
+class ClickGuiScreen93 : Screen(Component.literal("ClickGUI")) {
 
     // ==================== Colors (从 ModuleClickGui 动态读取) ====================
     // 激活文字/分类标题/蓝点
@@ -40,7 +40,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     // 激活文字 天蓝
     private val TEXT_BRIGHT get() = ModuleClickGui.getActiveTextColor()
     // 次要文字: 从 TEXT 降低亮度
-    private val TEXT_DIM get() = (ModuleClickGui.getTextColor() and 0x00FFFFFF) or 0x55000000
+    private val TEXT_DIM get() = 0xFF000000.toInt() or (ModuleClickGui.getTextColor() and 0x00FFFFFF)
     private val TAB_BG = 0x8025252E.toInt()
     private val TAB_ACTIVE = 0xFF33333D.toInt()
     private val BORDER = 0x20FFFFFF.toInt()
@@ -196,15 +196,18 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         return if (str.isEmpty()) "..." else "$str..."
     }
 
-    private fun getCategoryModules(category: ModuleCategory): List<ClientModule> {
-        return try {
-            ModuleManager.getModules().toList()
-                .filter { it.category == category && it.name != "ClickGUI" }
-                .filter { searchText.isEmpty() || it.name.contains(searchText, ignoreCase = true) }
-        } catch (_: Exception) {
-            emptyList()
-        }
+private fun getCategoryModules(category: ModuleCategory): List<ClientModule> {
+    return try {
+        // 1. 移除没必要的 .toList()，直接对集合进行过滤，减少并发转换时的潜在冲突
+        ModuleManager.getModules()
+            .filter { it.category == category && it.name != "ClickGUI" }
+            .filter { searchText.isEmpty() || it.name.contains(searchText, ignoreCase = true) }
+    } catch (e: Exception) {
+        // 2. 不静默忽略！将异常打印到 Logcat，这样如果还有问题，你就能准确知道是哪一行报错
+        e.printStackTrace()
+        emptyList()
     }
+}
 
     /** 计算展开后的总高度，Mode 竖排时高度 = (1 + constants数) * SETTING_H */
     private fun getExpandedHeight(mod: ClientModule): Float {
@@ -364,8 +367,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 val isExpanded = expandedModule == mod
                 val modEndY = curY + ITEM_H
 
-                // 【修复】只在可视区域内渲染
-                if (modEndY >= listAreaY && curY <= listAreaY + listAreaH) {
+                // 【修复】严格限制：整行必须在可视区域内才渲染，防止文字溢出面板边界
+                if (curY >= listAreaY && modEndY <= listAreaY + listAreaH) {
                     val isHover = mouseX in listAreaX.toInt()..(listAreaX + listAreaW).toInt() &&
                             mouseY in curY.toInt()..modEndY.toInt()
 
@@ -411,12 +414,13 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                         val actual = getActualValue(v)
                         if (isEnumWithMultiple(actual)) {
                             val rowCount = renderModeListVertical(ctx, font, v, getEnumConstants(actual),
-                                actual as Enum<*>, listAreaX, curY, listAreaW, depth, mouseX, mouseY)
+                                actual as Enum<*>, listAreaX, curY, listAreaW, depth, mouseX, mouseY,
+                                listAreaY, listAreaH)
                             curY += rowCount * SETTING_H
                         } else {
                             val settingEndY = curY + SETTING_H
-                            // 【修复】只渲染在可视区域内的设置行
-                            if (settingEndY >= listAreaY && curY <= listAreaY + listAreaH) {
+                            // 【修复】严格限制：整行必须在可视区域内才渲染
+                            if (curY >= listAreaY && settingEndY <= listAreaY + listAreaH) {
                                 val isSettingHover = mouseX in listAreaX.toInt()..(listAreaX + listAreaW).toInt() &&
                                         mouseY in curY.toInt()..settingEndY.toInt()
                                 if (isSettingHover) fillRect(ctx, listAreaX, curY, listAreaX + listAreaW, settingEndY, HOVER)
@@ -626,30 +630,36 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         ctx: GuiGraphicsExtractor, font: Font,
         v: Value<*>, constants: List<Any>, current: Enum<*>,
         x: Float, curY: Float, w: Float, depth: Int,
-        mouseX: Int, mouseY: Int
+        mouseX: Int, mouseY: Int,
+        listAreaY: Float, listAreaH: Float
     ): Int {
         val indent = depth * SETTING_INDENT
         val labelX = (x + 6 + indent).toInt()
         val nameMaxW = 50
-        drawText(ctx, font, trimText(font, v.name, nameMaxW), labelX, (curY + 4f).toInt(), TEXT)
+        // 标题行：严格限制在可视区域内
+        if (curY >= listAreaY && curY + SETTING_H <= listAreaY + listAreaH) {
+            drawText(ctx, font, trimText(font, v.name, nameMaxW), labelX, (curY + 4f).toInt(), TEXT)
+        }
         var yOff = curY + SETTING_H
 
         val dotSize = 4
         val dotGap = 2
         val nameX = labelX
         for (const in constants) {
-            val displayName = const.toString()
-            val isActive = displayName == current.name
-            val dotX = nameX + 4
-            val dotY = yOff.toInt() + 6
+            // 每行 Mode：严格限制在可视区域内
+            if (yOff >= listAreaY && yOff + SETTING_H <= listAreaY + listAreaH) {
+                val displayName = const.toString()
+                val isActive = displayName == current.name
+                val dotX = nameX + 4
+                val dotY = yOff.toInt() + 6
 
-            fillRect(ctx, dotX, dotY, dotX + dotSize, dotY + dotSize,
-                if (isActive) ACCENT else 0x40808080.toInt())
-            val textX = dotX + dotSize + dotGap
-            val maxTextW = (x + w - 8 - textX).toInt().coerceAtLeast(10)
-            drawText(ctx, font, trimText(font, displayName, maxTextW), textX, (yOff + 4f).toInt(),
-                if (isActive) TEXT_BRIGHT else TEXT_DIM)
-
+                fillRect(ctx, dotX, dotY, dotX + dotSize, dotY + dotSize,
+                    if (isActive) ACCENT else 0x40808080.toInt())
+                val textX = dotX + dotSize + dotGap
+                val maxTextW = (x + w - 8 - textX).toInt().coerceAtLeast(10)
+                drawText(ctx, font, trimText(font, displayName, maxTextW), textX, (yOff + 4f).toInt(),
+                    if (isActive) TEXT_BRIGHT else TEXT_DIM)
+            }
             yOff += SETTING_H
         }
         return 1 + constants.size
