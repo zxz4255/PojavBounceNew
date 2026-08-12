@@ -26,7 +26,7 @@ import java.io.File
  * LiquidBounce-style ClickGUI — Multi-panel layout, each category is an independent floating panel.
  * Vape-style white theme with lower opacity.
  */
-class ModuleClickGui : Screen(Component.literal("ClickGUI")) {
+class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
     // ==================== Colors (纯白主题, 降低透明度) ====================
     private val ACCENT = 0xFF56B4E9.toInt()
@@ -93,6 +93,7 @@ class ModuleClickGui : Screen(Component.literal("ClickGUI")) {
     private val PALETTE_W = PALETTE_COLS * (PALETTE_CELL + PALETTE_GAP) - PALETTE_GAP + PALETTE_PAD * 2
     private val PALETTE_H = PALETTE_ROWS * (PALETTE_CELL + PALETTE_GAP) - PALETTE_GAP + PALETTE_PAD * 2
 
+    /** 预生成调色板: 8 行色相 × 5 档亮度 + 1 行灰阶 = 45 色 */
     private val paletteColors: List<Color4b> = buildList {
         for (row in 0 until 8) {
             val hue = row * 45f / 360f
@@ -112,6 +113,7 @@ class ModuleClickGui : Screen(Component.literal("ClickGUI")) {
 
     private val categories = ModuleCategories.entries.toList()
 
+    // ==================== 模式值缓存 ====================
     private val modeValueCache = IdentityHashMap<ClientModule, Value<*>?>()
 
     private data class PanelData(
@@ -199,7 +201,7 @@ class ModuleClickGui : Screen(Component.literal("ClickGUI")) {
         }
     }
 
-    /** 计算展开后的总高度，Mode 竖排时高度 = constants 数 * SETTING_H */
+    /** 计算展开后的总高度，Mode 竖排时高度 = (1 + constants数) * SETTING_H */
     private fun getExpandedHeight(mod: ClientModule): Float {
         if (expandedModule != mod) return 0f
         var h = 0f
@@ -381,7 +383,7 @@ class ModuleClickGui : Screen(Component.literal("ClickGUI")) {
                     for ((v, _) in values) {
                         val actual = getActualValue(v)
                         if (isEnumWithMultiple(actual)) {
-                            totalSettingH += getEnumConstants(actual).size * SETTING_H
+                            totalSettingH += max(1f, getEnumConstants(actual).size.toFloat()) * SETTING_H
                         } else {
                             totalSettingH += SETTING_H
                         }
@@ -396,7 +398,7 @@ class ModuleClickGui : Screen(Component.literal("ClickGUI")) {
                     for ((v, depth) in values) {
                         val actual = getActualValue(v)
                         if (isEnumWithMultiple(actual)) {
-                            // Mode 竖排渲染：一行一个
+                            // Mode 竖排渲染：标题行 + 每行一个常量
                             val rowCount = renderModeListVertical(ctx, font, v, getEnumConstants(actual),
                                 actual as Enum<*>, listAreaX, curY, listAreaW, depth, mouseX, mouseY)
                             curY += rowCount * SETTING_H
@@ -524,6 +526,7 @@ class ModuleClickGui : Screen(Component.literal("ClickGUI")) {
         val font = minecraft!!.font
         val indent = depth * SETTING_INDENT
 
+        // 子项视觉: 浅色背景 + 左侧层级竖线
         if (depth > 0) {
             fillRect(ctx, x, y, x + w, y + SETTING_H, SETTING_CHILD_BG)
             val lineX = (x + 4f + indent).toInt()
@@ -539,13 +542,6 @@ class ModuleClickGui : Screen(Component.literal("ClickGUI")) {
         val labelMaxW = (valueX - labelX - 4).coerceAtLeast(10)
 
         when {
-            actual is Boolean -> {
-                // ON/OFF 移到最右边, 文字留空间
-                val nameMaxW = (toggleX - labelX - 6).coerceAtLeast(10)
-                drawText(ctx, font, trimText(font, v.name, nameMaxW), labelX, (y + 5f).toInt(), TEXT_DIM)
-                val status = if (actual) "§aON" else "§cOFF"
-                drawText(ctx, font, status, toggleX, (y + 5f).toInt(), if (actual) ACCENT else TEXT_DIM)
-            }
             isGroup -> {
                 val isCollapsed = collapsedGroups.contains(v)
                 val arrow = if (isCollapsed) "▶" else "▼"
@@ -553,6 +549,13 @@ class ModuleClickGui : Screen(Component.literal("ClickGUI")) {
                 val groupMaxW = (w - 16 - indent).toInt().coerceAtLeast(10)
                 drawText(ctx, font, "$arrow ${trimText(font, v.name, groupMaxW)}",
                     labelX, (y + 5f).toInt(), if (isCollapsed) TEXT_DIM else ACCENT)
+            }
+            actual is Boolean -> {
+                // ON/OFF 移到最右边, 文字留空间
+                val nameMaxW = (toggleX - labelX - 6).coerceAtLeast(10)
+                drawText(ctx, font, trimText(font, v.name, nameMaxW), labelX, (y + 5f).toInt(), TEXT_DIM)
+                val status = if (actual) "§aON" else "§cOFF"
+                drawText(ctx, font, status, toggleX, (y + 5f).toInt(), if (actual) ACCENT else TEXT_DIM)
             }
             isBindValue(v) -> {
                 drawText(ctx, font, trimText(font, v.name, labelMaxW), labelX, (y + 5f).toInt(), TEXT_DIM)
@@ -597,7 +600,6 @@ class ModuleClickGui : Screen(Component.literal("ClickGUI")) {
         // 子模块开关: 如果该设置不在 Mode 列表中但属于可 toggle 的子值, 最右边加蓝点
         if (depth > 0 && getActualValue(v) !is Boolean && !isEnumWithMultiple(getActualValue(v)) &&
             !isGroup && !isSliderValue(v) && !isColorValue(v) && !isBindValue(v)) {
-            // 判断是否可 toggle (可能是子 Enum)
             val va = getActualValue(v)
             if (va is Enum<*>) {
                 val dotX2 = (x + w - 4f).toInt()
@@ -609,7 +611,7 @@ class ModuleClickGui : Screen(Component.literal("ClickGUI")) {
         }
     }
 
-    // ==================== Mode 竖排渲染（返回行数） ====================
+    // ==================== Mode 竖排渲染（返回行数：标题 + 常量数） ====================
     private fun renderModeListVertical(
         ctx: GuiGraphicsExtractor, font: Font,
         v: Value<*>, constants: List<Any>, current: Enum<*>,
@@ -776,8 +778,7 @@ class ModuleClickGui : Screen(Component.literal("ClickGUI")) {
 
                         if (isEnumWithMultiple(actual)) {
                             val constants = getEnumConstants(actual)
-                            // 先跳过标题行
-                            val titleEndY = curY + SETTING_H
+                            // 跳过标题行
                             curY += SETTING_H
                             // 每行 Mode
                             for (const in constants) {
@@ -793,9 +794,7 @@ class ModuleClickGui : Screen(Component.literal("ClickGUI")) {
                         } else {
                             val settingEndY = curY + SETTING_H
                             if (my in curY.toInt()..settingEndY.toInt()) {
-                                if (btn == 0) {
-                                    handleSettingClick(v, btn, mx.toFloat(), curY, listAreaW, listAreaX, panel, depth * SETTING_INDENT)
-                                }
+                                handleSettingClick(v, btn, mx.toFloat(), curY, listAreaW, listAreaX, panel, depth * SETTING_INDENT)
                                 return true
                             }
                             curY += SETTING_H
@@ -1219,70 +1218,3 @@ class ModuleClickGui : Screen(Component.literal("ClickGUI")) {
         if (actual is Boolean) return if (actual) "ON" else "OFF"
         return actual.toString().take(15)
     }
-
-    // ==================== 面板位置缓存 ====================
-    private fun getLayoutFile(): File {
-        return File(minecraft?.gameDirectory ?: File("."), "config/liquidbounce_clickgui_panels.json")
-    }
-
-    private data class PanelState(val x: Int, val y: Int, val collapsed: Boolean, val scroll: Float)
-    private data class LayoutState(
-        val panels: Map<String, PanelState>,
-        val expandedModule: String?,
-        val collapsedGroups: List<String>
-    )
-
-    private fun saveLayout() {
-        try {
-            if (searchText.isNotEmpty()) return
-            val panelsJson = panels.filter { it.category != null }.joinToString(",") { p ->
-                val tag = p.category?.tag ?: ""
-                """{"tag":"$tag","x":${p.x.toInt()},"y":${p.y.toInt()},"collapsed":${p.collapsed},"scroll":${p.scrollOffset}}"""
-            }
-            val expandedName = expandedModule?.name ?: ""
-            val groups = mutableListOf<String>()
-            try {
-                for (mod in ModuleManager.getModules()) {
-                    for ((v, _) in getVisibleValues(mod)) {
-                        if (collapsedGroups.contains(v)) groups += "${mod.name}:${v.name}"
-                    }
-                }
-            } catch (_: Exception) { }
-            val groupsJson = groups.joinToString(",") { "\"$it\"" }
-            val sb = StringBuilder()
-            sb.append("{\"panels\":[").append(panelsJson).append("],")
-            sb.append("\"expanded\":\"").append(expandedName).append("\",")
-            sb.append("\"groups\":[").append(groupsJson).append("]}")
-            val file = getLayoutFile()
-            file.parentFile?.mkdirs()
-            file.writeText(sb.toString())
-        } catch (_: Exception) {}
-    }
-
-    private fun loadLayout(): LayoutState {
-        return try {
-            val file = getLayoutFile()
-            if (!file.exists()) return LayoutState(emptyMap(), null, emptyList())
-            val content = file.readText()
-            val panels = mutableMapOf<String, PanelState>()
-            val panelRegex =
-                Regex("""\{"tag":"([^"]+)","x":(-?[0-9]+),"y":(-?[0-9]+),"collapsed":(true|false)(,"scroll":(-?[0-9.]+))?\}""")
-            for (match in panelRegex.findAll(content)) {
-                val tag = match.groupValues[1]
-                val x = match.groupValues[2].toInt()
-                val y = match.groupValues[3].toInt()
-                val collapsed = match.groupValues[4].toBoolean()
-                val scroll = match.groupValues[6].takeIf { it.isNotEmpty() }?.toFloat() ?: 0f
-                panels[tag] = PanelState(x, y, collapsed, scroll)
-            }
-            val expanded = Regex(""""expanded":"([^"]*)"""").find(content)?.groupValues?.get(1)?.takeIf { it.isNotEmpty() }
-            val groups = mutableListOf<String>()
-            Regex(""""groups":\[(.*?)\]""").find(content)?.groupValues?.get(1)?.let { gs ->
-                Regex(""""([^"]+)"""").findAll(gs).forEach { groups.add(it.groupValues[1]) }
-            }
-            LayoutState(panels, expanded, groups)
-        } catch (_: Exception) {
-            LayoutState(emptyMap(), null, emptyList())
-        }
-    }
-}
