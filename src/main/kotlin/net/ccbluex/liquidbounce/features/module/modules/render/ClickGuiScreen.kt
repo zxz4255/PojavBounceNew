@@ -648,8 +648,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 }
                 // 滑块
                 val knobX = layout.sliderX + (layout.sliderW * progress)
-                drawRoundedRect(ctx, knobX - 3, sliderY - 3, 6f, 8f, 3f, 0xFFFFFFFF.toInt())
-                drawRoundedRect(ctx, knobX - 2, sliderY - 2, 4f, 6f, 2f, PRIMARY_LIGHT)
+                drawRoundedRect(ctx, knobX - 3, (sliderY - 3).toFloat(), 6f, 8f, 3f, 0xFFFFFFFF.toInt())
+                drawRoundedRect(ctx, knobX - 2, (sliderY - 2).toFloat(), 4f, 6f, 2f, PRIMARY_LIGHT)
 
                 drawText(ctx, font, layout.valText, layout.valX, (y + 4f).toInt(), TEXT_SECONDARY)
             }
