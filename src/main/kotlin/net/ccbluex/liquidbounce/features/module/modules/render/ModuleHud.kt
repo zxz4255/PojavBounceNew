@@ -52,7 +52,11 @@ import net.minecraft.client.gui.screens.Screen
  * The client in-game dashboard.
  */
 
-object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = true, hide = true) {
+object ModuleHud : ClientModule("HUD", ModuleCategories.RENDER, state = false, hide = true) {
+    init {
+    tree(Blur)
+    this.enabled = false // 添加这一行：强制设为关闭（即便旧配置里是开启的也会被关掉）
+    }
 
     override val running
         get() = this.enabled && !isDestructed
