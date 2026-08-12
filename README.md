@@ -6,8 +6,8 @@
 [Bilibili](https://b23.tv/tTuEWKE)
 </div>
 
-PojavBounceNew is a free and open-source mixin-based injection hacked client using the Fabric API for Minecraft.And it based on Rubbishy-Liquidbounce-NextGen For Android.I(40%)，Geda6(25%) and Cleverpeople(45%) used DeepSeek,AutoClaw and Genmini to develop this project.And I skided ArrayList,TargetInfo,Notifications from Rubbishy-Liquidbounce and I fixed and improved them.I added fonts to it.Thanked to Rubbishy-Liquidbounce and it created and skided some modules which made this project great. I want the latest LiquidBounce NextGen can work on Android.
-中字:PojavBounceNew 是一个免费且开源的基于混合输入的注入破解客户端，使用 Minecraft 的 Fabric API。它基于 Rubbishy-Liquidbounce-NextGen for Android以及LiquidBounceNextGen0.39.1，我Seagdo(bilibili名)（40%）、各大6（10%）和 Cleverpeople（50%）开发了该项目。我把功能列表、目标信息显示、消息通知和测试中的hotbar还原，从Rubbishy-Liquidbounce项目里打滑过来，修复并完善了它们。我给它内置了字体材质包。感谢CleverPeople的Rubbishy-Liquidbounce，我创建并从那打滑了一些模块，使这个项目非常出色。我想要最新的LiquidBounce下一代能在安卓上运行。
+PojavBounceNew is a free and open-source mixin-based injection hacked client using the Fabric API for Minecraft.And it based on Rubbishy-Liquidbounce-NextGen For Android.I(40%)，Geda6(25%) and Cleverpeople(45%) used DeepSeek,AutoClaw(GLM5) and Genmini to develop this project.And I skided ArrayList,TargetInfo,Notifications from Rubbishy-Liquidbounce and I fixed and improved them.I added fonts to it.Thanked to Rubbishy-Liquidbounce and it created and skided some modules which made this project great. I want the latest LiquidBounce NextGen can work on Android.
+中字:PojavBounceNew 是一个免费且开源的基于混合输入的注入破解客户端，使用 Minecraft 的 Fabric API。它基于 Rubbishy-Liquidbounce-NextGen for Android以及LiquidBounceNextGen0.39.1，我Seagdo(bilibili名)（40%）、各大6（10%）和 Cleverpeople（50%）使用了DeepSeek基础版，DeepSeekV4Flash,GLM5，等AI工具开发了该项目。我把功能列表、目标信息显示、消息通知和在测试中的hotbar原水还原，从Rubbishy-Liquidbounce项目里打滑过来，修复并完善了它们。我给它内置了字体材质包。感谢CleverPeople的Rubbishy-Liquidbounce，我创建并从那打滑了一些模块，使这个项目非常出色。我想要最新的LiquidBounce下一代能在安卓上运行。
 
 ## Issues
 
