@@ -119,9 +119,9 @@ object ModuleNotifications : ClientModule("Notifications", ModuleCategories.REND
     private val welcomeNotification by boolean("Welcome Notification", true)   // 启用时发送欢迎通知
 
     // —— 通知音效 (按类型区分) ——
-    private val enableSound by enumChoice("Enable Sound", NotificationSound.CLICK)    // 模块开启 (SUCCESS)
-    private val disableSound by enumChoice("Disable Sound", NotificationSound.POP)    // 模块关闭 (ERROR)
-    private val infoSound by enumChoice("Info Sound", NotificationSound.NONE)         // 普通通知 (INFO/WARNING)
+    private val enableSound by enumChoice("Enable Sound", NotificationSound.CUSTOM)    // 模块开启 (SUCCESS)
+    private val disableSound by enumChoice("Disable Sound", NotificationSound.CUSTOM)    // 模块关闭 (ERROR)
+    private val infoSound by enumChoice("Info Sound", NotificationSound.CUSTOM)         // 普通通知 (INFO/WARNING)
     private val soundVolume by float("Sound Volume", 1f, 0.1f..2f)
     // 自定义音效的资源 ID (对应 assets/liquidbounce/sounds/<name>.ogg)
     private val enableCustomId by text("Enable Custom ID", "liquidbounce:enable")
