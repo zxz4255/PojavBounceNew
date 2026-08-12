@@ -290,6 +290,9 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     )
                     newPanel.targetScroll = saved?.scroll ?: 0f
                     newPanel.scrollOffset = newPanel.targetScroll
+                    if (isFirstLoad) {
+                        println("[ClickGui] apply ${cat.tag}: saved=$saved -> x=$savedX y=$savedY collapsed=$savedCollapsed scroll=${newPanel.targetScroll}")
+                    }
                     targetPanels.add(newPanel)
                 }
             }
@@ -1376,7 +1379,11 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             val file = getLayoutFile()
             file.parentFile?.mkdirs()
             file.writeText(sb.toString())
-        } catch (_: Exception) {}
+            println("[ClickGui] saved ${panels.filter { it.category != null }.size} panels -> ${file.absolutePath}")
+            println("[ClickGui] content: $sb")
+        } catch (e: Exception) {
+            println("[ClickGui] save FAILED: ${e.message}")
+        }
     }
 
     /**
@@ -1385,8 +1392,12 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     private fun loadLayout(): LayoutState {
         return try {
             val file = getLayoutFile()
-            if (!file.exists()) return LayoutState(emptyMap(), null, emptyList())
+            if (!file.exists()) {
+                println("[ClickGui] no cache file: ${file.absolutePath}")
+                return LayoutState(emptyMap(), null, emptyList())
+            }
             val content = file.readText()
+            println("[ClickGui] loaded raw: $content")
 
             // 面板 (scroll 为可选字段, 兼容旧格式)
             val panels = mutableMapOf<String, PanelState>()
@@ -1412,8 +1423,10 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 Regex(""""([^"]+)"""").findAll(gs).forEach { groups.add(it.groupValues[1]) }
             }
 
+            println("[ClickGui] parsed panels=${panels.size} ($panels), expanded=$expanded, groups=${groups.size}")
             LayoutState(panels, expanded, groups)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            println("[ClickGui] load FAILED: ${e.message}")
             LayoutState(emptyMap(), null, emptyList())
         }
     }
