@@ -251,7 +251,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         }
 
         // 检查是否需要重建
-        val currentHash = searchText.hashCode() + expandedModule?.hashCode() ?: 0
+        val currentHash = searchText.hashCode() + (expandedModule?.hashCode() ?: 0)
         if (lastSearchText != searchText || needsRebuild) {
             lastSearchText = searchText
             cachedPanelData.clear()
