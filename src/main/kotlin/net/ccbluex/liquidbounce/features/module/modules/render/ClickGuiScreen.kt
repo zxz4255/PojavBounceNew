@@ -132,10 +132,12 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         fillRect(ctx, x.toInt(), (y + h - r).toInt(), (x + r).toInt(), (y + h - r + 1).toInt(), color)   // 左下
     }
 
+    private fun fontWidth(font: Font, text: String): Int = font.width(text) ?: 0
+
     private fun trimText(font: Font, text: String, maxWidth: Int): String {
-        if (font.width(text) <= maxWidth) return text
+        if (fontWidth(font, text) <= maxWidth) return text
         var str = text
-        while (str.isNotEmpty() && font.width("$str...") > maxWidth) {
+        while (str.isNotEmpty() && fontWidth(font, "$str...") > maxWidth) {
             str = str.substring(0, str.length - 1)
         }
         return if (str.isEmpty()) "..." else "$str..."
@@ -250,7 +252,7 @@ private fun getCategoryModules(category: ModuleCategory): List<ClientModule> {
             panels = targetPanels
             if (isFirstLoad) {
                 savedLayout.expandedModule?.let { name ->
-                    expandedModule = ModuleManager.getModuleByName(name)
+                    ModuleManager.getModuleByName(name)?.let { expandedModule = it }
                 }
                 for (key in savedLayout.collapsedGroups) {
                     val idx = key.indexOf(':')
@@ -285,7 +287,7 @@ private fun getCategoryModules(category: ModuleCategory): List<ClientModule> {
                 // 分类标题 — 保持原天蓝色不变
                 val arrow = if (panel.collapsed) "▶ " else "▼ "
                 drawText(ctx, font, "§l$arrow${category.tag}", (px + 8f).toInt(), (py + 5f).toInt(), ACCENT)
-                val lineWidth = font.width(category.tag) + 10f
+                val lineWidth = fontWidth(font, category.tag) + 10f
                 fillRect(ctx, px + 8f, py + 18f, px + 8f + lineWidth, py + 19f, 0x30FFFFFF.toInt())
             }
 
@@ -394,7 +396,7 @@ private fun getCategoryModules(category: ModuleCategory): List<ClientModule> {
         val searchY = sh - 30f
         val searchX = (sc - 160f) / 2f
         val searchW = 160f
-        fillRect(ctx, searchX, searchY, searchX + searchW, searchY + 16f, TAB_BG)
+        fillRect(ctx, searchX, searchY, searchX + searchW, searchY + 16f, 0xD01A1A24.toInt())
         drawRoundedRect(ctx, searchX, searchY, searchW, 16f, 2f, BORDER)
 
         if (searchText.isEmpty()) {
