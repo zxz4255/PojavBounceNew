@@ -26,7 +26,7 @@ import java.io.File
  * LiquidBounce-style ClickGUI — Multi-panel layout, each category is an independent floating panel.
  * Dark glass theme matching reference screenshot.
  */
-class ClickGuiScreen93 : Screen(Component.literal("ClickGUI")) {
+class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
     // ==================== Colors (从 ModuleClickGui 动态读取) ====================
     // 激活文字/分类标题/蓝点
