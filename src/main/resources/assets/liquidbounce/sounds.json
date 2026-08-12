@@ -76,5 +76,14 @@
   },
   "squash": {
     "sounds": ["liquidbounce:squash"]
+  },
+  "enable": {
+    "sounds": ["liquidbounce:enable"]
+  },
+  "disable": {
+    "sounds": ["liquidbounce:disable"]
+  },
+  "info": {
+    "sounds": ["liquidbounce:info"]
   }
 }
