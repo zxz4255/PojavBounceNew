@@ -1,14 +1,10 @@
 /*
- * ModuleClickGui —— 打开原生 ClickGuiScreen 的轻量模块 (无 Web 依赖)
+ * ModuleClickGui —— 打开 ClickGuiScreen 的模块
  *
- * 解决: 原浏览器版需两次按右 Shift 才能打开 ClickGUI 的问题。
- * 本版: 模块始终 running, keyHandler 常驻监听, 按下右 Shift 一次即打开;
- *       再次按下 (当前屏幕是 ClickGuiScreen) 关闭。
- *
- * 兼容 API: sync() / invalidate() / isInSearchBar / updateStandaloneScreen()
- *           满足 AutoConfig / ScreenManager / ThemeManager / CommandBind(s)
- *           / CommandValue / CommandTargets / CommandModels / ModelManager
- *           / ModuleInventoryMove / ScriptManager 等文件的引用。
+ * 功能:
+ *   - 快捷键(RightShift/ESC)打开/关闭 ClickGUI
+ *   - 自定义 ClickGUI 颜色、不透明度、大小
+ *   - 兼容所有现有 API
  */
 package net.ccbluex.liquidbounce.features.module.modules.render
 
@@ -21,7 +17,55 @@ import org.lwjgl.glfw.GLFW
 object ModuleClickGui :
     ClientModule("ClickGUI", ModuleCategories.RENDER, bind = GLFW.GLFW_KEY_RIGHT_SHIFT) {
 
-    // 模块未启用时也保持事件处理, 保证快捷键始终可用 (无需先启用模块)
+    // ==================== 自定义设置 ====================
+    /** GUI 整体缩放 (0.5 ~ 2.0) */
+    val guiScale by float("Scale", 1.0f, 0.5f..2.0f)
+
+    /** 面板背景不透明度 (0.1 ~ 1.0) */
+    val bgAlpha by float("BackgroundAlpha", 0.69f, 0.1f..1.0f)
+
+    /** 面板背景颜色 R/G/B (0~255) */
+    val bgColorR by int("BgColor-R", 0x0D, 0..255)
+    val bgColorG by int("BgColor-G", 0x0D, 0..255)
+    val bgColorB by int("BgColor-B", 0x12, 0..255)
+
+    /** 未激活模块字体颜色 R/G/B (0~255) */
+    val textColorR by int("TextColor-R", 0xC8, 0..255)
+    val textColorG by int("TextColor-G", 0xC8, 0..255)
+    val textColorB by int("TextColor-B", 0xCC, 0..255)
+
+    /** 激活模块/分类标题字体颜色 R/G/B (0~255) */
+    val activeTextColorR by int("ActiveColor-R", 0x56, 0..255)
+    val activeTextColorG by int("ActiveColor-G", 0xB4, 0..255)
+    val activeTextColorB by int("ActiveColor-B", 0xE9, 0..255)
+
+    // ==================== 便捷访问 (供 ClickGuiScreen 读取) ====================
+    fun getScale(): Float = try { guiScale } catch (_: Exception) { 1.0f }
+    fun getBgAlphaFloat(): Float = try { bgAlpha } catch (_: Exception) { 0.69f }
+
+    /** 构建面板背景颜色 ARGB: Alpha=bgAlpha*255, R=bgColorR, G=bgColorG, B=bgColorB */
+    fun getBgColor(): Int {
+        return try {
+            val a = (getBgAlphaFloat() * 255f).toInt().coerceIn(0, 255)
+            (a shl 24) or (bgColorR shl 16) or (bgColorG shl 8) or bgColorB
+        } catch (_: Exception) { 0xB00D0D12.toInt() }
+    }
+
+    /** 构建未激活字体颜色 ARGB: Alpha=FF, R=textColorR, G=textColorG, B=textColorB */
+    fun getTextColor(): Int {
+        return try {
+            0xFF000000.toInt() or (textColorR shl 16) or (textColorG shl 8) or textColorB
+        } catch (_: Exception) { 0xFFC8C8CC.toInt() }
+    }
+
+    /** 构建激活/标题字体颜色 ARGB: Alpha=FF, R=activeTextColorR, G=activeTextColorG, B=activeTextColorB */
+    fun getActiveTextColor(): Int {
+        return try {
+            0xFF000000.toInt() or (activeTextColorR shl 16) or (activeTextColorG shl 8) or activeTextColorB
+        } catch (_: Exception) { 0xFF56B4E9.toInt() }
+    }
+
+    // ==================== 模块行为 ====================
     override val running get() = true
 
     @Suppress("unused")
@@ -36,15 +80,13 @@ object ModuleClickGui :
                 closeGui()
             }
         }
-        // ESC 关闭 ClickGUI（仅关闭，不打开）
         if (event.action == 1 && event.keyCode == GLFW.GLFW_KEY_ESCAPE) {
             if (mc.gui.screen() is ClickGuiScreen) {
                 closeGui()
-             }
-         }
+            }
+        }
     }
 
-    // 从模块列表启用 ClickGUI 时立即打开 (用 enabledEffect 替代不存在的 onEnabled)
     override suspend fun enabledEffect() {
         if (mc.gui.screen() !is ClickGuiScreen) {
             openGui()
@@ -68,9 +110,6 @@ object ModuleClickGui :
         }
     }
 
-    /**
-     * 与 openGui 采用完全相同的反射兜底逻辑, 保证能安全关屏。
-     */
     private fun closeGui() {
         try {
             mc.gui.setScreen(null)
@@ -88,7 +127,7 @@ object ModuleClickGui :
         }
     }
 
-    // ==================== 兼容 API (供其他系统调用) ====================
+    // ==================== 兼容 API ====================
     fun sync() {}
     fun invalidate() {}
     val isInSearchBar: Boolean get() = false

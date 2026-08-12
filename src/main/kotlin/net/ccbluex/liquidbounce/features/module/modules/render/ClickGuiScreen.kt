@@ -28,27 +28,32 @@ import java.io.File
  */
 class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
-    // ==================== Colors (深色毛玻璃主题, 接近参考图) ====================
-    private val ACCENT = 0xFF56B4E9.toInt()           // 分类标题 / 激活文字 / 蓝点 — 天蓝
-    private val ACCENT_DARK = 0xFF3A7CA5.toInt()
-    private val BG = 0xB00D0D12.toInt()              // 面板背景 深色半透明 ~69%
-    private val PANEL_BG = 0xA8101016.toInt()         // 面板内部 稍亮 ~66%
-    private val TAB_BG = 0x8025252E.toInt()           // 搜索框背景
+    // ==================== Colors (从 ModuleClickGui 动态读取) ====================
+    // 激活文字/分类标题/蓝点
+    private val ACCENT get() = ModuleClickGui.getActiveTextColor()
+    private val ACCENT_DARK get() = (ModuleClickGui.getActiveTextColor() and 0x00FFFFFF) or 0x66000000
+    // 面板背景 (颜色+不透明度来自模块设置)
+    private val BG get() = ModuleClickGui.getBgColor()
+    private val PANEL_BG get() = ModuleClickGui.getBgColor()
+    // 未激活模块名 浅灰白
+    private val TEXT get() = ModuleClickGui.getTextColor()
+    // 激活文字 天蓝
+    private val TEXT_BRIGHT get() = ModuleClickGui.getActiveTextColor()
+    // 次要文字: 从 TEXT 降低亮度
+    private val TEXT_DIM get() = (ModuleClickGui.getTextColor() and 0x00FFFFFF) or 0x55000000
+    private val TAB_BG = 0x8025252E.toInt()
     private val TAB_ACTIVE = 0xFF33333D.toInt()
-    private val TEXT = 0xFFC8C8CC.toInt()             // 未激活模块名 浅灰白 (接近图中未激活色)
-    private val TEXT_DIM = 0xFF808088.toInt()          // 次要文字 中灰
-    private val TEXT_BRIGHT = 0xFF56B4E9.toInt()      // 激活文字 天蓝 (与蓝点一致)
-    private val BORDER = 0x20FFFFFF.toInt()            // 边框 极淡
-    private val HOVER = 0x15FFFFFF.toInt()             // 悬停
-    private val SCROLL_TRACK = 0x18FFFFFF.toInt()     // 滚动条轨道
-    private val SCROLL_THUMB = 0x50FFFFFF.toInt()     // 滚动条滑块
-    private val SCROLL_THUMB_HOVER = 0x78FFFFFF.toInt() // 滑块悬停
+    private val BORDER = 0x20FFFFFF.toInt()
+    private val HOVER = 0x15FFFFFF.toInt()
+    private val SCROLL_TRACK = 0x18FFFFFF.toInt()
+    private val SCROLL_THUMB = 0x50FFFFFF.toInt()
+    private val SCROLL_THUMB_HOVER = 0x78FFFFFF.toInt()
     private val EXPANDED_BG = 0x0A56B4E9.toInt()
     private val GROUP_BG = 0x0C56B4E9.toInt()
     private val GROUP_LINE = 0x1456B4E9.toInt()
     private val SETTING_CHILD_BG = 0x06FFFFFF.toInt()
-    private val OVERLAY = 0x28000000                   // 遮罩 加深模拟模糊感
-    private val SETTING_BG = 0x50080810.toInt()        // 设置区域背景
+    private val OVERLAY = 0x28000000
+    private val SETTING_BG = 0x50080810.toInt()
 
     // ==================== Layout ====================
     private val CORNER = 5f                           // 圆角稍大, 更圆润
