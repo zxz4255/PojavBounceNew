@@ -22,44 +22,55 @@ import kotlin.math.max
 import kotlin.math.sin
 import java.io.File
 
-/**
- * LiquidBounce-style ClickGUI — Multi-panel layout, each category is an independent floating panel.
- */
 class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
-    // ==================== Colors (降低透明度) ====================
-    private val ACCENT = 0xFF56B4E9.toInt()
-    private val ACCENT_DARK = 0xFF3A7CA5.toInt()
-    private val BG = 0x80101014.toInt()          // 面板背景降低至 0x80 (50%)
-    private val PANEL_BG = 0x9016161A.toInt()     // 面板内部降低至 0x90 (56%)
-    private val TAB_BG = 0x8025252E.toInt()
-    private val TAB_ACTIVE = 0xFF33333D.toInt()
-    private val TEXT = 0xFFE8E8E8.toInt()
-    private val TEXT_DIM = 0xFF8E8E8E.toInt()
-    private val TEXT_BRIGHT = 0xFFFFFFFF.toInt()
-    private val BORDER = 0x1CFFFFFF.toInt()
-    private val HOVER = 0x10FFFFFF.toInt()
-    private val SCROLL_TRACK = 0x1CFFFFFF.toInt()
-    private val SCROLL_THUMB = 0x44FFFFFF.toInt()
-    private val SCROLL_THUMB_HOVER = 0x80FFFFFF.toInt()
-    private val EXPANDED_BG = 0x0A56B4E9.toInt()
-    private val GROUP_BG = 0x1456B4E9.toInt()      // 组头背景 (ACCENT 8%)
-    private val GROUP_LINE = 0x1856B4E9.toInt()    // 子项层级竖线
-    private val SETTING_CHILD_BG = 0x06FFFFFF.toInt() // 子项浅色背景
-    private val OVERLAY = 0x20000000
-    private val SETTING_BG = 0x60080810.toInt()
+    // ==================== 暗黑风格配色 ====================
+    // 主色 - 霓虹蓝紫
+    private val PRIMARY = 0xFF6C5CE7.toInt()         // 紫色主色
+    private val PRIMARY_LIGHT = 0xFFA29BFE.toInt()   // 亮紫
+    private val PRIMARY_DARK = 0xFF4834D4.toInt()    // 深紫
+    private val ACCENT = 0xFF00D2D3.toInt()          // 青色点缀
+    
+    // 纯黑背景
+    private val BG_MAIN = 0xE6000000.toInt()         // 主背景（几乎全黑）
+    private val BG_PANEL = 0xCC0A0A0A.toInt()        // 面板背景（纯黑半透明）
+    private val BG_PANEL_ALT = 0xDD111111.toInt()    // 面板备选
+    private val BG_ITEM = 0x00FFFFFF.toInt()         // 项目背景（完全透明）
+    private val BG_ITEM_HOVER = 0x15FFFFFF.toInt()   // 悬停高亮（白色微光）
+    private val BG_ITEM_ACTIVE = 0x0D6C5CE7.toInt()  // 激活状态（紫色微光）
+    private val BG_ITEM_SELECTED = 0x1A6C5CE7.toInt() // 选中状态
+    
+    // 文字颜色 - 灰阶
+    private val TEXT_WHITE = 0xFFFFFFFF.toInt()
+    private val TEXT_MAIN = 0xFFE8E8E8.toInt()
+    private val TEXT_SECONDARY = 0xFF888888.toInt()
+    private val TEXT_DIM = 0xFF555555.toInt()
+    private val TEXT_DISABLED = 0xFF333333.toInt()
+    private val TEXT_ACCENT = 0xFFA29BFE.toInt()
+    
+    // 边框和分割线
+    private val BORDER_LIGHT = 0x15FFFFFF.toInt()
+    private val BORDER_MEDIUM = 0x2AFFFFFF.toInt()
+    private val DIVIDER = 0x0AFFFFFF.toInt()
+    
+    // 开关颜色
+    private val TOGGLE_ON = 0xFF6C5CE7.toInt()
+    private val TOGGLE_OFF = 0xFF2A2A2A.toInt()
+    private val TOGGLE_BG = 0x30FFFFFF.toInt()
+    private val TOGGLE_KNOB = 0xFFFFFFFF.toInt()
 
     // ==================== Layout ====================
-    private val CORNER = 4f
-    private val ITEM_H = 18f
-    private val SETTING_H = 18f
-    private val SCROLL_W = 4f
-    private val PADDING = 5f
-    private val SETTING_INDENT = 8f
-    private val PANEL_GAP = 0f
-    private val PANEL_MIN_W = 125
+    private val CORNER = 8f
+    private val ITEM_H = 24f
+    private val SETTING_H = 22f
+    private val SCROLL_W = 3f
+    private val PADDING = 10f
+    private val SETTING_INDENT = 14f
+    private val PANEL_GAP = 10f
+    private val PANEL_MIN_W = 140
     private val PANEL_MAX_H = 400
-    private val HEADER_H = 24f
+    private val HEADER_H = 32f
+    private val CATEGORY_TAB_H = 32f
 
     // ==================== Slider Drag State ====================
     private data class SliderContext(
@@ -80,19 +91,18 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     private var listeningValue: Value<*>? = null
     private val collapsedGroups = mutableSetOf<Value<*>>()
 
-    // ==================== 调色板 (color 选项) ====================
-    private var activeColorValue: Value<*>? = null      // 当前打开的调色板对应的 Value
+    // ==================== 调色板 ====================
+    private var activeColorValue: Value<*>? = null
     private var colorPickerX = 0f
     private var colorPickerY = 0f
     private val PALETTE_ROWS = 9
     private val PALETTE_COLS = 5
-    private val PALETTE_CELL = 10f
-    private val PALETTE_GAP = 2f
-    private val PALETTE_PAD = 4f
+    private val PALETTE_CELL = 12f
+    private val PALETTE_GAP = 3f
+    private val PALETTE_PAD = 6f
     private val PALETTE_W = PALETTE_COLS * (PALETTE_CELL + PALETTE_GAP) - PALETTE_GAP + PALETTE_PAD * 2
     private val PALETTE_H = PALETTE_ROWS * (PALETTE_CELL + PALETTE_GAP) - PALETTE_GAP + PALETTE_PAD * 2
 
-    /** 预生成调色板: 8 行色相 × 5 档亮度 + 1 行灰阶 = 45 色 */
     private val paletteColors: List<Color4b> = buildList {
         for (row in 0 until 8) {
             val hue = row * 45f / 360f
@@ -108,13 +118,13 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     }
 
     private var fadeAnim = 0f
-    private var isFirstLoad = true   // 标记首次加载，用于读取缓存
+    private var layoutLoaded = false
+    private val cachedLayout: LayoutState by lazy { loadLayout() }
 
     private val categories = ModuleCategories.entries.toList()
-
-    // ==================== 模式值缓存 ====================
     private val modeValueCache = IdentityHashMap<ClientModule, Value<*>?>()
 
+    // ==================== Panel Data ====================
     private data class PanelData(
         val category: ModuleCategory?,
         var x: Float, var y: Float, var w: Float, var h: Float,
@@ -126,10 +136,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         var collapsed: Boolean = false
     )
 
-    private var panels = mutableListOf<PanelData>()
+    private val panels = mutableListOf<PanelData>()
     private var searchPanel: PanelData? = null
-
-    private var isLeftMouseDownCached = false
 
     override fun isPauseScreen() = false
     override fun shouldCloseOnEsc() = true
@@ -220,7 +228,17 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     override fun extractBackground(ctx: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, delta: Float) {
         val sc = minecraft!!.window.guiScaledWidth
         val sh = minecraft!!.window.guiScaledHeight
-        fillRect(ctx, 0, 0, sc, sh, OVERLAY)
+        // 纯黑背景，带微弱渐变
+        fillRect(ctx, 0, 0, sc, sh, 0xCC000000.toInt())
+        // 中心微光
+        val radius = sc.coerceAtMost(sh) / 2f
+        for (i in 0..10) {
+            val alpha = (10 - i) * 2
+            val size = radius * (1 - i / 11f)
+            val x = (sc - size) / 2f
+            val y = (sh - size) / 2f
+            fillRect(ctx, x, y, x + size, y + size, (alpha shl 24) or 0x6C5CE7)
+        }
     }
 
     // ==================== Main render ====================
@@ -234,9 +252,11 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
         val isSearching = searchText.isNotEmpty()
 
-        // 首次加载：先读取缓存状态 (面板坐标/折叠/滚动 + 展开模块 + 折叠分组)
-        val savedLayout = if (isFirstLoad) loadLayout() else LayoutState(emptyMap(), null, emptyList())
-        // 计算面板布局
+        if (!layoutLoaded) {
+            applyCachedLayout()
+            layoutLoaded = true
+        }
+
         val targetPanels = mutableListOf<PanelData>()
 
         if (isSearching) {
@@ -260,91 +280,75 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
             for ((idx, cat) in categories.withIndex()) {
                 val panelX = startX + (panelW + PANEL_GAP) * idx
+                
                 val existingPanel = panels.find { it.category == cat }
                 if (existingPanel != null) {
-                    // 首次加载时应用缓存坐标/滚动/折叠
-                    if (isFirstLoad) {
-                        savedLayout.panels[cat.tag]?.let {
-                            existingPanel.x = it.x.toFloat()
-                            existingPanel.y = it.y.toFloat()
-                            existingPanel.collapsed = it.collapsed
-                            existingPanel.targetScroll = it.scroll
-                            existingPanel.scrollOffset = it.scroll
-                        }
-                    }
                     existingPanel.w = panelW
                     existingPanel.h = panelH
                     targetPanels.add(existingPanel)
                 } else {
-                    // 创建新面板，优先使用缓存坐标
-                    val saved = savedLayout.panels[cat.tag]
-                    val savedX = saved?.x?.toFloat() ?: panelX
-                    val savedY = saved?.y?.toFloat() ?: panelY
-                    val savedCollapsed = saved?.collapsed ?: false
                     val newPanel = PanelData(
                         cat,
-                        savedX,
-                        savedY,
+                        panelX,
+                        panelY,
                         panelW, panelH,
-                        collapsed = savedCollapsed
+                        collapsed = false
                     )
-                    newPanel.targetScroll = saved?.scroll ?: 0f
-                    newPanel.scrollOffset = newPanel.targetScroll
-                    if (isFirstLoad) {
-                        println("[ClickGui] apply ${cat.tag}: saved=$saved -> x=$savedX y=$savedY collapsed=$savedCollapsed scroll=${newPanel.targetScroll}")
-                    }
                     targetPanels.add(newPanel)
                 }
             }
+            
             panels.removeAll { targetPanels.contains(it).not() && it.category != null }
-            panels = targetPanels
-            if (isFirstLoad) {
-                // 恢复展开的模块
-                savedLayout.expandedModule?.let { name ->
-                    expandedModule = ModuleManager.getModuleByName(name)
-                }
-                // 恢复折叠的分组 ("模块名:分组名")
-                for (key in savedLayout.collapsedGroups) {
-                    val idx = key.indexOf(':')
-                    if (idx <= 0) continue
-                    val mod = ModuleManager.getModuleByName(key.substring(0, idx)) ?: continue
-                    val groupName = key.substring(idx + 1)
-                    for ((v, _) in getVisibleValues(mod)) {
-                        if (v.name == groupName && isGroupValue(v)) {
-                            collapsedGroups.add(v)
-                        }
-                    }
-                }
-                isFirstLoad = false
-            }
+            panels.clear()
+            panels.addAll(targetPanels)
         }
 
-        // 绘制面板循环
+        // 绘制面板
         for (panel in panels) {
             val px = panel.x; val py = panel.y; val pw = panel.w; val ph = panel.h
-
             val actualHeight = if (panel.collapsed) HEADER_H + 2f else ph
 
-            drawRoundedRect(ctx, px, py, pw, actualHeight, CORNER, BG)
-            drawRoundedRect(ctx, px, py, pw, 1f, CORNER, BORDER)
-            drawRoundedRect(ctx, px, py + actualHeight - 1f, pw, 1f, CORNER, BORDER)
+            // 面板背景 - 纯黑磨砂
+            drawRoundedRect(ctx, px, py, pw, actualHeight, CORNER, BG_PANEL)
+            
+            // 边框 - 微光
+            drawRoundedRect(ctx, px, py, pw, 1f, CORNER, BORDER_LIGHT)
+            drawRoundedRect(ctx, px, py + actualHeight - 1f, pw, 1f, CORNER, BORDER_LIGHT)
+            
+            // 顶部高光线
+            fillRect(ctx, px + 20f, py, px + pw - 20f, py + 1f, 0x0A6C5CE7.toInt())
 
             var panelModules: List<ClientModule>
             if (isSearching) {
                 panelModules = categories.flatMap { getCategoryModules(it) }.distinct()
-                drawText(ctx, font, "§lSearch Results", (px + 8f).toInt(), (py + 5f).toInt(), ACCENT)
+                drawText(ctx, font, "🔍 Search Results", (px + 12f).toInt(), (py + 9f).toInt(), PRIMARY_LIGHT)
             } else {
                 val category = panel.category ?: continue
                 panelModules = getCategoryModules(category)
-                val arrow = if (panel.collapsed) "▶ " else "▼ "
-                drawText(ctx, font, "§l$arrow${category.tag}", (px + 8f).toInt(), (py + 5f).toInt(), ACCENT)
-                val lineWidth = font.width(category.tag) + 10f
-                fillRect(ctx, px + 8f, py + 18f, px + 8f + lineWidth, py + 19f, ACCENT_DARK)
+                
+                // 分类标题
+                val title = "${category.tag}"
+                drawText(ctx, font, "§l$title", (px + 14f).toInt(), (py + 9f).toInt(), TEXT_WHITE)
+                
+                // 模块数量 - 使用紫色
+                val countText = "${panelModules.size}"
+                val countX = px + pw - font.width(countText) - 14f
+                drawText(ctx, font, countText, countX.toInt(), (py + 9f).toInt(), PRIMARY_LIGHT)
+                
+                // 底部细线 - 紫色渐变
+                val gradientSteps = 10
+                for (i in 0..gradientSteps) {
+                    val progress = i.toFloat() / gradientSteps
+                    val alpha = (0x15 * (1 - progress)).toInt()
+                    val xPos = px + 14f + (pw - 28f) * progress
+                    fillRect(ctx, xPos, py + HEADER_H - 1f, xPos + (pw - 28f) / gradientSteps, py + HEADER_H, 
+                        (alpha shl 24) or PRIMARY)
+                }
             }
 
             if (panel.collapsed) continue
 
-            val headerH = 24f
+            val headerH = HEADER_H
             val listAreaX = px + PADDING
             val listAreaW = pw - PADDING * 2 - SCROLL_W
             val listAreaY = py + headerH + 4f
@@ -365,18 +369,46 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     val isHover = mouseX in listAreaX.toInt()..(listAreaX + listAreaW).toInt() &&
                             mouseY in curY.toInt()..modEndY.toInt()
 
-                    if (isHover) fillRect(ctx, listAreaX, curY, listAreaX + listAreaW, modEndY, HOVER)
-                    if (isExpanded) fillRect(ctx, listAreaX, curY, listAreaX + listAreaW, modEndY, EXPANDED_BG)
+                    // 模块行背景
+                    if (isHover) {
+                        fillRect(ctx, listAreaX, curY, listAreaX + listAreaW, modEndY, BG_ITEM_HOVER)
+                    }
+                    if (isExpanded) {
+                        fillRect(ctx, listAreaX, curY, listAreaX + listAreaW, modEndY, BG_ITEM_ACTIVE)
+                    }
 
-                    val nameColor = if (mod.enabled) TEXT else TEXT_DIM
-                    val nameMaxW = (listAreaW - 16).toInt()
+                    // 模块名称 - 白色为主
+                    val nameColor = if (mod.enabled) TEXT_WHITE else TEXT_SECONDARY
+                    val nameMaxW = (listAreaW - 56).toInt()
                     drawText(ctx, font, trimText(font, mod.name, nameMaxW),
-                        (listAreaX + 4f).toInt(), (curY + 5f).toInt(), nameColor)
+                        (listAreaX + 6f).toInt(), (curY + 7f).toInt(), nameColor)
 
-                    val dotX = (listAreaX + listAreaW - 4f).toInt()
-                    val dotY = curY.toInt() + 7
-                    fillRect(ctx, dotX, dotY, dotX + 4, dotY + 4,
-                        if (mod.enabled) ACCENT else 0x40808080.toInt())
+                    // 暗黑风格开关 - 紫色主题
+                    val toggleX = (listAreaX + listAreaW - 32f).toInt()
+                    val toggleY = curY.toInt() + 6
+                    val toggleW = 26
+                    val toggleH = 12
+                    
+                    // 开关轨道
+                    drawRoundedRect(ctx, toggleX.toFloat(), toggleY.toFloat(), toggleW.toFloat(), toggleH.toFloat(), 6f, 
+                        if (mod.enabled) 0x406C5CE7.toInt() else 0xFF2A2A2A.toInt())
+                    
+                    // 开关背景填充
+                    if (mod.enabled) {
+                        fillRect(ctx, toggleX + 2, toggleY + 2, toggleX + toggleW - 2, toggleY + toggleH - 2, PRIMARY)
+                        drawRoundedRect(ctx, (toggleX + 2).toFloat(), (toggleY + 2).toFloat(), 
+                            (toggleW - 4).toFloat(), (toggleH - 4).toFloat(), 4f, PRIMARY_LIGHT)
+                    }
+                    
+                    // 开关滑块 - 带光晕
+                    val knobX = if (mod.enabled) toggleX + toggleW - 10 else toggleX
+                    val knobColor = if (mod.enabled) 0xFFFFFFFF.toInt() else 0xFF666666.toInt()
+                    drawRoundedRect(ctx, knobX.toFloat(), (toggleY - 1).toFloat(), 10f, (toggleH + 2).toFloat(), 5f, knobColor)
+                    
+                    // 开启时滑块光晕
+                    if (mod.enabled) {
+                        drawRoundedRect(ctx, (knobX - 2).toFloat(), (toggleY - 3).toFloat(), 14f, (toggleH + 6).toFloat(), 7f, 0x106C5CE7.toInt())
+                    }
                 }
 
                 curY += ITEM_H
@@ -388,7 +420,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     val bgStart = curY.coerceAtLeast(listAreaY)
                     val bgEnd = (curY + settingBgH).coerceAtMost(listAreaY + listAreaH)
                     if (bgEnd > bgStart && bgStart < listAreaY + listAreaH) {
-                        fillRect(ctx, listAreaX, bgStart, listAreaX + listAreaW, bgEnd, SETTING_BG)
+                        fillRect(ctx, listAreaX, bgStart, listAreaX + listAreaW, bgEnd, 0x08000000.toInt())
                     }
 
                     for ((v, depth) in values) {
@@ -396,7 +428,9 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                         if (settingEndY >= listAreaY && curY <= listAreaY + listAreaH) {
                             val isSettingHover = mouseX in listAreaX.toInt()..(listAreaX + listAreaW).toInt() &&
                                     mouseY in curY.toInt()..settingEndY.toInt()
-                            if (isSettingHover) fillRect(ctx, listAreaX, curY, listAreaX + listAreaW, settingEndY, HOVER)
+                            if (isSettingHover) {
+                                fillRect(ctx, listAreaX, curY, listAreaX + listAreaW, settingEndY, BG_ITEM_HOVER)
+                            }
                             renderSetting(ctx, v, depth, listAreaX, curY, listAreaW, mouseX, mouseY, mod)
                         }
                         curY += SETTING_H
@@ -404,79 +438,123 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 }
             }
 
+            // 滚动条 - 紫色主题
             if (contentH > listAreaH) {
-                fillRect(ctx, listAreaX + listAreaW, listAreaY, listAreaX + listAreaW + SCROLL_W, listAreaY + listAreaH, SCROLL_TRACK)
                 val thumbH = (listAreaH * listAreaH / contentH).coerceAtLeast(12f)
                 val thumbY = listAreaY + if (maxScroll > 0f) (panel.scrollOffset / maxScroll) * (listAreaH - thumbH) else 0f
                 val isScrollHover = mouseX in (listAreaX + listAreaW).toInt()..(listAreaX + listAreaW + SCROLL_W).toInt() &&
                         mouseY in thumbY.toInt()..(thumbY + thumbH).toInt()
-                val thumbColor = if (isScrollHover || panel.draggingScroll) SCROLL_THUMB_HOVER else SCROLL_THUMB
-                fillRect(ctx, listAreaX + listAreaW, thumbY, listAreaX + listAreaW + SCROLL_W, thumbY + thumbH, thumbColor)
+                val thumbColor = if (isScrollHover || panel.draggingScroll) 
+                    0x806C5CE7.toInt() else 0x306C5CE7.toInt()
+                drawRoundedRect(ctx, listAreaX + listAreaW, thumbY, SCROLL_W, thumbH, 2f, thumbColor)
             }
         }
 
-        // 底部搜索输入框
-        val searchY = sh - 30f
-        val searchX = (sc - 160f) / 2f
-        val searchW = 160f
-        fillRect(ctx, searchX, searchY, searchX + searchW, searchY + 16f, TAB_BG)
-        drawRoundedRect(ctx, searchX, searchY, searchW, 16f, 2f, BORDER)
+        // 搜索框 - 暗黑风格
+        val searchY = sh - 40f
+        val searchX = (sc - 220f) / 2f
+        val searchW = 220f
+        drawRoundedRect(ctx, searchX, searchY, searchW, 28f, 6f, 0xCC0A0A0A.toInt())
+        drawRoundedRect(ctx, searchX, searchY, searchW, 1f, 6f, BORDER_LIGHT)
+        
+        // 搜索框聚焦光晕
+        if (searchFocused) {
+            drawRoundedRect(ctx, searchX, searchY, searchW, 28f, 6f, 0x066C5CE7.toInt())
+        }
 
         if (searchText.isEmpty()) {
-            drawText(ctx, font, "§7Search modules...", (searchX + 4f).toInt(), (searchY + 3f).toInt(), TEXT_DIM)
+            drawText(ctx, font, "⌕  Search modules...", (searchX + 12f).toInt(), (searchY + 9f).toInt(), TEXT_SECONDARY)
         } else {
-            drawText(ctx, font, trimText(font, searchText, (searchW - 20).toInt()),
-                (searchX + 4f).toInt(), (searchY + 3f).toInt(), TEXT)
+            drawText(ctx, font, trimText(font, searchText, (searchW - 30).toInt()),
+                (searchX + 12f).toInt(), (searchY + 9f).toInt(), TEXT_WHITE)
         }
 
         if (searchFocused) {
-            val cursorX = searchX.toInt() + 4 + font.width(searchText)
-            if (cursorX < searchX + searchW - 4) {
+            val cursorX = searchX.toInt() + 12 + font.width(searchText)
+            if (cursorX < searchX + searchW - 12) {
                 val blink = System.currentTimeMillis() / 500 % 2 == 0L
-                if (blink) fillRect(ctx, cursorX, searchY.toInt() + 2, cursorX + 1, searchY.toInt() + 14, TEXT_BRIGHT)
+                if (blink) {
+                    fillRect(ctx, cursorX, searchY.toInt() + 6, cursorX + 1, searchY.toInt() + 22, PRIMARY_LIGHT)
+                }
             }
         }
 
-        // ==================== 调色板 (color 选项) ====================
+        // ==================== 调色板 ====================
         val colorVal = activeColorValue
         if (colorVal != null) {
             val px = colorPickerX.coerceIn(0f, sc - PALETTE_W)
             val py = colorPickerY.coerceIn(0f, sh - PALETTE_H)
 
-            // 背景 + 边框
-            drawRoundedRect(ctx, px, py, PALETTE_W, PALETTE_H, 4f, BG)
-            fillRect(ctx, px.toInt(), py.toInt(), (px + PALETTE_W).toInt(), py.toInt() + 1, SCROLL_THUMB)
-            fillRect(ctx, px.toInt(), (py + PALETTE_H - 1).toInt(), (px + PALETTE_W).toInt(), (py + PALETTE_H).toInt(), SCROLL_THUMB)
-            fillRect(ctx, px.toInt(), py.toInt(), px.toInt() + 1, (py + PALETTE_H).toInt(), SCROLL_THUMB)
-            fillRect(ctx, (px + PALETTE_W - 1).toInt(), py.toInt(), (px + PALETTE_W).toInt(), (py + PALETTE_H).toInt(), SCROLL_THUMB)
+            drawRoundedRect(ctx, px, py, PALETTE_W, PALETTE_H, 6f, 0xDD0A0A0A.toInt())
+            drawRoundedRect(ctx, px, py, PALETTE_W, 1f, 6f, BORDER_LIGHT)
 
-            // 当前颜色 (用于高亮匹配)
             val currentRgb = extractColor(colorVal).rgb and 0xFFFFFF
 
-            // 色格网格
             for (index in paletteColors.indices) {
                 val row = index / PALETTE_COLS
                 val col = index % PALETTE_COLS
                 val cx = px + PALETTE_PAD + col * (PALETTE_CELL + PALETTE_GAP)
                 val cy = py + PALETTE_PAD + row * (PALETTE_CELL + PALETTE_GAP)
                 val color4b = paletteColors[index]
-                fillRect(ctx, cx.toInt(), cy.toInt(), (cx + PALETTE_CELL).toInt(), (cy + PALETTE_CELL).toInt(), color4b.argb)
-                // 当前颜色对应的色格加白色高亮边框
+                drawRoundedRect(ctx, cx, cy, PALETTE_CELL, PALETTE_CELL, 3f, color4b.argb)
                 if ((color4b.argb and 0xFFFFFF) == currentRgb) {
-                    fillRect(ctx, (cx - 1).toInt(), (cy - 1).toInt(), (cx + PALETTE_CELL + 1).toInt(), cy.toInt(), TEXT_BRIGHT)
-                    fillRect(ctx, (cx - 1).toInt(), (cy + PALETTE_CELL).toInt(), (cx + PALETTE_CELL + 1).toInt(), (cy + PALETTE_CELL + 1).toInt(), TEXT_BRIGHT)
-                    fillRect(ctx, (cx - 1).toInt(), (cy - 1).toInt(), cx.toInt(), (cy + PALETTE_CELL + 1).toInt(), TEXT_BRIGHT)
-                    fillRect(ctx, (cx + PALETTE_CELL).toInt(), (cy - 1).toInt(), (cx + PALETTE_CELL + 1).toInt(), (cy + PALETTE_CELL + 1).toInt(), TEXT_BRIGHT)
+                    drawRoundedRect(ctx, cx - 1.5f, cy - 1.5f, PALETTE_CELL + 3, PALETTE_CELL + 3, 4f, 0xFFFFFFFF.toInt())
+                    drawRoundedRect(ctx, cx - 1f, cy - 1f, PALETTE_CELL + 2, PALETTE_CELL + 2, 3f, 0xFF6C5CE7.toInt())
                 }
             }
         }
     }
 
-    // ==================== 滑条布局计算 ====================
-    /**
-     * 滑条 + 数值的布局: 数值右对齐面板右边界, 滑条紧贴数值左侧。
-     * 渲染 / 点击 / 拖动统一使用, 保证滑条与数值不超出面板。
-     */
+    private fun applyCachedLayout() {
+        try {
+            val saved = cachedLayout
+            for ((tag, state) in saved.panels) {
+                val category = categories.find { it.tag == tag }
+                if (category != null) {
+                    val panel = panels.find { it.category == category }
+                    if (panel != null) {
+                        panel.x = state.x.toFloat()
+                        panel.y = state.y.toFloat()
+                        panel.collapsed = state.collapsed
+                        panel.targetScroll = state.scroll
+                        panel.scrollOffset = state.scroll
+                    } else {
+                        val newPanel = PanelData(
+                            category,
+                            state.x.toFloat(),
+                            state.y.toFloat(),
+                            PANEL_MIN_W.toFloat(),
+                            PANEL_MAX_H.toFloat(),
+                            collapsed = state.collapsed
+                        )
+                        newPanel.targetScroll = state.scroll
+                        newPanel.scrollOffset = state.scroll
+                        panels.add(newPanel)
+                    }
+                }
+            }
+
+            saved.expandedModule?.let { name ->
+                expandedModule = ModuleManager.getModuleByName(name)
+            }
+
+            for (key in saved.collapsedGroups) {
+                val idx = key.indexOf(':')
+                if (idx <= 0) continue
+                val mod = ModuleManager.getModuleByName(key.substring(0, idx)) ?: continue
+                val groupName = key.substring(idx + 1)
+                for ((v, _) in getVisibleValues(mod)) {
+                    if (v.name == groupName && isGroupValue(v)) {
+                        collapsedGroups.add(v)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    // ==================== 滑条布局 ====================
     private data class SliderLayout(
         val sliderX: Int,
         val sliderW: Int,
@@ -504,16 +582,14 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             }
         }
 
-        val rightEdge = (x + w - 2).toInt()               // 面板内容右边界 (留 2px)
-        val sliderW = 36
-        // 滑条左侧不能压过 label 区域 (label 起点 + 名字最小宽度)
-        val minSliderX = (x + 6 + indent).toInt() + 40
-        // 数值可用宽度 (右边界 - 滑条区域), 面板过窄时收缩数值文本
+        val rightEdge = (x + w - 2).toInt()
+        val sliderW = 40
+        val minSliderX = (x + 6 + indent).toInt() + 50
         val maxValW = (rightEdge - minSliderX - 3 - sliderW).coerceIn(16, 70)
         val valText = trimText(font, "%.1f".format(fv), maxValW)
         val valW = font.width(valText).coerceAtMost(maxValW)
-        val valX = rightEdge - valW                       // 数值右对齐
-        val sliderX = valX - 3 - sliderW                  // 滑条紧贴数值左侧
+        val valX = rightEdge - valW
+        val sliderX = valX - 3 - sliderW
 
         return SliderLayout(sliderX, sliderW, valText, valX, fv, minV, maxV)
     }
@@ -527,18 +603,17 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val font = minecraft!!.font
         val indent = depth * SETTING_INDENT
 
-        // 子项视觉: 浅色背景 + 左侧层级竖线 (depth > 0), 强化分组层次
         if (depth > 0) {
-            fillRect(ctx, x, y, x + w, y + SETTING_H, SETTING_CHILD_BG)
-            val lineX = (x + 4f + indent).toInt()
-            fillRect(ctx, lineX, y.toInt() + 1, lineX + 1, y.toInt() + SETTING_H.toInt() - 1, GROUP_LINE)
+            // 层级线 - 紫色
+            val lineX = (x + 6f + indent).toInt()
+            fillRect(ctx, lineX, y.toInt() + 2, lineX + 1, y.toInt() + SETTING_H.toInt() - 2, 0x206C5CE7.toInt())
         }
 
         val actual = getActualValue(v)
         val isGroup = isGroupValue(v)
         val labelX = (x + 6 + indent).toInt()
-        val valueX = (x + w - 44).toInt()
-        val labelMaxW = (valueX - labelX - 4).coerceAtLeast(10)
+        val valueX = (x + w - 50).toInt()
+        val labelMaxW = (valueX - labelX - 6).coerceAtLeast(10)
 
         val isEnum = actual is Enum<*>
         val enumConstants: List<Any> = if (isEnum) {
@@ -562,71 +637,70 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 if (currentEnum != null) {
                     renderModeList(ctx, font, v, enumConstants, currentEnum, x, y, w, indent, mouseX, mouseY)
                 } else {
-                    drawText(ctx, font, trimText(font, v.name, labelMaxW), labelX, (y + 5f).toInt(), TEXT_DIM)
+                    drawText(ctx, font, trimText(font, v.name, labelMaxW), labelX, (y + 6f).toInt(), TEXT_SECONDARY)
                     val valMaxW = (x + w - valueX - 2).toInt().coerceAtLeast(10)
-                    drawText(ctx, font, "§7${trimText(font, getDisplayValue(v), valMaxW)}", valueX, (y + 5f).toInt(), TEXT_DIM)
+                    drawText(ctx, font, trimText(font, getDisplayValue(v), valMaxW), valueX, (y + 6f).toInt(), TEXT_DIM)
                 }
             }
             isGroup -> {
                 val isCollapsed = collapsedGroups.contains(v)
                 val arrow = if (isCollapsed) "▶" else "▼"
-                // 组头背景色块, 强化分组视觉
-                fillRect(ctx, x, y, x + w, y + SETTING_H, GROUP_BG)
-                // 组名使用高亮色, 全宽显示 (不受右侧值区域限制)
-                val groupMaxW = (w - 16 - indent).toInt().coerceAtLeast(10)
-                drawText(ctx, font, "$arrow ${trimText(font, v.name, groupMaxW)}",
-                    labelX, (y + 5f).toInt(), if (isCollapsed) TEXT_DIM else ACCENT)
+                val color = if (isCollapsed) TEXT_SECONDARY else PRIMARY_LIGHT
+                drawText(ctx, font, "$arrow ${trimText(font, v.name, (w - 20 - indent).toInt())}",
+                    labelX, (y + 6f).toInt(), color)
             }
             actual is Boolean -> {
                 drawText(ctx, font, trimText(font, v.name, labelMaxW),
-                    labelX, (y + 5f).toInt(), TEXT_DIM)
-                val status = if (actual) "§aON" else "§cOFF"
-                drawText(ctx, font, status, valueX, (y + 5f).toInt(), if (actual) ACCENT else TEXT_DIM)
+                    labelX, (y + 6f).toInt(), TEXT_SECONDARY)
+                val status = if (actual) "ON" else "OFF"
+                drawText(ctx, font, status, valueX, (y + 6f).toInt(), if (actual) PRIMARY_LIGHT else TEXT_DIM)
             }
             isBindValue(v) -> {
                 drawText(ctx, font, trimText(font, v.name, labelMaxW),
-                    labelX, (y + 5f).toInt(), TEXT_DIM)
+                    labelX, (y + 6f).toInt(), TEXT_SECONDARY)
                 val isListening = listeningValue == v
                 val bindStr = trimText(font, formatBindValue(v), (w - 60 - indent).toInt())
-                val display = if (isListening) "§e[...]" else "§7$bindStr"
-                drawText(ctx, font, display, valueX, (y + 5f).toInt(), if (isListening) ACCENT else TEXT_DIM)
+                val display = if (isListening) "[...]" else bindStr
+                drawText(ctx, font, display, valueX, (y + 6f).toInt(), if (isListening) PRIMARY_LIGHT else TEXT_DIM)
             }
             isSliderValue(v) -> {
                 drawText(ctx, font, trimText(font, v.name, labelMaxW),
-                    labelX, (y + 3f).toInt(), TEXT_DIM)
+                    labelX, (y + 4f).toInt(), TEXT_SECONDARY)
 
                 val layout = computeSliderLayout(font, v, actual, x, w, indent)
-                val sliderY = y.toInt() + 8
+                val sliderY = y.toInt() + 9
                 val progress = if (layout.maxV > layout.minV) {
                     ((layout.fv - layout.minV) / (layout.maxV - layout.minV)).coerceIn(0f, 1f)
                 } else 0f
 
-                fillRect(ctx, layout.sliderX, sliderY, layout.sliderX + layout.sliderW, sliderY + 2, 0x30FFFFFF.toInt())
-                fillRect(ctx, layout.sliderX, sliderY, layout.sliderX + (layout.sliderW * progress).toInt(), sliderY + 2, ACCENT)
-                fillRect(ctx, layout.sliderX + (layout.sliderW * progress).toInt() - 1, sliderY - 1,
-                    layout.sliderX + (layout.sliderW * progress).toInt() + 1, sliderY + 3, TEXT_BRIGHT)
+                // 滑条轨道
+                drawRoundedRect(ctx, layout.sliderX.toFloat(), sliderY.toFloat(), layout.sliderW.toFloat(), 2f, 1f, 0x30FFFFFF.toInt())
+                // 滑条填充
+                if (progress > 0) {
+                    drawRoundedRect(ctx, layout.sliderX.toFloat(), sliderY.toFloat(), (layout.sliderW * progress), 2f, 1f, PRIMARY)
+                }
+                // 滑块
+                val knobX = layout.sliderX + (layout.sliderW * progress)
+                drawRoundedRect(ctx, knobX - 3, sliderY - 3, 6f, 8f, 3f, 0xFFFFFFFF.toInt())
+                drawRoundedRect(ctx, knobX - 2, sliderY - 2, 4f, 6f, 2f, PRIMARY_LIGHT)
 
-                drawText(ctx, font, layout.valText, layout.valX, (y + 3f).toInt(), TEXT_DIM)
+                drawText(ctx, font, layout.valText, layout.valX, (y + 4f).toInt(), TEXT_SECONDARY)
             }
             isColorValue(v) -> {
                 drawText(ctx, font, trimText(font, v.name, labelMaxW),
-                    labelX, (y + 5f).toInt(), TEXT_DIM)
+                    labelX, (y + 6f).toInt(), TEXT_SECONDARY)
                 val color = extractColor(v)
-                fillRect(ctx, valueX, y.toInt() + 4, valueX + 10, y.toInt() + 14, color.rgb)
-                // 调色板打开时给颜色块加白色激活边框
+                drawRoundedRect(ctx, valueX.toFloat(), y + 4f, 12f, 12f, 3f, color.rgb)
                 if (activeColorValue == v) {
-                    fillRect(ctx, valueX - 1, y.toInt() + 3, valueX + 11, y.toInt() + 4, TEXT_BRIGHT)
-                    fillRect(ctx, valueX - 1, y.toInt() + 14, valueX + 11, y.toInt() + 15, TEXT_BRIGHT)
-                    fillRect(ctx, valueX - 1, y.toInt() + 3, valueX, y.toInt() + 15, TEXT_BRIGHT)
-                    fillRect(ctx, valueX + 10, y.toInt() + 3, valueX + 11, y.toInt() + 15, TEXT_BRIGHT)
+                    drawRoundedRect(ctx, valueX - 1f, y + 3f, 14f, 14f, 4f, 0xFFFFFFFF.toInt())
                 }
             }
             else -> {
                 drawText(ctx, font, trimText(font, v.name, labelMaxW),
-                    labelX, (y + 5f).toInt(), TEXT_DIM)
+                    labelX, (y + 6f).toInt(), TEXT_SECONDARY)
                 val valMaxW = (x + w - valueX - 2).toInt().coerceAtLeast(10)
-                drawText(ctx, font, "§7${trimText(font, getDisplayValue(v), valMaxW)}",
-                    valueX, (y + 5f).toInt(), TEXT_DIM)
+                drawText(ctx, font, trimText(font, getDisplayValue(v), valMaxW),
+                    valueX, (y + 6f).toInt(), TEXT_DIM)
             }
         }
     }
@@ -639,16 +713,16 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         mouseX: Int, mouseY: Int
     ) {
         val labelX = (x + 6 + indent).toInt()
-        val nameMaxW = 40
-        drawText(ctx, font, trimText(font, v.name, nameMaxW), labelX, (y + 5f).toInt(), TEXT)
+        val nameMaxW = 45
+        drawText(ctx, font, trimText(font, v.name, nameMaxW), labelX, (y + 6f).toInt(), TEXT_SECONDARY)
 
-        val dotSize = 4
-        val dotGap = 2
+        val dotSize = 3
+        val dotGap = 3
         val nameGap = 4
         val nameW = font.width(v.name)
-        var drawX = labelX + nameW + 8
-        val drawY = y.toInt() + 7
-        val maxX = (x + w - 2).toInt()
+        var drawX = labelX + nameW + 10
+        val drawY = y.toInt() + 9
+        val maxX = (x + w - 4).toInt()
 
         for (const in constants) {
             val displayName = const.toString()
@@ -658,18 +732,18 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             val neededW = dotSize + dotGap + cNameW + nameGap + 4
             if (drawX + neededW > maxX) {
                 if (drawX + dotSize <= maxX) {
-                    fillRect(ctx, drawX, drawY, drawX + dotSize, drawY + dotSize,
-                        if (isActive) ACCENT else 0x40808080.toInt())
+                    drawRoundedRect(ctx, drawX.toFloat(), drawY.toFloat(), dotSize.toFloat(), dotSize.toFloat(), 1.5f,
+                        if (isActive) PRIMARY else 0x30FFFFFF.toInt())
                 }
                 break
             }
 
-            fillRect(ctx, drawX, drawY, drawX + dotSize, drawY + dotSize,
-                if (isActive) ACCENT else 0x40808080.toInt())
+            drawRoundedRect(ctx, drawX.toFloat(), drawY.toFloat(), dotSize.toFloat(), dotSize.toFloat(), 1.5f,
+                if (isActive) PRIMARY else 0x30FFFFFF.toInt())
             drawX += dotSize + dotGap
 
-            drawText(ctx, font, displayName, drawX, (y + 5f).toInt(),
-                if (isActive) TEXT_BRIGHT else TEXT_DIM)
+            drawText(ctx, font, displayName, drawX, (y + 6f).toInt(),
+                if (isActive) TEXT_WHITE else TEXT_DIM)
             drawX += cNameW + nameGap + 4
         }
     }
@@ -683,24 +757,23 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val sh = minecraft!!.window.guiScaledHeight
 
         // 搜索框点击
-        val searchY = sh - 30f
-        val searchX = (sc - 160f) / 2f
-        val searchW = 160f
+        val searchY = sh - 40f
+        val searchX = (sc - 220f) / 2f
+        val searchW = 220f
         if (mx in searchX.toInt()..(searchX + searchW).toInt() &&
-            my in searchY.toInt()..(searchY + 16f).toInt()) {
+            my in searchY.toInt()..(searchY + 28f).toInt()) {
             searchFocused = true
             return true
         }
         searchFocused = false
 
-        // 调色板点击优先 (最上层)
+        // 调色板点击
         val colorVal = activeColorValue
         if (colorVal != null) {
             val px = colorPickerX.coerceIn(0f, sc - PALETTE_W)
             val py = colorPickerY.coerceIn(0f, sh - PALETTE_H)
             if (mx in px.toInt()..(px + PALETTE_W).toInt() &&
                 my in py.toInt()..(py + PALETTE_H).toInt()) {
-                // 点击色格 → 选择颜色
                 val col = ((mx - px - PALETTE_PAD) / (PALETTE_CELL + PALETTE_GAP)).toInt()
                 val row = ((my - py - PALETTE_PAD) / (PALETTE_CELL + PALETTE_GAP)).toInt()
                 val index = row * PALETTE_COLS + col
@@ -710,7 +783,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 }
                 return true
             }
-            // 点击调色板外部 → 关闭
             activeColorValue = null
         }
 
@@ -725,7 +797,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
         if (targetPanel != null) {
             val headerY = targetPanel.y
-            val headerH = 24f
+            val headerH = HEADER_H
             if (my in headerY.toInt()..(headerY + headerH).toInt()) {
                 if (btn == 1) {
                     targetPanel.collapsed = !targetPanel.collapsed
@@ -747,8 +819,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
         val listAreaX = panel.x + PADDING
         val listAreaW = panel.w - PADDING * 2 - SCROLL_W
-        val listAreaY = panel.y + 28f
-        val listAreaH = panel.h - 32f
+        val listAreaY = panel.y + HEADER_H + 4f
+        val listAreaH = panel.h - HEADER_H - 8f
 
         if (mx in (listAreaX + listAreaW).toInt()..(listAreaX + listAreaW + SCROLL_W).toInt() &&
             my in listAreaY.toInt()..(listAreaY + listAreaH).toInt()) {
@@ -779,6 +851,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                         }
                         1 -> { expandedModule = if (expandedModule == mod) null else mod }
                     }
+                    saveLayout()
                     return true
                 }
 
@@ -796,10 +869,12 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                                 } catch (_: Exception) { emptyList() }
                                 if (constants.size >= 2) {
                                     handleModeClick(v, mx.toFloat(), listAreaX, listAreaW, 8f, constants, actual)
+                                    saveLayout()
                                     return true
                                 }
                             }
                             handleSettingClick(v, btn, mx.toFloat(), curY, listAreaW, listAreaX, panel, depth * SETTING_INDENT)
+                            saveLayout()
                             return true
                         }
                         curY += SETTING_H
@@ -811,21 +886,21 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         return true
     }
 
-    // ==================== 模式点击处理（新版，与 renderModeList 坐标一致） ====================
+    // ==================== 模式点击处理 ====================
     private fun handleModeClick(
         v: Value<*>, mx: Float,
         x: Float, w: Float, indent: Float,
         constants: List<Any>, current: Enum<*>
     ) {
         val font = minecraft!!.font
-        val dotSize = 4
-        val dotGap = 2
+        val dotSize = 3
+        val dotGap = 3
         val nameGap = 4
 
         val labelX = (x + 6 + indent).toInt()
         val nameW = font.width(v.name)
-        var drawX = labelX + nameW + 8
-        val maxX = (x + w - 2).toInt()
+        var drawX = labelX + nameW + 10
+        val maxX = (x + w - 4).toInt()
 
         for (const in constants) {
             val cName = const.toString()
@@ -851,7 +926,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             drawX += dotSize + dotGap + cNameW + nameGap + 4
         }
 
-        // 循环到下一个
         val currentIdx = constants.indexOfFirst { it.toString() == current.name }
         if (currentIdx >= 0) {
             val nextIdx = (currentIdx + 1) % constants.size
@@ -859,19 +933,11 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         }
     }
 
-    // ==================== 旧版模式点击（保留但不使用） ====================
-    @Suppress("UNUSED_PARAMETER")
-    private fun handleModeClick(v: Value<*>, mx: Float, rightEdge: Float,
-                                constants: List<Any>, current: Enum<*>) {
-        // 此重载已废弃，保留仅为兼容
-    }
-
     // ==================== 鼠标拖拽 ====================
     override fun mouseDragged(event: MouseButtonEvent, dx: Double, dy: Double): Boolean {
         val mx = event.x().toFloat()
         val my = event.y().toFloat()
 
-        // 滑块拖动
         val context = sliderContext
         if (context != null) {
             val valueX = context.sliderX
@@ -907,7 +973,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             if (panel.draggingScroll) {
                 val modules = getModulesForPanel(panel)
                 val contentH = getContentHeight(modules)
-                val listAreaH = panel.h - 32f
+                val listAreaH = panel.h - HEADER_H - 8f
                 if (contentH > listAreaH) {
                     val maxScroll = contentH - listAreaH
                     panel.targetScroll = (panel.targetScroll - dy.toFloat() * 1.2f).coerceIn(0f, maxScroll)
@@ -961,14 +1027,12 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         }
 
         if (isColorValue(v)) {
-            // 点击颜色块 → 切换调色板显示
             if (activeColorValue == v) {
                 activeColorValue = null
             } else {
                 activeColorValue = v
-                // 调色板定位在颜色块下方 (渲染时 clamp 到屏幕内)
-                colorPickerX = x + w - PALETTE_W - 2f
-                colorPickerY = y + SETTING_H + 2f
+                colorPickerX = x + w - PALETTE_W - 4f
+                colorPickerY = y + SETTING_H + 4f
             }
             return
         }
@@ -1027,6 +1091,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     override fun keyPressed(event: KeyEvent): Boolean {
         if (listeningValue != null) {
             listeningValue = null
+            saveLayout()
             return true
         }
 
@@ -1109,13 +1174,9 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         saveLayout()
         setScreenCompat(null)
         fadeAnim = 0f
-        isFirstLoad = true   // 下次打开重新加载缓存
+        layoutLoaded = false
     }
 
-    /**
-     * 屏幕被替换/关闭时必定调用 (ESC 的 onClose 路径 与 右 Shift 的 setScreen(null) 路径都会触发)。
-     * 保证无论以何种方式关闭 ClickGUI, UI 状态都会被保存。
-     */
     override fun removed() {
         saveLayout()
     }
@@ -1338,19 +1399,10 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val collapsedGroups: List<String>
     )
 
-    /**
-     * 保存完整 UI 状态:
-     *   - 各面板坐标 / 折叠 / 滚动位置
-     *   - 当前展开的模块
-     *   - 所有折叠的分组 ("模块名:分组名")
-     * 文件格式: {"panels":[{...}],"expanded":"...","groups":["..."]}
-     */
     private fun saveLayout() {
         try {
-            // 搜索模式下 panels 被替换为搜索面板 (category=null), 保存会清空缓存, 直接跳过
-            if (searchText.isNotEmpty()) {
-                return
-            }
+            if (searchText.isNotEmpty()) return
+            
             val panelsJson = panels.filter { it.category != null }.joinToString(",") { p ->
                 val tag = p.category?.tag ?: ""
                 """{"tag":"$tag","x":${p.x.toInt()},"y":${p.y.toInt()},"collapsed":${p.collapsed},"scroll":${p.scrollOffset}}"""
@@ -1358,7 +1410,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
             val expandedName = expandedModule?.name ?: ""
             val groups = mutableListOf<String>()
-            // 分组收集独立保护: 任一模块异常不影响面板/展开状态保存
             try {
                 for (mod in ModuleManager.getModules()) {
                     for ((v, _) in getVisibleValues(mod)) {
@@ -1379,27 +1430,20 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             val file = getLayoutFile()
             file.parentFile?.mkdirs()
             file.writeText(sb.toString())
-            println("[ClickGui] saved ${panels.filter { it.category != null }.size} panels -> ${file.absolutePath}")
-            println("[ClickGui] content: $sb")
         } catch (e: Exception) {
-            println("[ClickGui] save FAILED: ${e.message}")
+            e.printStackTrace()
         }
     }
 
-    /**
-     * 读取 UI 状态缓存。兼容旧版 (仅面板坐标) 的文件格式。
-     */
     private fun loadLayout(): LayoutState {
         return try {
             val file = getLayoutFile()
             if (!file.exists()) {
-                println("[ClickGui] no cache file: ${file.absolutePath}")
                 return LayoutState(emptyMap(), null, emptyList())
             }
+            
             val content = file.readText()
-            println("[ClickGui] loaded raw: $content")
 
-            // 面板 (scroll 为可选字段, 兼容旧格式)
             val panels = mutableMapOf<String, PanelState>()
             val panelRegex = Regex(
                 """\{"tag":"([^"]+)","x":(-?[0-9]+),"y":(-?[0-9]+),"collapsed":(true|false)(,"scroll":(-?[0-9.]+))?\}"""
@@ -1413,20 +1457,16 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 panels[tag] = PanelState(x, y, collapsed, scroll)
             }
 
-            // 展开的模块
             val expanded = Regex(""""expanded":"([^"]*)"""").find(content)
                 ?.groupValues?.get(1)?.takeIf { it.isNotEmpty() }
 
-            // 折叠的分组
             val groups = mutableListOf<String>()
             Regex(""""groups":\[(.*?)\]""").find(content)?.groupValues?.get(1)?.let { gs ->
                 Regex(""""([^"]+)"""").findAll(gs).forEach { groups.add(it.groupValues[1]) }
             }
 
-            println("[ClickGui] parsed panels=${panels.size} ($panels), expanded=$expanded, groups=${groups.size}")
             LayoutState(panels, expanded, groups)
         } catch (e: Exception) {
-            println("[ClickGui] load FAILED: ${e.message}")
             LayoutState(emptyMap(), null, emptyList())
         }
     }
