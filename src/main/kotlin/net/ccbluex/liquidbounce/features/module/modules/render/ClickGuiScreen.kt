@@ -63,10 +63,15 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val totalHeight: Float
     )
     
+    // ── 性能缓存（关键：避免每帧反射 + 列表分配）──
     private var cachedPanelData = mutableMapOf<ModuleCategory, List<CachedModuleInfo>>()
     private var lastSearchText = ""
     private var lastUpdateTime = 0L
     private var needsRebuild = true
+    private var cacheVersion = 0L
+    private val categoryModulesCache = mutableMapOf<ModuleCategory, List<ClientModule>>()
+    private var cacheVersionModules = -1L
+    private val contentHeightCache = mutableMapOf<PanelData, Float>()
 
     // ==================== Slider Drag State ====================
     private data class SliderContext(
@@ -200,13 +205,37 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     }
 
     private fun getCategoryModules(category: ModuleCategory): List<ClientModule> {
-        return try {
+        val v = cacheVersionModules
+        if (v == cacheVersion && searchText.isEmpty()) {
+            return categoryModulesCache.getOrPut(category) {
+                try {
+                    ModuleManager.getModules().toList()
+                        .filter { it.category == category && it.name != "ClickGUI" }
+                } catch (_: Exception) { emptyList() }
+            }
+        }
+        cacheVersionModules = cacheVersion
+        categoryModulesCache.clear()
+        val result = try {
             ModuleManager.getModules().toList()
                 .filter { it.category == category && it.name != "ClickGUI" }
                 .filter { searchText.isEmpty() || it.name.contains(searchText, ignoreCase = true) }
-        } catch (_: Exception) {
-            emptyList()
+        } catch (_: Exception) { emptyList() }
+        categoryModulesCache[category] = result
+        return result
+    }
+
+    private fun getContentHeightCached(modules: List<ClientModule>, panel: PanelData?): Float {
+        if (panel != null) {
+            contentHeightCache[panel]?.let { return it }
         }
+        var h = 0f
+        modules.forEach { mod ->
+            h += ITEM_H
+            h += getExpandedHeight(mod)
+        }
+        if (panel != null) contentHeightCache[panel] = h
+        return h
     }
 
     private fun getExpandedHeight(mod: ClientModule): Float {
@@ -256,6 +285,9 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             lastSearchText = searchText
             cachedPanelData.clear()
             needsRebuild = false
+            cacheVersion++
+            contentHeightCache.clear()
+            categoryModulesCache.clear()
         }
 
         // 更新面板列表（只在必要时）
@@ -341,7 +373,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             val listAreaY = py + headerH + 2f
             val listAreaH = ph - headerH - 6f
 
-            val contentH = getContentHeight(panelModules)
+            val contentH = getContentHeightCached(panelModules, panel)
             val maxScroll = max(0f, contentH - listAreaH)
             panel.targetScroll = panel.targetScroll.coerceIn(0f, maxScroll)
             panel.scrollOffset += (panel.targetScroll - panel.scrollOffset) * 0.3f
