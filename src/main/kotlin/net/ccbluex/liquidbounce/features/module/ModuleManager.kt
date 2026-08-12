@@ -232,6 +232,7 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModuleTrueSight
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleVoidESP
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleXRay
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleZoom
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleStatusBars
 import net.ccbluex.liquidbounce.features.module.modules.render.cameraclip.ModuleCameraClip
 import net.ccbluex.liquidbounce.features.module.modules.render.crosshair.ModuleCrosshair
 import net.ccbluex.liquidbounce.features.module.modules.render.esp.ModuleESP
@@ -674,6 +675,7 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleVoidESP,
             ModuleXRay,
             ModuleDebug,
+            ModuleStatusBars,
             ModuleZoom,
             ModuleItemChams,
             ModuleCrystalView,
