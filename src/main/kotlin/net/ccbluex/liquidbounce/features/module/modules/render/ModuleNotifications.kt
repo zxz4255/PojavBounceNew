@@ -240,7 +240,7 @@ object ModuleNotifications : ClientModule("Notifications", ModuleCategories.REND
 
         notify(
             event.moduleName,
-            if (event.enabled) "已启用" else "已禁用",
+            if (event.enabled) "Enabled" else "Disabled",
             if (event.enabled) NotificationType.SUCCESS else NotificationType.ERROR,
         )
     }

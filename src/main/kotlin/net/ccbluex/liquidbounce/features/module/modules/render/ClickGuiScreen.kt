@@ -25,22 +25,19 @@ import java.io.File
 class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
     // ==================== 暗黑风格配色 ====================
-    // 主色 - 霓虹蓝紫
-    private val PRIMARY = 0xFF6C5CE7.toInt()         // 紫色主色
-    private val PRIMARY_LIGHT = 0xFFA29BFE.toInt()   // 亮紫
-    private val PRIMARY_DARK = 0xFF4834D4.toInt()    // 深紫
-    private val ACCENT = 0xFF00D2D3.toInt()          // 青色点缀
+    private val PRIMARY = 0xFF6C5CE7.toInt()
+    private val PRIMARY_LIGHT = 0xFFA29BFE.toInt()
+    private val PRIMARY_DARK = 0xFF4834D4.toInt()
+    private val ACCENT = 0xFF00D2D3.toInt()
     
-    // 纯黑背景
-    private val BG_MAIN = 0xE6000000.toInt()         // 主背景（几乎全黑）
-    private val BG_PANEL = 0xCC0A0A0A.toInt()        // 面板背景（纯黑半透明）
-    private val BG_PANEL_ALT = 0xDD111111.toInt()    // 面板备选
-    private val BG_ITEM = 0x00FFFFFF.toInt()         // 项目背景（完全透明）
-    private val BG_ITEM_HOVER = 0x15FFFFFF.toInt()   // 悬停高亮（白色微光）
-    private val BG_ITEM_ACTIVE = 0x0D6C5CE7.toInt()  // 激活状态（紫色微光）
-    private val BG_ITEM_SELECTED = 0x1A6C5CE7.toInt() // 选中状态
+    private val BG_MAIN = 0xE6000000.toInt()
+    private val BG_PANEL = 0xCC0A0A0A.toInt()
+    private val BG_PANEL_ALT = 0xDD111111.toInt()
+    private val BG_ITEM = 0x00FFFFFF.toInt()
+    private val BG_ITEM_HOVER = 0x15FFFFFF.toInt()
+    private val BG_ITEM_ACTIVE = 0x0D6C5CE7.toInt()
+    private val BG_ITEM_SELECTED = 0x1A6C5CE7.toInt()
     
-    // 文字颜色 - 灰阶
     private val TEXT_WHITE = 0xFFFFFFFF.toInt()
     private val TEXT_MAIN = 0xFFE8E8E8.toInt()
     private val TEXT_SECONDARY = 0xFF888888.toInt()
@@ -48,12 +45,10 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     private val TEXT_DISABLED = 0xFF333333.toInt()
     private val TEXT_ACCENT = 0xFFA29BFE.toInt()
     
-    // 边框和分割线
     private val BORDER_LIGHT = 0x15FFFFFF.toInt()
     private val BORDER_MEDIUM = 0x2AFFFFFF.toInt()
     private val DIVIDER = 0x0AFFFFFF.toInt()
     
-    // 开关颜色
     private val TOGGLE_ON = 0xFF6C5CE7.toInt()
     private val TOGGLE_OFF = 0xFF2A2A2A.toInt()
     private val TOGGLE_BG = 0x30FFFFFF.toInt()
@@ -70,7 +65,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     private val PANEL_MIN_W = 140
     private val PANEL_MAX_H = 400
     private val HEADER_H = 32f
-    private val CATEGORY_TAB_H = 32f
 
     // ==================== Slider Drag State ====================
     private data class SliderContext(
@@ -228,17 +222,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     override fun extractBackground(ctx: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, delta: Float) {
         val sc = minecraft!!.window.guiScaledWidth
         val sh = minecraft!!.window.guiScaledHeight
-        // 纯黑背景，带微弱渐变
         fillRect(ctx, 0, 0, sc, sh, 0xCC000000.toInt())
-        // 中心微光
-        val radius = sc.coerceAtMost(sh) / 2f
-        for (i in 0..10) {
-            val alpha = (10 - i) * 2
-            val size = radius * (1 - i / 11f)
-            val x = (sc - size) / 2f
-            val y = (sh - size) / 2f
-            fillRect(ctx, x, y, x + size, y + size, (alpha shl 24) or 0x6C5CE7)
-        }
     }
 
     // ==================== Main render ====================
@@ -308,14 +292,10 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             val px = panel.x; val py = panel.y; val pw = panel.w; val ph = panel.h
             val actualHeight = if (panel.collapsed) HEADER_H + 2f else ph
 
-            // 面板背景 - 纯黑磨砂
             drawRoundedRect(ctx, px, py, pw, actualHeight, CORNER, BG_PANEL)
-            
-            // 边框 - 微光
             drawRoundedRect(ctx, px, py, pw, 1f, CORNER, BORDER_LIGHT)
             drawRoundedRect(ctx, px, py + actualHeight - 1f, pw, 1f, CORNER, BORDER_LIGHT)
             
-            // 顶部高光线
             fillRect(ctx, px + 20f, py, px + pw - 20f, py + 1f, 0x0A6C5CE7.toInt())
 
             var panelModules: List<ClientModule>
@@ -326,16 +306,13 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 val category = panel.category ?: continue
                 panelModules = getCategoryModules(category)
                 
-                // 分类标题
                 val title = "${category.tag}"
                 drawText(ctx, font, "§l$title", (px + 14f).toInt(), (py + 9f).toInt(), TEXT_WHITE)
                 
-                // 模块数量 - 使用紫色
                 val countText = "${panelModules.size}"
                 val countX = px + pw - font.width(countText) - 14f
                 drawText(ctx, font, countText, countX.toInt(), (py + 9f).toInt(), PRIMARY_LIGHT)
                 
-                // 底部细线 - 紫色渐变
                 val gradientSteps = 10
                 for (i in 0..gradientSteps) {
                     val progress = i.toFloat() / gradientSteps
@@ -369,7 +346,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     val isHover = mouseX in listAreaX.toInt()..(listAreaX + listAreaW).toInt() &&
                             mouseY in curY.toInt()..modEndY.toInt()
 
-                    // 模块行背景
                     if (isHover) {
                         fillRect(ctx, listAreaX, curY, listAreaX + listAreaW, modEndY, BG_ITEM_HOVER)
                     }
@@ -377,35 +353,29 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                         fillRect(ctx, listAreaX, curY, listAreaX + listAreaW, modEndY, BG_ITEM_ACTIVE)
                     }
 
-                    // 模块名称 - 白色为主
                     val nameColor = if (mod.enabled) TEXT_WHITE else TEXT_SECONDARY
                     val nameMaxW = (listAreaW - 56).toInt()
                     drawText(ctx, font, trimText(font, mod.name, nameMaxW),
                         (listAreaX + 6f).toInt(), (curY + 7f).toInt(), nameColor)
 
-                    // 暗黑风格开关 - 紫色主题
                     val toggleX = (listAreaX + listAreaW - 32f).toInt()
                     val toggleY = curY.toInt() + 6
                     val toggleW = 26
                     val toggleH = 12
                     
-                    // 开关轨道
                     drawRoundedRect(ctx, toggleX.toFloat(), toggleY.toFloat(), toggleW.toFloat(), toggleH.toFloat(), 6f, 
                         if (mod.enabled) 0x406C5CE7.toInt() else 0xFF2A2A2A.toInt())
                     
-                    // 开关背景填充
                     if (mod.enabled) {
                         fillRect(ctx, toggleX + 2, toggleY + 2, toggleX + toggleW - 2, toggleY + toggleH - 2, PRIMARY)
                         drawRoundedRect(ctx, (toggleX + 2).toFloat(), (toggleY + 2).toFloat(), 
                             (toggleW - 4).toFloat(), (toggleH - 4).toFloat(), 4f, PRIMARY_LIGHT)
                     }
                     
-                    // 开关滑块 - 带光晕
                     val knobX = if (mod.enabled) toggleX + toggleW - 10 else toggleX
                     val knobColor = if (mod.enabled) 0xFFFFFFFF.toInt() else 0xFF666666.toInt()
                     drawRoundedRect(ctx, knobX.toFloat(), (toggleY - 1).toFloat(), 10f, (toggleH + 2).toFloat(), 5f, knobColor)
                     
-                    // 开启时滑块光晕
                     if (mod.enabled) {
                         drawRoundedRect(ctx, (knobX - 2).toFloat(), (toggleY - 3).toFloat(), 14f, (toggleH + 6).toFloat(), 7f, 0x106C5CE7.toInt())
                     }
@@ -438,7 +408,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 }
             }
 
-            // 滚动条 - 紫色主题
             if (contentH > listAreaH) {
                 val thumbH = (listAreaH * listAreaH / contentH).coerceAtLeast(12f)
                 val thumbY = listAreaY + if (maxScroll > 0f) (panel.scrollOffset / maxScroll) * (listAreaH - thumbH) else 0f
@@ -450,14 +419,13 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             }
         }
 
-        // 搜索框 - 暗黑风格
+        // 搜索框
         val searchY = sh - 40f
         val searchX = (sc - 220f) / 2f
         val searchW = 220f
         drawRoundedRect(ctx, searchX, searchY, searchW, 28f, 6f, 0xCC0A0A0A.toInt())
         drawRoundedRect(ctx, searchX, searchY, searchW, 1f, 6f, BORDER_LIGHT)
         
-        // 搜索框聚焦光晕
         if (searchFocused) {
             drawRoundedRect(ctx, searchX, searchY, searchW, 28f, 6f, 0x066C5CE7.toInt())
         }
@@ -479,7 +447,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             }
         }
 
-        // ==================== 调色板 ====================
+        // 调色板
         val colorVal = activeColorValue
         if (colorVal != null) {
             val px = colorPickerX.coerceIn(0f, sc - PALETTE_W)
@@ -604,7 +572,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val indent = depth * SETTING_INDENT
 
         if (depth > 0) {
-            // 层级线 - 紫色
             val lineX = (x + 6f + indent).toInt()
             fillRect(ctx, lineX, y.toInt() + 2, lineX + 1, y.toInt() + SETTING_H.toInt() - 2, 0x206C5CE7.toInt())
         }
@@ -677,7 +644,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 drawRoundedRect(ctx, layout.sliderX.toFloat(), sliderY.toFloat(), layout.sliderW.toFloat(), 2f, 1f, 0x30FFFFFF.toInt())
                 // 滑条填充
                 if (progress > 0) {
-                    drawRoundedRect(ctx, layout.sliderX.toFloat(), sliderY.toFloat(), (layout.sliderW * progress), 2f, 1f, PRIMARY)
+                    drawRoundedRect(ctx, layout.sliderX.toFloat(), sliderY.toFloat(), (layout.sliderW * progress).toFloat(), 2f, 1f, PRIMARY)
                 }
                 // 滑块
                 val knobX = layout.sliderX + (layout.sliderW * progress)
@@ -756,7 +723,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val sc = minecraft!!.window.guiScaledWidth
         val sh = minecraft!!.window.guiScaledHeight
 
-        // 搜索框点击
         val searchY = sh - 40f
         val searchX = (sc - 220f) / 2f
         val searchW = 220f
@@ -767,7 +733,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         }
         searchFocused = false
 
-        // 调色板点击
         val colorVal = activeColorValue
         if (colorVal != null) {
             val px = colorPickerX.coerceIn(0f, sc - PALETTE_W)
@@ -1390,7 +1355,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         return File(minecraft?.gameDirectory ?: File("."), "config/liquidbounce_clickgui_panels.json")
     }
 
-    // ==================== UI 状态缓存数据结构 ====================
     private data class PanelState(val x: Int, val y: Int, val collapsed: Boolean, val scroll: Float)
 
     private data class LayoutState(
