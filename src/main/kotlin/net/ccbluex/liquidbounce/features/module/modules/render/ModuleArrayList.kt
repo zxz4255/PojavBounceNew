@@ -57,6 +57,11 @@ object ModuleArrayList : ClientModule("ArrayList【Skid+fix】", ModuleCategorie
         CUSTOM("Custom")    // 自定义 Bar 颜色
     }
 
+    // Bar 左右方向 (【修复】独立于 Side 切换 Bar 在条目左侧/右侧)
+    private enum class BarSide(override val tag: String) : Tagged {
+        AUTO("Auto"), LEFT("Left"), RIGHT("Right")
+    }
+
     // 水印颜色模式
     private enum class WaterMarkColorMode(override val tag: String) : Tagged {
         SKY_BLUE("SkyBlue"), FADE("Fade"), RAINBOW("Rainbow"), CUSTOM("Custom")
@@ -91,6 +96,7 @@ object ModuleArrayList : ClientModule("ArrayList【Skid+fix】", ModuleCategorie
     private val barMode by enumChoice("Bar Mode", BarMode.FOLLOW)
     private val barWidth by int("Bar Width", 2, 0..8)
     private val barCustomColor by color("Bar Color", Color4b.WHITE)
+    private val barSide by enumChoice("Bar Side", BarSide.AUTO)   // 【修复】Bar 方向独立切换
 
     // —— 动画 ——
     private val animationSpeed by float("Animation Speed", 50f, 1f..50f)
@@ -211,14 +217,16 @@ object ModuleArrayList : ClientModule("ArrayList【Skid+fix】", ModuleCategorie
 
             // 绘制每条模块
             drawn.forEach { d ->
-                val barX = when (side) {
-                    Side.RIGHT -> d.x + d.entry.width + barGap + padding * 2f - padding - barWidth
-                    Side.LEFT -> d.x
+                // 【修复】Bar 方向独立切换: AUTO 跟随 Side, 也可手动 LEFT/RIGHT
+                val barLeft = when (barSide) {
+                    BarSide.AUTO -> side == Side.LEFT
+                    BarSide.LEFT -> true
+                    BarSide.RIGHT -> false
                 }
-                val textX = when (side) {
-                    Side.RIGHT -> d.x + padding
-                    Side.LEFT -> d.x + barWidth + 3f + padding
-                }
+                val barX = if (barLeft) d.x
+                else d.x + d.entry.width + barGap + padding * 2f - padding - barWidth
+                val textX = if (barLeft) d.x + barWidth + 3f + padding
+                else d.x + padding
                 val textY = d.y + (d.entry.height - fontHeight) / 2f
 
                 // 背景
@@ -298,12 +306,10 @@ object ModuleArrayList : ClientModule("ArrayList【Skid+fix】", ModuleCategorie
         )
 
         val wmTime = (System.currentTimeMillis() % 100000) / 1000f
-        val wmTextColor = when (waterMarkColorMode) {
+        // 【修复】FADE 模式返回 null → 走逐字符蓝→白渐变 (原来整条同色呼吸, 无渐变)
+        val wmTextColor: Int? = when (waterMarkColorMode) {
             WaterMarkColorMode.SKY_BLUE -> SKY_BLUE.argb
-            WaterMarkColorMode.FADE -> {
-                val t = (sin(wmTime * 2.0 * waterMarkRainbowSpeed) + 1.0) / 2.0
-                lerpColor(SKY_BLUE, WHITE, t.toFloat()).argb
-            }
+            WaterMarkColorMode.FADE -> null
             WaterMarkColorMode.RAINBOW -> {
                 val hue = (wmTime * 60f * waterMarkRainbowSpeed) % 360f
                 hueColor(hue).argb
@@ -313,7 +319,19 @@ object ModuleArrayList : ClientModule("ArrayList【Skid+fix】", ModuleCategorie
 
         val wmTextX = wmBgX + wmPad
         val wmTextY = wmBgY + wmPad
-        ctx.text(f, wmText, wmTextX.roundToInt(), wmTextY.roundToInt(), wmTextColor, textShadow)
+        if (wmTextColor != null) {
+            ctx.text(f, wmText, wmTextX.roundToInt(), wmTextY.roundToInt(), wmTextColor, textShadow)
+        } else {
+            // 【修复】FADE: 水印文字从左到右 天蓝→白色 渐变
+            var cx = wmTextX
+            for (i in wmText.indices) {
+                val ch = wmText[i].toString()
+                val t = if (wmText.length > 1) i / (wmText.length - 1).toFloat() else 0f
+                val c = lerpColor(SKY_BLUE, WHITE, t)
+                ctx.text(f, ch, cx.roundToInt(), wmTextY.roundToInt(), c.argb, textShadow)
+                cx += f.width(ch)
+            }
+        }
     }
 
     /* ============================= 工具函数 ============================= */
@@ -323,7 +341,8 @@ object ModuleArrayList : ClientModule("ArrayList【Skid+fix】", ModuleCategorie
         return when (colorMode) {
             ColorMode.CUSTOM -> customColor
             ColorMode.RAINBOW -> hueColor(time * 36f * rainbowSpeed + index * rainbowOffset)
-            ColorMode.FADE -> hueColor(index * rainbowOffset.toFloat())
+            // 【修复】FADE: 随时间流动的渐变色 (原来每条固定色相, 无渐变效果)
+            ColorMode.FADE -> hueColor(time * 36f * rainbowSpeed + index * rainbowOffset, saturation = 0.65f)
             ColorMode.SKY -> hueColor(y / 720f * 360f + time * 18f * rainbowSpeed, saturation = 0.65f)
             ColorMode.RAINBOW_TEXT -> {
                 val hue = (time * 60f * rainbowTextSpeed + index * 20f) % 360f

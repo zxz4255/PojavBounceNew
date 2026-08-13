@@ -48,13 +48,14 @@ import net.ccbluex.liquidbounce.render.drawRoundedRect
 import net.ccbluex.liquidbounce.render.drawHorizontalLine
 import net.ccbluex.liquidbounce.render.drawVerticalLine
 import net.ccbluex.liquidbounce.render.engine.type.Color4b
+import net.ccbluex.liquidbounce.render.withPush
 import net.ccbluex.liquidbounce.utils.client.mc
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import java.util.IdentityHashMap
 import kotlin.math.roundToInt
 
 object ModuleSolsticeArraylist : ClientModule(
-    "SolsticeArraylist[beta+skid]",
+    "SolsticeArraylist",
     ModuleCategories.RENDER,
     aliases = listOf("Arraylist", "SolsticeArray"),
 ) {
@@ -78,6 +79,8 @@ object ModuleSolsticeArraylist : ClientModule(
     // —— 布局 ——
     private val topOffset by int("Top Offset", 10, 0..500)
     private val rightOffset by int("Right Offset", 30, 0..500)
+    private val uiScale by float("Scale", 1f, 0.5f..2.5f)        // 整体缩放 (锚定右上角)
+    private val spacing by int("Spacing", 2, 0..12)              // 模块条目间距
 
     // —— 水印 (原版 Solstice V4) ——
     private val showWatermark by boolean("Show Watermark", false)
@@ -94,7 +97,7 @@ object ModuleSolsticeArraylist : ClientModule(
     private val textShadow by boolean("Text Shadow", true)
     private val shadowOffset by float("Shadow Offset", 1f, 0f..5f)
     private val clickToToggle by boolean("Click To Toggle", true)
-    private val animationSpeed by float("Animation Speed", 30f, 0.5f..30f)
+    private val animationSpeed by float("Animation Speed", 50f, 0.5f..50f)
 
     // —— 背景 ——
     private val listBackground by boolean("List Background", false)
@@ -153,21 +156,19 @@ object ModuleSolsticeArraylist : ClientModule(
         if (radius <= 0f || density <= 0) return
         if (density <= 1) {
             drawRoundedRect(
-                x1 - radius * 0.3f, y1 - radius * 0.3f, x2 + radius * 0.3f, y2 + radius * 0.3f,
-                radius * 0.5f, Color4b.TRANSPARENT, color, radius * 0.4f,
+                x1, y1, x2, y2,
+                radius * 0.5f, Color4b.TRANSPARENT, color, radius * 0.35f,
             )
             return
         }
         for (i in 0 until density) {
             val t = i / (density - 1).toFloat()
-            val w = radius * (0.25f + 0.75f * t)        // 描边厚度逐层增加
-            val a = color.a * (0.35f + 0.35f * (1f - t))  // 透明度低且逐层递减
-            val inset = radius * 0.15f
+            val w = radius * (0.3f + 0.7f * t)          // 描边厚度逐层增加
+            val a = color.a * (0.25f + 0.25f * (1f - t))  // 透明度低且逐层递减
+            // 【修复】贴齐文本边缘 (不再外扩, 避免光晕偏移/糊成团)
             drawRoundedRect(
-                x1 - inset - w * 0.25f, y1 - inset - w * 0.25f,
-                x2 + inset + w * 0.25f, y2 + inset + w * 0.25f,
-                w * 0.5f, Color4b.TRANSPARENT,
-                color.alpha(a.roundToInt().coerceIn(0, 255)), w * 0.5f,
+                x1, y1, x2, y2, w * 0.5f,
+                Color4b.TRANSPARENT, color.alpha(a.roundToInt().coerceIn(0, 255)), w * 0.4f,
             )
         }
     }
@@ -224,10 +225,18 @@ object ModuleSolsticeArraylist : ClientModule(
         }
         lastFrameNs = now
 
-        if (showWatermark) {
-            renderWatermark(context, frameTime)
+        // 【修复】整体缩放 (锚定右上角, Scale 配置可调)
+        context.pose().withPush {
+            val gw = context.guiWidth().toFloat()
+            translate(gw, 0f)
+            scale(uiScale, uiScale)
+            translate(-gw, 0f)
+
+            if (showWatermark) {
+                renderWatermark(context, frameTime)
+            }
+            renderModules(context, frameTime)
         }
-        renderModules(context, frameTime)
     }
 
     /* ------------------------- 水印 (右上角) ------------------------- */
@@ -238,11 +247,15 @@ object ModuleSolsticeArraylist : ClientModule(
         val guiWidth = ctx.guiWidth()
 
         // 逐字符彩虹水印 (原版: 每字符 getThemedColor(i*100))
-        var x = (guiWidth - rightOffset).toFloat()
+        // 【修复】从左到右渲染: 先算总宽, 再逐字符右移 (原实现从右往左导致文字倒序)
+        var totalWidth = 0f
+        for (i in watermarkText.indices) {
+            totalWidth += font.width(watermarkText[i].toString()).toFloat()
+        }
+        var x = guiWidth - totalWidth - rightOffset
         for (i in watermarkText.indices) {
             val ch = watermarkText[i].toString()
             val charW = font.width(ch).toFloat()
-            x -= charW
             val color = resolveColor(i * 100f)
 
             // 圆形发光
@@ -257,6 +270,7 @@ object ModuleSolsticeArraylist : ClientModule(
                 ctx.text(font, ch, (x + 3.25f).roundToInt(), (topOffset + 9f + 3.25f).roundToInt(), color.darker().argb, false)
             }
             ctx.text(font, ch, x.roundToInt(), (topOffset + 9f).roundToInt(), color.argb, false)
+            x += charW
         }
     }
 
@@ -359,7 +373,8 @@ object ModuleSolsticeArraylist : ClientModule(
             }
 
             entries += EntryRect(mod, rectX, posY, rectZ - rectX, textH)
-            posY += textH * anim
+            // 【修复】条目间距可调 (Spacing 配置)
+            posY += textH * anim + spacing
         }
 
         // Outline 连线 (简化版: 每条左右竖线 + 首条顶线 + 末条底线)
@@ -373,10 +388,10 @@ object ModuleSolsticeArraylist : ClientModule(
             }
         }
 
-        // 列表背景
+        // 列表背景 (【修复】贴合各条目实际边缘, 不再固定为矩形)
         if (listBackground && entries.isNotEmpty()) {
-            val minX = entries.minOf { it.x } - 6f
-            val maxX = guiWidth - rightOffset + 6f
+            val minX = entries.minOf { it.x } - 3f
+            val maxX = entries.maxOf { it.x + it.w } + 3f
             val topY = entries.minOf { it.y } - 2f
             val bottomY = entries.maxOf { it.y + it.h } + 2f
             val bg = Color4b(0, 0, 0, backgroundAlpha)

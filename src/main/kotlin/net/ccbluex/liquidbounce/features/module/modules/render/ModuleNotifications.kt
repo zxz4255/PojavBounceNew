@@ -54,8 +54,7 @@ import kotlin.math.exp
 import kotlin.math.roundToInt
 
 object ModuleNotifications : ClientModule("Notifications", ModuleCategories.RENDER) {
-    init { enabled = true }
-
+init { enabled = true }
     /* ============================= 通知类型 ============================= */
     // 图标使用 ASCII 字符 (mc.font 保证渲染), 颜色对应 Opal 的类型色
 
@@ -73,6 +72,8 @@ object ModuleNotifications : ClientModule("Notifications", ModuleCategories.REND
         val duration: Long,
     ) {
         val startTime: Long = System.currentTimeMillis()
+        /** 【优化】缓存计算好的面板宽度, 避免每帧重复测量文本 (减少卡顿) */
+        var cachedWidth = -1f
         val elapsed: Long get() = System.currentTimeMillis() - startTime
         val hasExpired: Boolean get() = elapsed >= duration
         val progress: Float get() = (elapsed.toFloat() / duration).coerceIn(0f, 1f)
@@ -99,7 +100,7 @@ object ModuleNotifications : ClientModule("Notifications", ModuleCategories.REND
     private val scaleValue by float("Scale", 1.1f, 0.5f..2f)        // 整体缩放
     private val notificationHeight by int("Height", 30, 18..40)   // 单条高度
     private val spacing by int("Spacing", 3, 0..10)               // 条间距
-    private val maxNotifications by int("Max Notifications", 6, 1..10)
+    private val maxNotifications by int("Max Notifications", 5, 1..10)
 
     // —— 外观 ——
     private val background by boolean("Background", true)
@@ -115,8 +116,8 @@ object ModuleNotifications : ClientModule("Notifications", ModuleCategories.REND
     private val textShadow by boolean("Text Shadow", true)
 
     // —— 动画 / 时长 ——
-    private val animationSpeed by float("Animation Speed", 30f, 0.5f..40f)
-    private val defaultDuration by int("Default Duration", 3000, 500..10000)  // 毫秒
+    private val animationSpeed by float("Animation Speed", 50f, 0.5f..50f)
+    private val defaultDuration by int("Default Duration", 2800, 500..10000)  // 毫秒
     private val welcomeNotification by boolean("Welcome Notification", true)   // 启用时发送欢迎通知
 
     // —— 通知音效 (按类型区分) ——
@@ -241,7 +242,7 @@ object ModuleNotifications : ClientModule("Notifications", ModuleCategories.REND
 
         notify(
             event.moduleName,
-            if (event.enabled) "Enabled" else "Disabled",
+            if (event.enabled) "已启用" else "已禁用",
             if (event.enabled) NotificationType.SUCCESS else NotificationType.ERROR,
         )
     }
@@ -288,9 +289,13 @@ object ModuleNotifications : ClientModule("Notifications", ModuleCategories.REND
             val anim = animations.getOrPut(notification) { AnimState(guiWidth) }
 
             // 宽度由内容决定 (参照 Opal: 至少 100, 图标 + 标题/描述较宽者)
-            val titleWidth = font.width(notification.title).toFloat()
-            val descWidth = font.width(notification.description).toFloat()
-            val width = maxOf(100f, iconOffset + maxOf(titleWidth + padding * 4f, descWidth))
+            // 【优化】缓存宽度, 文本不变时不再每帧测量
+            if (notification.cachedWidth < 0f) {
+                val titleWidth = font.width(notification.title).toFloat()
+                val descWidth = font.width(notification.description).toFloat()
+                notification.cachedWidth = maxOf(100f, iconOffset + maxOf(titleWidth + padding * 4f, descWidth))
+            }
+            val width = notification.cachedWidth
             val endX = guiWidth - width - offsetX
 
             // 滑入 / 滑出动画 (EASE_OUT_EXPO 的指数平滑近似)
