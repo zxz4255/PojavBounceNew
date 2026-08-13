@@ -7,7 +7,7 @@
  *  修改:
  *  - 按像素宽度从长到短排序
  *  - 每条模块独立矩形背景
- *  - 文字颜色模式: CUSTOM / RAINBOW / FADE / SKY / RAINBOW_TEXT / FADE2 / LB
+ *  - 文字颜色模式: CUSTOM / RAINBOW / FADE / SKY / RAINBOW_TEXT / FADE2 / LB / SOLSTICE (新增)
  *  - Bar 模式: NONE / SOLID / GRADIENT / FOLLOW(跟随文字) / CUSTOM(自定义)
  *  - 自定义整体大小 Scale
  *  - 水印支持多种颜色模式: SkyBlue / Fade / Rainbow / Custom
@@ -42,7 +42,8 @@ object ModuleArrayList : ClientModule("ArrayList【Skid+fix】", ModuleCategorie
         CUSTOM("Custom"), RAINBOW("Rainbow"), FADE("Fade"), SKY("Sky"),
         RAINBOW_TEXT("RainbowText"),  // 彩虹渐变文字
         FADE2("Fade2"),              // 白色 ↔ 天蓝色渐变循环
-        LB("LB")                     // 文字白色，Bar 天蓝色
+        LB("LB"),                    // 文字白色，Bar 天蓝色
+        SOLSTICE("Solstice")         // 【新增】Solstice 三色渐变 (粉‑蓝‑白)
     }
 
     private enum class SortMode(override val tag: String) : Tagged {
@@ -117,6 +118,14 @@ object ModuleArrayList : ClientModule("ArrayList【Skid+fix】", ModuleCategorie
 
     private val WHITE = Color4b(255, 255, 255, 255)
     private val SKY_BLUE = Color4b(0, 160, 255, 255)
+
+    // ----- 新增：Solstice 三色板 (取自 ModuleSolsticeArraylist) -----
+    private val SOLSTICE_COLORS = listOf(
+        Color4b(0xE9, 0xA8, 0xBC),    // 粉
+        Color4b(0x6E, 0xC8, 0xF1),    // 蓝
+        Color4b(255, 255, 255)        // 白
+    )
+    // ------------------------------------------------------------
 
     /* =============================== 渲染 =============================== */
 
@@ -325,8 +334,23 @@ object ModuleArrayList : ClientModule("ArrayList【Skid+fix】", ModuleCategorie
                 lerpColor(WHITE, SKY_BLUE, t)
             }
             ColorMode.LB -> SKY_BLUE
+            // ----- 新增 Solstice 分支 -----
+            ColorMode.SOLSTICE -> themedColor(index.toFloat())
         }
     }
+
+    // ----- 新增：Solstice 三色渐变（取自 ModuleSolsticeArraylist）-----
+    private fun themedColor(index: Float): Color4b {
+        val totalTime = 10000f / 3f          // 总循环周期（毫秒）
+        val now = System.currentTimeMillis()
+        val angle = ((now + index.toLong()) % totalTime.toLong()).toFloat()
+        val segmentTime = totalTime / SOLSTICE_COLORS.size
+        val seg = (angle / segmentTime).toInt().coerceIn(0, SOLSTICE_COLORS.size - 1)
+        val t = (angle / segmentTime - seg).coerceIn(0f, 1f)
+        val next = (seg + 1) % SOLSTICE_COLORS.size
+        return lerpColor(SOLSTICE_COLORS[seg], SOLSTICE_COLORS[next], t)
+    }
+    // ----------------------------------------------------------------
 
     private fun hueColor(hueDeg: Float, saturation: Float = 1f, brightness: Float = 1f): Color4b {
         var hue = hueDeg % 360f
