@@ -80,9 +80,9 @@ object ModuleSolsticeArraylist : ClientModule(
     private val rightOffset by int("Right Offset", 30, 0..500)
 
     // —— 水印 (原版 Solstice V4) ——
-    private val showWatermark by boolean("Show Watermark", true)
+    private val showWatermark by boolean("Show Watermark", false)
     private val watermarkText by text("Watermark Text", "Solstice V4")
-    private val watermarkGlow by boolean("Watermark Glow", true)
+    private val watermarkGlow by boolean("Watermark Glow", false)
     private val watermarkGlowRadius by int("Watermark Glow Radius", 10, 0..40)
     private val watermarkGlowDensity by int("Watermark Glow Density", 5, 1..8)
 
@@ -94,7 +94,7 @@ object ModuleSolsticeArraylist : ClientModule(
     private val textShadow by boolean("Text Shadow", true)
     private val shadowOffset by float("Shadow Offset", 1f, 0f..5f)
     private val clickToToggle by boolean("Click To Toggle", true)
-    private val animationSpeed by float("Animation Speed", 12f, 0.5f..30f)
+    private val animationSpeed by float("Animation Speed", 30f, 0.5f..30f)
 
     // —— 背景 ——
     private val listBackground by boolean("List Background", false)
