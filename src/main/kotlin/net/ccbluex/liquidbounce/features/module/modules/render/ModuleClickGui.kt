@@ -80,7 +80,10 @@ object ModuleClickGui :
                 closeGui()
             }
         }
-        if (event.action == 1 && event.keyCode == GLFW.GLFW_KEY_ESCAPE) {
+        // ESC 关闭: Android 环境 keyCode 是 scancode, ESC 的 scancode = 1
+        if (event.action == 1 &&
+            (event.keyCode == GLFW.GLFW_KEY_ESCAPE || event.keyCode == 1)
+        ) {
             if (mc.gui.screen() is ClickGuiScreen) {
                 closeGui()
             }

@@ -2,6 +2,7 @@ package net.ccbluex.liquidbounce.features.module.modules.render
 
 import net.ccbluex.liquidbounce.config.types.RangedValue
 import net.ccbluex.liquidbounce.config.types.Value
+import net.ccbluex.liquidbounce.config.types.group.ModeValueGroup
 import net.ccbluex.liquidbounce.features.module.ClientModule
 import net.ccbluex.liquidbounce.features.module.ModuleCategory
 import net.ccbluex.liquidbounce.features.module.ModuleCategories
@@ -79,7 +80,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val sliderY: Int,
         val sliderW: Int,
         val min: Float,
-        val max: Float
+        val max: Float,
+        val rangeWidth: Float = 0f   // 范围值宽度 (如 12~14 → 2), 拖动时保持
     )
     private var sliderContext: SliderContext? = null
 
@@ -220,7 +222,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     private fun getCategoryModules(category: ModuleCategory): List<ClientModule> {
         return try {
             ModuleManager.getModules().toList()
-                .filter { it.category == category && it.name != "ClickGUI" }
+                .filter { it.category == category }
                 .filter { searchText.isEmpty() || it.name.contains(searchText, ignoreCase = true) }
         } catch (_: Exception) {
             emptyList()
@@ -233,7 +235,10 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         var h = 0f
         for ((v, _) in getVisibleValues(mod)) {
             val actual = getActualValue(v)
-            if (isEnumWithMultiple(actual)) {
+            if (v is ModeValueGroup<*>) {
+                // 【修复】Mode 组: 标题行 + 每个 mode 一行
+                h += max(1f, (1 + v.modes.size).toFloat()) * SETTING_H
+            } else if (isEnumWithMultiple(actual)) {
                 val constants = getEnumConstants(actual)
                 h += max(1f, constants.size.toFloat()) * SETTING_H
             } else {
@@ -279,6 +284,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             searchPanel = searchPanel ?: PanelData(null, x, y, w, h, 0f, 0f)
             searchPanel?.let { it.x = x; it.y = y; it.w = w; it.h = h }
             if (searchPanel != null) targetPanels.add(searchPanel!!)
+            // 【修复】搜索时只保留搜索结果面板, 避免所有分类面板都显示匹配模块
+            panels = targetPanels
         } else {
             searchPanel = null
             val count = categories.size
@@ -377,14 +384,19 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             val clipTop = listAreaY.toInt().coerceAtLeast(0)
             val clipBottom = (listAreaY + listAreaH).toInt().coerceAtMost(sh.toInt())
 
+            // 【修复】列表区域 scissor 裁剪: 部分可见的模块/设置也能渲染, 超出部分被裁剪
+            // 不再"整行必须在可视区才渲染"(那会隐藏列表底部最后一个模块)
+            ctx.enableScissor(listAreaX.toInt(), listAreaY.toInt(),
+                (listAreaX + listAreaW).toInt(), (listAreaY + listAreaH).toInt())
+
             var curY = listAreaY - panel.scrollOffset
 
             for (mod in panelModules) {
                 val isExpanded = expandedModule == mod
                 val modEndY = curY + ITEM_H
 
-                // 【修复】严格限制：整行必须在可视区域内才渲染，防止文字溢出面板边界
-                if (curY >= listAreaY && modEndY <= listAreaY + listAreaH) {
+                // 【修复】部分可见即渲染 (由 scissor 裁剪超出部分)
+                if (curY < listAreaY + listAreaH && modEndY > listAreaY) {
                     val isHover = mouseX in listAreaX.toInt()..(listAreaX + listAreaW).toInt() &&
                             mouseY in curY.toInt()..modEndY.toInt()
 
@@ -412,7 +424,9 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     var totalSettingH = 0f
                     for ((v, _) in values) {
                         val actual = getActualValue(v)
-                        if (isEnumWithMultiple(actual)) {
+                        if (v is ModeValueGroup<*>) {
+                            totalSettingH += max(1f, (1 + v.modes.size).toFloat()) * SETTING_H
+                        } else if (isEnumWithMultiple(actual)) {
                             totalSettingH += max(1f, getEnumConstants(actual).size.toFloat()) * SETTING_H
                         } else {
                             totalSettingH += SETTING_H
@@ -428,15 +442,20 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
                     for ((v, depth) in values) {
                         val actual = getActualValue(v)
-                        if (isEnumWithMultiple(actual)) {
+                        if (v is ModeValueGroup<*>) {
+                            // 【修复】Mode 选择器: 标题 + 每个 mode 一行
+                            val rowCount = renderModeListForModeGroup(ctx, font, v,
+                                listAreaX, curY, listAreaW, depth, mouseX, mouseY)
+                            curY += rowCount * SETTING_H
+                        } else if (isEnumWithMultiple(actual)) {
                             val rowCount = renderModeListVertical(ctx, font, v, getEnumConstants(actual),
                                 actual as Enum<*>, listAreaX, curY, listAreaW, depth, mouseX, mouseY,
                                 listAreaY, listAreaH)
                             curY += rowCount * SETTING_H
                         } else {
                             val settingEndY = curY + SETTING_H
-                            // 【修复】严格限制：整行必须在可视区域内才渲染
-                            if (curY >= listAreaY && settingEndY <= listAreaY + listAreaH) {
+                            // 【修复】部分可见即渲染 (由 scissor 裁剪)
+                            if (curY < listAreaY + listAreaH && settingEndY > listAreaY) {
                                 val isSettingHover = mouseX in listAreaX.toInt()..(listAreaX + listAreaW).toInt() &&
                                         mouseY in curY.toInt()..settingEndY.toInt()
                                 if (isSettingHover) fillRect(ctx, listAreaX, curY, listAreaX + listAreaW, settingEndY, HOVER)
@@ -447,6 +466,9 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     }
                 }
             }
+
+            // 关闭列表裁剪 (滚动条/后续内容不受影响)
+            ctx.disableScissor()
 
             // 滚动条
             if (contentH > listAreaH) {
@@ -520,8 +542,21 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val valX: Int,
         val fv: Float,
         val minV: Float,
-        val maxV: Float
+        val maxV: Float,
+        val rangeWidth: Float = 0f
     )
+
+    /** 范围值显示文本 (如 12..14 → "12~14") */
+    private fun formatRange(r: ClosedRange<*>): String {
+        val s = r.start
+        return when (s) {
+            is Int -> "${s}~${r.endInclusive}"
+            is Long -> "$s~${r.endInclusive}"
+            is Float -> String.format(java.util.Locale.US, "%.1f~%.1f", s, r.endInclusive)
+            is Double -> String.format(java.util.Locale.US, "%.1f~%.1f", s, r.endInclusive)
+            else -> "$s~${r.endInclusive}"
+        }
+    }
 
     private fun computeSliderLayout(
         font: Font,
@@ -532,22 +567,34 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         var fv = 0f
         var minV = 0f
         var maxV = 100f
-        if (actual is Number) {
+        var rangeText: String? = null
+        var rangeWidth = 0f
+
+        // 【修复】范围值支持: actual 可能是 ClosedRange (如 12..14)
+        if (actual is ClosedRange<*>) {
+            val start = (actual.start as? Number)?.toFloat() ?: 0f
+            val endIncl = (actual.endInclusive as? Number)?.toFloat() ?: start
+            fv = start
+            rangeWidth = (endIncl - start).coerceAtLeast(0f)
+            rangeText = formatRange(actual)
+        } else if (actual is Number) {
             fv = actual.toFloat()
-            if (v is RangedValue<*>) {
-                minV = (v.range.start as? Number)?.toFloat() ?: 0f
-                maxV = (v.range.endInclusive as? Number)?.toFloat() ?: 100f
-            }
         }
+        if (v is RangedValue<*>) {
+            minV = (v.range.start as? Number)?.toFloat() ?: 0f
+            maxV = (v.range.endInclusive as? Number)?.toFloat() ?: 100f
+        }
+
+        // 【修复】滑条固定最右, 数值文本固定在滑条左侧, 不再随数值长度改变滑条坐标
         val rightEdge = (x + w - 2).toInt()
         val sliderW = 36
-        val minSliderX = (x + 6 + indent).toInt() + 40
-        val maxValW = (rightEdge - minSliderX - 3 - sliderW).coerceIn(16, 70)
-        val valText = trimText(font, "%.1f".format(fv), maxValW)
+        val sliderX = rightEdge - 3 - sliderW
+        val minSliderX = (x + 6 + indent).toInt() + 24
+        val maxValW = (sliderX - 3 - minSliderX).coerceIn(12, 80)
+        val valText = trimText(font, rangeText ?: String.format(java.util.Locale.US, "%.1f", fv), maxValW)
         val valW = font.width(valText).coerceAtMost(maxValW)
-        val valX = rightEdge - valW
-        val sliderX = valX - 3 - sliderW
-        return SliderLayout(sliderX, sliderW, valText, valX, fv, minV, maxV)
+        val valX = sliderX - 3 - valW
+        return SliderLayout(sliderX, sliderW, valText, valX, fv, minV, maxV, rangeWidth)
     }
 
     // ==================== Setting row renderer ====================
@@ -582,7 +629,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     labelX, (y + 4f).toInt(), if (isCollapsed) TEXT_DIM else ACCENT)
             }
             actual is Boolean -> {
-                val nameMaxW = (toggleX - labelX - 6).coerceAtLeast(10)
+                // 【修复】label 充分利用到 ON/OFF 前方 (省略号贴近开关)
+                val nameMaxW = (toggleX - labelX - 2).coerceAtLeast(10)
                 drawText(ctx, font, trimText(font, v.name, nameMaxW), labelX, (y + 4f).toInt(), TEXT_DIM)
                 val status = if (actual) "§aON" else "§cOFF"
                 drawText(ctx, font, status, toggleX, (y + 4f).toInt(), if (actual) ACCENT else TEXT_DIM)
@@ -641,6 +689,40 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         }
     }
 
+    // ==================== Mode 组 (ModeValueGroup) 渲染 ====================
+    /** 【修复】ModeValueGroup 选择器: 标题行 + 每个 mode 一行(点+名称), 当前 mode 高亮 */
+    private fun renderModeListForModeGroup(
+        ctx: GuiGraphicsExtractor, font: Font,
+        v: ModeValueGroup<*>, x: Float, curY: Float, w: Float, depth: Int,
+        mouseX: Int, mouseY: Int
+    ): Int {
+        val indent = depth * SETTING_INDENT
+        val labelX = (x + 6 + indent).toInt()
+        val collapsed = collapsedGroups.contains(v)
+
+        // 标题行
+        fillRect(ctx, x, curY, x + w, curY + SETTING_H, GROUP_BG)
+        drawText(ctx, font, "${if (collapsed) "▶" else "▼"} ${v.name}",
+            labelX, (curY + 4f).toInt(), ACCENT)
+        if (collapsed) return 1
+
+        // 每个 mode 一行
+        var yOff = curY + SETTING_H
+        for (mode in v.modes) {
+            val isActive = mode === v.activeMode
+            val dotX = labelX + 4
+            val dotY = yOff.toInt() + 6
+            fillRect(ctx, dotX, dotY, dotX + 4, dotY + 4,
+                if (isActive) ACCENT else 0x40808080.toInt())
+            val textX = dotX + 6
+            val maxTextW = (x + w - 8 - textX).toInt().coerceAtLeast(10)
+            drawText(ctx, font, trimText(font, mode.name, maxTextW), textX, (yOff + 4f).toInt(),
+                if (isActive) TEXT_BRIGHT else TEXT_DIM)
+            yOff += SETTING_H
+        }
+        return 1 + v.modes.size
+    }
+
     // ==================== Mode 竖排渲染 ====================
     private fun renderModeListVertical(
         ctx: GuiGraphicsExtractor, font: Font,
@@ -652,8 +734,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val indent = depth * SETTING_INDENT
         val labelX = (x + 6 + indent).toInt()
         val nameMaxW = 50
-        // 标题行：严格限制在可视区域内
-        if (curY >= listAreaY && curY + SETTING_H <= listAreaY + listAreaH) {
+        // 标题行：部分可见即渲染 (由 scissor 裁剪)
+        if (curY < listAreaY + listAreaH && curY + SETTING_H > listAreaY) {
             drawText(ctx, font, trimText(font, v.name, nameMaxW), labelX, (curY + 4f).toInt(), TEXT)
         }
         var yOff = curY + SETTING_H
@@ -662,8 +744,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val dotGap = 2
         val nameX = labelX
         for (const in constants) {
-            // 每行 Mode：严格限制在可视区域内
-            if (yOff >= listAreaY && yOff + SETTING_H <= listAreaY + listAreaH) {
+            // 每行 Mode：部分可见即渲染 (由 scissor 裁剪)
+            if (yOff < listAreaY + listAreaH && yOff + SETTING_H > listAreaY) {
                 val displayName = const.toString()
                 val isActive = displayName == current.name
                 val dotX = nameX + 4
@@ -813,7 +895,28 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     for ((v, depth) in values) {
                         val actual = getActualValue(v)
 
-                        if (isEnumWithMultiple(actual)) {
+                        if (v is ModeValueGroup<*>) {
+                            // 【修复】Mode 组点击: 标题行折叠/展开, mode 行切换
+                            val titleEndY = curY + SETTING_H
+                            if (my in curY.toInt()..titleEndY.toInt()) {
+                                if (btn == 0) {
+                                    if (collapsedGroups.contains(v)) collapsedGroups.remove(v)
+                                    else collapsedGroups.add(v)
+                                }
+                                return true
+                            }
+                            curY += SETTING_H
+                            for (mode in v.modes) {
+                                val settingEndY = curY + SETTING_H
+                                if (my in curY.toInt()..settingEndY.toInt()) {
+                                    if (btn == 0) {
+                                        try { v.setByString(mode.name) } catch (_: Exception) {}
+                                    }
+                                    return true
+                                }
+                                curY += SETTING_H
+                            }
+                        } else if (isEnumWithMultiple(actual)) {
                             val constants = getEnumConstants(actual)
                             curY += SETTING_H
                             for (const in constants) {
@@ -884,20 +987,43 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             if (mx.toInt() in hitStart..hitEnd) {
                 val progress = ((mx.toInt() - layout.sliderX).toFloat() / layout.sliderW).coerceIn(0f, 1f)
                 val newValue = layout.minV + (layout.maxV - layout.minV) * progress
-
-                when (actual) {
-                    is Float -> trySetValue(v, newValue)
-                    is Double -> trySetValue(v, newValue.toDouble())
-                    is Int -> trySetValue(v, newValue.toInt())
-                    is Long -> trySetValue(v, newValue.toLong())
-                }
+                applySliderValue(v, actual, newValue, layout.rangeWidth)
 
                 sliderContext = SliderContext(
                     value = v, panel = panel,
                     sliderX = layout.sliderX, sliderY = y.toInt() + 8,
-                    sliderW = layout.sliderW, min = layout.minV, max = layout.maxV
+                    sliderW = layout.sliderW, min = layout.minV, max = layout.maxV,
+                    rangeWidth = layout.rangeWidth
                 )
             }
+        }
+    }
+
+    /** 应用滑块值: 支持普通数值和范围值 (ClosedRange, 拖动时保持范围宽度) */
+    private fun applySliderValue(v: Value<*>, actual: Any?, newValue: Float, rangeWidth: Float) {
+        when (actual) {
+            is ClosedRange<*> -> {
+                val start = actual.start
+                val newStart: Any = when (start) {
+                    is Int -> newValue.toInt()
+                    is Long -> newValue.toLong()
+                    is Float -> newValue
+                    is Double -> newValue.toDouble()
+                    else -> return
+                }
+                val newRange: Any = when (start) {
+                    is Int -> (newStart as Int)..(newStart + rangeWidth.toInt())
+                    is Long -> (newStart as Long)..(newStart + rangeWidth.toLong())
+                    is Float -> (newStart as Float)..(newStart + rangeWidth)
+                    is Double -> (newStart as Double)..(newStart + rangeWidth.toDouble())
+                    else -> return
+                }
+                trySetValue(v, newRange)
+            }
+            is Float -> trySetValue(v, newValue)
+            is Double -> trySetValue(v, newValue.toDouble())
+            is Int -> trySetValue(v, newValue.toInt())
+            is Long -> trySetValue(v, newValue.toLong())
         }
     }
 
@@ -929,12 +1055,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             val progress = ((mx.toInt() - context.sliderX).toFloat() / context.sliderW).coerceIn(0f, 1f)
             val newValue = context.min + (context.max - context.min) * progress
             val actual = getActualValue(context.value)
-            when (actual) {
-                is Float -> trySetValue(context.value, newValue)
-                is Double -> trySetValue(context.value, newValue.toDouble())
-                is Int -> trySetValue(context.value, newValue.toInt())
-                is Long -> trySetValue(context.value, newValue.toLong())
-            }
+            applySliderValue(context.value, actual, newValue, context.rangeWidth)
             return true
         }
 
@@ -949,14 +1070,14 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 }
                 return true
             }
-            // 【修复】滚动条拖拽 — 确保 dy 正确传递
+            // 【修复】滚动条拖拽方向: 鼠标向下(dy>0) → 内容向上滚(targetScroll 增大)
             if (panel.draggingScroll) {
                 val modules = getModulesForPanel(panel)
                 val contentH = getContentHeight(modules)
                 val listAreaH = panel.h - 32f
                 if (contentH > listAreaH) {
                     val maxScroll = contentH - listAreaH
-                    panel.targetScroll = (panel.targetScroll - dy.toFloat() * 1.5f).coerceIn(0f, maxScroll)
+                    panel.targetScroll = (panel.targetScroll + dy.toFloat() * 1.5f).coerceIn(0f, maxScroll)
                 }
                 return true
             }
@@ -1000,7 +1121,10 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             listeningValue = null
             return true
         }
-        if (event.key() == GLFW.GLFW_KEY_ESCAPE || event.key() == GLFW.GLFW_KEY_RIGHT_SHIFT) {
+        // ESC / 右 Shift 关闭: Android 环境 key() 可能是 scancode, 同时用 key() 和 scancode() 兜底
+        // (ESC scancode=1, 右 Shift scancode=54)
+        if (event.key() == GLFW.GLFW_KEY_ESCAPE || event.scancode() == 1 ||
+            event.key() == GLFW.GLFW_KEY_RIGHT_SHIFT || event.scancode() == 54) {
             if (searchFocused) { searchFocused = false; return true }
             onClose()
             return true
@@ -1135,12 +1259,25 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
         fun process(v: Value<*>, depth: Int) {
             if (visited.containsKey(v)) return
-            if (isHiddenForCurrentMode(v)) { visited[v] = true; return }
+            // ModeValueGroup 不走按名过滤(由 activeMode 决定显示), 其余值正常过滤
+            if (v !is ModeValueGroup<*> && isHiddenForCurrentMode(v)) { visited[v] = true; return }
             visited[v] = true
             result.add(Pair(v, depth))
-            if (isGroupValue(v) && !collapsedGroups.contains(v)) {
-                getGroupChildren(v).forEach { child ->
-                    if (!isHiddenForCurrentMode(child)) process(child, depth + 1)
+            when {
+                // 【修复】ModeValueGroup: 只展开当前激活的 Mode 的设置, 其他 mode 的设置不再混入
+                v is ModeValueGroup<*> -> {
+                    if (!collapsedGroups.contains(v)) {
+                        getGroupChildren(v.activeMode).forEach { child ->
+                            if (!isHiddenForCurrentMode(child)) process(child, depth + 1)
+                        }
+                    }
+                }
+                isGroupValue(v) -> {
+                    if (!collapsedGroups.contains(v)) {
+                        getGroupChildren(v).forEach { child ->
+                            if (!isHiddenForCurrentMode(child)) process(child, depth + 1)
+                        }
+                    }
                 }
             }
         }
@@ -1288,7 +1425,9 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             val file = getLayoutFile()
             file.parentFile?.mkdirs()
             file.writeText(sb.toString())
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            println("[ClickGui] saveLayout failed: ${e.message}")
+        }
     }
 
     private fun loadLayout(): LayoutState {
