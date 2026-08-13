@@ -224,6 +224,7 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModuleQuickPerspe
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleRadar
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleRotations
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSilentHotbar
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleTargetHud
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSkinChanger
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeArraylist
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSmoothCamera
@@ -653,6 +654,7 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleJumpEffect,
             ModuleMobOwners,
             ModuleMurderMystery,
+            ModuleTargetHud,
             ModuleHitFX,
             ModuleNametags,
             ModuleCombineMobs,
