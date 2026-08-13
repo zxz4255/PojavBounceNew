@@ -207,7 +207,7 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModuleHoleESP
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleHud
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleItemChams
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleItemESP
-import net.ccbluex.liquidbounce.features.module.modules.render.SolsticeNametags
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeNametags
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleItemTags
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleJumpEffect
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleLogoffSpot
