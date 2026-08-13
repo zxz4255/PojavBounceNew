@@ -37,7 +37,7 @@
  *    2. ModuleManager.kt: import + builtin 列表加 ModuleSolsticeNotifications,
  * ============================================================================
  */
-package net.ccbluex.liquidbounce.features.module.modules.`fun`
+package net.ccbluex.liquidbounce.features.module.modules.render
 
 import net.ccbluex.liquidbounce.config.types.list.Tagged
 import net.ccbluex.liquidbounce.event.events.ModuleToggleEvent
@@ -103,7 +103,7 @@ object ModuleSolsticeNotifications : ClientModule(
 
     // —— 动画 ——
     // 原版: deltaTime * 5.0f (纯线性 lerp)。此配置直接替换 5.0f, 默认保持原版。
-    private val animationSpeed by float("Animation Speed", 50f, 1f..50f)
+    private val animationSpeed by float("Animation Speed", 80f, 1f..100f)
 
     /* ============================= 内部状态 ============================= */
 
