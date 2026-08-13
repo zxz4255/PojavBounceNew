@@ -37,7 +37,7 @@
  *    2. ModuleManager.kt: import + builtin 列表加 ModuleSolsticeNotifications,
  * ============================================================================
  */
-package net.ccbluex.liquidbounce.features.module.modules.render
+package net.ccbluex.liquidbounce.features.module.modules.`fun`
 
 import net.ccbluex.liquidbounce.config.types.list.Tagged
 import net.ccbluex.liquidbounce.event.events.ModuleToggleEvent
