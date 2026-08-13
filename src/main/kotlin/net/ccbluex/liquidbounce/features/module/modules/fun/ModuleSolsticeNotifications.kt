@@ -46,10 +46,11 @@ import net.ccbluex.liquidbounce.render.drawRoundedRect
 import net.ccbluex.liquidbounce.render.engine.type.Color4b
 import net.ccbluex.liquidbounce.utils.client.mc
 import net.minecraft.client.gui.GuiGraphicsExtractor
+import kotlin.math.exp
 import kotlin.math.roundToInt
 
 object ModuleSolsticeNotifications : ClientModule(
-    "SolsticeNotifications",
+    "SolsticeNotifications[skid测试]",
     ModuleCategories.RENDER,
     aliases = listOf("SolsticeNotify", "Notifications"),
 ) {
@@ -97,7 +98,7 @@ object ModuleSolsticeNotifications : ClientModule(
     private val rainbowSpeed by float("Rainbow Speed", 1f, 0.1f..10f)
 
     // —— 动画 ——
-    private val animationSpeed by float("Animation Speed", 5f, 0.5f..20f)    // 原版 deltaTime*5
+    private val animationSpeed by float("Animation Speed", 15f, 0.5f..50f)   // 原版 deltaTime*5, 加快默认
 
     /* ============================= 内部状态 ============================= */
 
@@ -199,7 +200,8 @@ object ModuleSolsticeNotifications : ClientModule(
         val screenH = ctx.guiHeight().toFloat()
 
         val boxH = 9f + 30f   // 9px 字体 + 原版 30 内边距
-        val smooth = (dt * animationSpeed).coerceAtMost(1f)
+        // 指数平滑: 启动快、收尾顺, 视觉比原版线性 lerp 更跟手
+        val smooth = (1f - exp(-animationSpeed * dt)).coerceIn(0f, 1f)
         var index = 0
 
         for (n in notifications) {
