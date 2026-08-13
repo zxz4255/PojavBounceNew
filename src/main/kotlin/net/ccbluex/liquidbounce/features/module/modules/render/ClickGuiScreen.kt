@@ -98,13 +98,18 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     private var activeColorValue: Value<*>? = null
     private var colorPickerX = 0f
     private var colorPickerY = 0f
+    private var colorPickerAlpha = 255               // 当前调色板 Alpha (0..255)
+    private var colorPickerAlphaDragging = false     // 正在拖动 Alpha 条
     private val PALETTE_ROWS = 9
     private val PALETTE_COLS = 5
     private val PALETTE_CELL = 10f
     private val PALETTE_GAP = 2f
     private val PALETTE_PAD = 4f
+    private val ALPHA_BAR_H = 10f
+    private val ALPHA_BAR_OFFSET = 6f
     private val PALETTE_W = PALETTE_COLS * (PALETTE_CELL + PALETTE_GAP) - PALETTE_GAP + PALETTE_PAD * 2
-    private val PALETTE_H = PALETTE_ROWS * (PALETTE_CELL + PALETTE_GAP) - PALETTE_GAP + PALETTE_PAD * 2
+    private val PALETTE_H = PALETTE_ROWS * (PALETTE_CELL + PALETTE_GAP) - PALETTE_GAP + PALETTE_PAD * 2 +
+        ALPHA_BAR_H + ALPHA_BAR_OFFSET
 
     /** 预生成调色板 */
     private val paletteColors: List<Color4b> = buildList {
@@ -210,7 +215,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     }
 
     // 字体缩放比例 (0.8 = 比默认小一点)
-    private val TEXT_SCALE = 0.8f
+    private val TEXT_SCALE = 0.9f
 
     private fun trimText(font: Font, text: String, maxWidth: Int): String {
         if (font.width(text) <= maxWidth) return text
@@ -535,6 +540,25 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     fillRect(ctx, (cx + PALETTE_CELL).toInt(), (cy - 1).toInt(), (cx + PALETTE_CELL + 1).toInt(), (cy + PALETTE_CELL + 1).toInt(), TEXT_BRIGHT)
                 }
             }
+
+            // —— 【新增】Alpha 透明度条 (底部): 透明 → 当前色, 拖动调节 ——
+            val barY = py + PALETTE_H - ALPHA_BAR_H
+            val barX = px + PALETTE_PAD
+            val barW = PALETTE_W - PALETTE_PAD * 2
+            val (cr, cg, cb) = currentColorRgb(colorVal)
+            // 渐变: 8 段, 每段当前色 alpha 递增
+            for (s in 0 until 8) {
+                val a = (s * 255 / 7).coerceIn(0, 255)
+                val sx = barX + barW * s / 8
+                val ex = barX + barW * (s + 1) / 8
+                fillRect(ctx, sx.toInt(), barY.toInt(), ex.toInt(), (barY + ALPHA_BAR_H).toInt(),
+                    (a shl 24) or (cr shl 16) or (cg shl 8) or cb)
+            }
+            // Alpha 滑块
+            val knobX = barX + barW * colorPickerAlpha / 255
+            fillRect(ctx, (knobX - 2).toInt(), (barY - 2).toInt(), (knobX + 2).toInt(), (barY + ALPHA_BAR_H + 2).toInt(), TEXT_BRIGHT)
+            // Alpha 数值
+            drawText(ctx, font, "$colorPickerAlpha", (barX + barW + 3f).roundToInt(), (barY + 1f).toInt(), TEXT_DIM)
         }
     }
 
@@ -837,11 +861,26 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             val py = colorPickerY.coerceIn(0f, sh - PALETTE_H)
             if (mx in px.toInt()..(px + PALETTE_W).toInt() &&
                 my in py.toInt()..(py + PALETTE_H).toInt()) {
+                // 【新增】Alpha 条区域 → 设置透明度并开始拖动
+                val barY = py + PALETTE_H - ALPHA_BAR_H
+                if (my >= barY.toInt() && my <= (barY + ALPHA_BAR_H).toInt()) {
+                    val barX = px + PALETTE_PAD
+                    val barW = PALETTE_W - PALETTE_PAD * 2
+                    val alpha = (((mx - barX) / barW) * 255).toInt().coerceIn(0, 255)
+                    colorPickerAlpha = alpha
+                    colorPickerAlphaDragging = true
+                    // 实时应用到当前颜色
+                    val (r, g, b) = currentColorRgb(colorVal)
+                    trySetValue(colorVal, Color4b(r, g, b, alpha))
+                    return true
+                }
+                // 色块 → 选色 (应用当前 Alpha)
                 val col = ((mx - px - PALETTE_PAD) / (PALETTE_CELL + PALETTE_GAP)).toInt()
                 val row = ((my - py - PALETTE_PAD) / (PALETTE_CELL + PALETTE_GAP)).toInt()
                 val index = row * PALETTE_COLS + col
                 if (index in paletteColors.indices) {
-                    trySetValue(colorVal, paletteColors[index])
+                    val picked = paletteColors[index]
+                    trySetValue(colorVal, Color4b(picked.r, picked.g, picked.b, colorPickerAlpha))
                     activeColorValue = null
                 }
                 return true
@@ -1011,6 +1050,9 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 activeColorValue = null
             } else {
                 activeColorValue = v
+                // 【新增】打开调色板时同步当前颜色的 Alpha
+                colorPickerAlpha = currentColorAlpha(v)
+                colorPickerAlphaDragging = false
                 colorPickerX = x + w - PALETTE_W - 2f
                 colorPickerY = y + SETTING_H + 2f
             }
@@ -1126,6 +1168,22 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val mx = event.x().toFloat()
         val my = event.y().toFloat()
 
+        // 【新增】Alpha 条拖动: 拖动时实时更新当前颜色的透明度
+        if (colorPickerAlphaDragging) {
+            val colorVal = activeColorValue
+            if (colorVal != null) {
+                val px = colorPickerX.coerceIn(0f, minecraft!!.window.guiScaledWidth - PALETTE_W)
+                val py = colorPickerY.coerceIn(0f, minecraft!!.window.guiScaledHeight - PALETTE_H)
+                val barX = px + PALETTE_PAD
+                val barW = PALETTE_W - PALETTE_PAD * 2
+                val alpha = (((mx - barX) / barW) * 255).toInt().coerceIn(0, 255)
+                colorPickerAlpha = alpha
+                val (r, g, b) = currentColorRgb(colorVal)
+                trySetValue(colorVal, Color4b(r, g, b, alpha))
+            }
+            return true
+        }
+
         // 滑块拖动
         val context = sliderContext
         if (context != null) {
@@ -1173,6 +1231,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             panel.draggingPanel = false
         }
         sliderContext = null
+        colorPickerAlphaDragging = false
         saveLayout()
         return true
     }
@@ -1451,6 +1510,21 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         if (actual is Color4b) return Color(actual.argb, true)
         if (actual is Number) return Color(actual.toInt(), true)
         return Color.WHITE
+    }
+
+    /** 当前颜色 Alpha (Color4b.a) */
+    private fun currentColorAlpha(v: Value<*>): Int {
+        val actual = getActualValue(v)
+        if (actual is Color4b) return actual.a
+        return 255
+    }
+
+    /** 当前颜色 RGB 分量 */
+    private fun currentColorRgb(v: Value<*>): Triple<Int, Int, Int> {
+        val actual = getActualValue(v)
+        if (actual is Color4b) return Triple(actual.r, actual.g, actual.b)
+        val c = extractColor(v)
+        return Triple(c.red, c.green, c.blue)
     }
 
     private fun formatBindValue(v: Value<*>): String {
