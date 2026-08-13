@@ -34,7 +34,7 @@
  *    2. ModuleManager.kt: import + builtin 列表加 ModuleSolsticeArraylist,
  * ============================================================================
  */
-package net.ccbluex.liquidbounce.features.module.modules.fun
+package net.ccbluex.liquidbounce.features.module.modules.`fun`
 
 import net.ccbluex.liquidbounce.config.types.list.Tagged
 import net.ccbluex.liquidbounce.event.events.MouseButtonEvent
