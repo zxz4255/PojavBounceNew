@@ -88,9 +88,9 @@ import net.ccbluex.liquidbounce.features.module.modules.`fun`.ModuleDerp
 import net.ccbluex.liquidbounce.features.module.modules.`fun`.ModuleHandDerp
 import net.ccbluex.liquidbounce.features.module.modules.`fun`.ModuleSkinDerp
 import net.ccbluex.liquidbounce.features.module.modules.`fun`.ModuleTwerk
-import net.ccbluex.liquidbounce.features.module.modules.`fun´.ModuleSolsticeNotifications
+import net.ccbluex.liquidbounce.features.module.modules.`fun`.ModuleSolsticeNotifications
 import net.ccbluex.liquidbounce.features.module.modules.`fun`.ModuleVomit
-import net.ccbluex.liquidbounce.features.module.modules.`fun´.ModuleSolsticeArraylist
+import net.ccbluex.liquidbounce.features.module.modules.`fun`.ModuleSolsticeArraylist
 import net.ccbluex.liquidbounce.features.module.modules.`fun`.notebot.ModuleNotebot
 import net.ccbluex.liquidbounce.features.module.modules.misc.ModuleAntiCheatDetect
 import net.ccbluex.liquidbounce.features.module.modules.misc.ModuleAntiStaff
@@ -524,7 +524,7 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleDerp,
             ModuleNotebot,
             ModuleSkinDerp,
-            MofuleSolsticeNotifications,
+            ModuleSolsticeNotifications,
             ModuleHandDerp,
             ModuleSolsticeArraylist,
             ModuleTwerk,
