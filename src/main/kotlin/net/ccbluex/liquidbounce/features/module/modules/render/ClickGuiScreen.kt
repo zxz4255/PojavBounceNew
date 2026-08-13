@@ -81,7 +81,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val sliderW: Int,
         val min: Float,
         val max: Float,
-        val rangeWidth: Float = 0f   // 范围值宽度 (如 12~14 → 2), 拖动时保持
+        val rangeWidth: Float = 0f,   // 范围值宽度 (如 12~14 → 2), 拖动时保持
+        val rangePoint: Int = -1      // 【修复】范围双滑块: -1=普通, 0=下限点, 1=上限点
     )
     private var sliderContext: SliderContext? = null
 
@@ -208,7 +209,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     }
 
     // 字体缩放比例 (0.8 = 比默认小一点)
-    private val TEXT_SCALE = 0.9f
+    private val TEXT_SCALE = 0.8f
 
     private fun trimText(font: Font, text: String, maxWidth: Int): String {
         if (font.width(text) <= maxWidth) return text
@@ -284,8 +285,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             searchPanel = searchPanel ?: PanelData(null, x, y, w, h, 0f, 0f)
             searchPanel?.let { it.x = x; it.y = y; it.w = w; it.h = h }
             if (searchPanel != null) targetPanels.add(searchPanel!!)
-            // 【修复】搜索时只保留搜索结果面板, 避免所有分类面板都显示匹配模块
-            panels = targetPanels
+            // 【修复】搜索时不再替换 panels: 分类面板保留(位置/状态不丢),
+            // 绘制/交互时只使用 searchPanel (见 currentPanels)
         } else {
             searchPanel = null
             val count = categories.size
@@ -328,7 +329,9 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             panels = targetPanels
             if (isFirstLoad) {
                 savedLayout.expandedModule?.let { name ->
-                    expandedModule = ModuleManager.getModuleByName(name)
+                    val mod = ModuleManager.getModuleByName(name)
+                    // 【建议】OFF 模块不默认展开 (仅启用模块恢复展开状态)
+                    expandedModule = if (mod != null && mod.enabled) mod else null
                 }
                 for (key in savedLayout.collapsedGroups) {
                     val idx = key.indexOf(':')
@@ -345,8 +348,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             }
         }
 
-        // 绘制面板循环
-        for (panel in panels) {
+        // 绘制面板循环 (【修复】搜索时只绘制 searchPanel, 分类面板保留在 panels 中)
+        for (panel in if (isSearching) targetPanels else panels) {
             val px = panel.x; val py = panel.y; val pw = panel.w; val ph = panel.h
             val actualHeight = if (panel.collapsed) HEADER_H + 2f else ph
 
@@ -543,7 +546,11 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val fv: Float,
         val minV: Float,
         val maxV: Float,
-        val rangeWidth: Float = 0f
+        val rangeWidth: Float = 0f,
+        // 【修复】范围值双滑块: 下限点/上限点在轨道内的位置 (仅 Range 使用)
+        val lowerPointX: Int = 0,
+        val upperPointX: Int = 0,
+        val rangeEnd: Float = 0f,
     )
 
     /** 范围值显示文本 (如 12..14 → "12~14") */
@@ -569,12 +576,14 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         var maxV = 100f
         var rangeText: String? = null
         var rangeWidth = 0f
+        var rangeEnd = 0f
 
         // 【修复】范围值支持: actual 可能是 ClosedRange (如 12..14)
         if (actual is ClosedRange<*>) {
             val start = (actual.start as? Number)?.toFloat() ?: 0f
             val endIncl = (actual.endInclusive as? Number)?.toFloat() ?: start
             fv = start
+            rangeEnd = endIncl
             rangeWidth = (endIncl - start).coerceAtLeast(0f)
             rangeText = formatRange(actual)
         } else if (actual is Number) {
@@ -594,7 +603,16 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val valText = trimText(font, rangeText ?: String.format(java.util.Locale.US, "%.1f", fv), maxValW)
         val valW = font.width(valText).coerceAtMost(maxValW)
         val valX = sliderX - 3 - valW
-        return SliderLayout(sliderX, sliderW, valText, valX, fv, minV, maxV, rangeWidth)
+
+        // 【修复】范围值: 计算轨道内下限点/上限点的 x 位置 (双滑块)
+        var lowerPointX = 0
+        var upperPointX = 0
+        if (rangeWidth > 0f || actual is ClosedRange<*>) {
+            val span = (maxV - minV).takeIf { it > 0f } ?: 1f
+            lowerPointX = sliderX + ((fv - minV) / span * sliderW).toInt().coerceIn(0, sliderW)
+            upperPointX = sliderX + ((rangeEnd - minV) / span * sliderW).toInt().coerceIn(0, sliderW)
+        }
+        return SliderLayout(sliderX, sliderW, valText, valX, fv, minV, maxV, rangeWidth, lowerPointX, upperPointX, rangeEnd)
     }
 
     // ==================== Setting row renderer ====================
@@ -646,14 +664,29 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 drawText(ctx, font, trimText(font, v.name, labelMaxW), labelX, (y + 3f).toInt(), TEXT_DIM)
                 val layout = computeSliderLayout(font, v, actual, x, w, indent)
                 val sliderY = y.toInt() + 8
-                val progress = if (layout.maxV > layout.minV) {
-                    ((layout.fv - layout.minV) / (layout.maxV - layout.minV)).coerceIn(0f, 1f)
-                } else 0f
+                val isRange = layout.rangeWidth > 0f || layout.upperPointX != 0
 
+                // 轨道 (固定)
                 fillRect(ctx, layout.sliderX, sliderY, layout.sliderX + layout.sliderW, sliderY + 2, 0x30FFFFFF.toInt())
-                fillRect(ctx, layout.sliderX, sliderY, layout.sliderX + (layout.sliderW * progress).toInt(), sliderY + 2, ACCENT)
-                fillRect(ctx, layout.sliderX + (layout.sliderW * progress).toInt() - 1, sliderY - 1,
-                    layout.sliderX + (layout.sliderW * progress).toInt() + 1, sliderY + 3, TEXT_BRIGHT)
+
+                if (isRange) {
+                    // 【修复】范围值双滑块: 下限点↔上限点之间填充, 两个可拖动的点
+                    val lx = layout.lowerPointX
+                    val ux = layout.upperPointX.coerceAtLeast(lx + 2)
+                    // 区间填充
+                    fillRect(ctx, lx, sliderY, ux, sliderY + 2, ACCENT)
+                    // 下限点
+                    fillRect(ctx, lx - 2, sliderY - 3, lx + 2, sliderY + 5, TEXT_BRIGHT)
+                    // 上限点
+                    fillRect(ctx, ux - 2, sliderY - 3, ux + 2, sliderY + 5, TEXT_BRIGHT)
+                } else {
+                    val progress = if (layout.maxV > layout.minV) {
+                        ((layout.fv - layout.minV) / (layout.maxV - layout.minV)).coerceIn(0f, 1f)
+                    } else 0f
+                    fillRect(ctx, layout.sliderX, sliderY, layout.sliderX + (layout.sliderW * progress).toInt(), sliderY + 2, ACCENT)
+                    fillRect(ctx, layout.sliderX + (layout.sliderW * progress).toInt() - 1, sliderY - 1,
+                        layout.sliderX + (layout.sliderW * progress).toInt() + 1, sliderY + 3, TEXT_BRIGHT)
+                }
                 drawText(ctx, font, layout.valText, layout.valX, (y + 3f).toInt(), TEXT_DIM)
             }
             isColorValue(v) -> {
@@ -816,7 +849,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         }
 
         var targetPanel: PanelData? = null
-        for (panel in panels) {
+        for (panel in currentPanels()) {
             if (mx in panel.x.toInt()..(panel.x + panel.w).toInt() &&
                 my in panel.y.toInt()..(panel.y + panel.h).toInt()) {
                 targetPanel = panel
@@ -881,6 +914,10 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                         0 -> {
                             if (mod.name != "ClickGUI") {
                                 try { mod.enabled = !mod.enabled } catch (_: Exception) {}
+                                // 【修复】模块关闭(OFF)后自动收起其展开的设置
+                                if (!mod.enabled && expandedModule == mod) {
+                                    expandedModule = null
+                                }
                             }
                         }
                         1 -> { expandedModule = if (expandedModule == mod) null else mod }
@@ -987,15 +1024,54 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             if (mx.toInt() in hitStart..hitEnd) {
                 val progress = ((mx.toInt() - layout.sliderX).toFloat() / layout.sliderW).coerceIn(0f, 1f)
                 val newValue = layout.minV + (layout.maxV - layout.minV) * progress
-                applySliderValue(v, actual, newValue, layout.rangeWidth)
+
+                // 【修复】范围双滑块: 判断点击离下限点/上限点哪个近
+                var rangePoint = -1
+                if (layout.upperPointX != 0) {
+                    val mxInt = mx.toInt()
+                    val dLower = abs(mxInt - layout.lowerPointX)
+                    val dUpper = abs(mxInt - layout.upperPointX)
+                    rangePoint = if (dLower <= dUpper) 0 else 1
+                }
+                if (rangePoint == -1) {
+                    applySliderValue(v, actual, newValue, layout.rangeWidth)
+                } else {
+                    applyRangePoint(v, actual, newValue, rangePoint)
+                }
 
                 sliderContext = SliderContext(
                     value = v, panel = panel,
                     sliderX = layout.sliderX, sliderY = y.toInt() + 8,
                     sliderW = layout.sliderW, min = layout.minV, max = layout.maxV,
-                    rangeWidth = layout.rangeWidth
+                    rangeWidth = layout.rangeWidth, rangePoint = rangePoint
                 )
             }
+        }
+    }
+
+    /** 应用范围值双滑块: 只移动下限点(point=0)或上限点(point=1), 另一端保持不动 */
+    private fun applyRangePoint(v: Value<*>, actual: Any?, newValue: Float, point: Int) {
+        if (actual !is ClosedRange<*>) return
+        val start = (actual.start as? Number)?.toFloat() ?: return
+        val end = (actual.endInclusive as? Number)?.toFloat() ?: return
+        val min = ((v as? RangedValue<*>)?.range?.start as? Number)?.toFloat() ?: 0f
+        val max = ((v as? RangedValue<*>)?.range?.endInclusive as? Number)?.toFloat() ?: 100f
+        val newStart: Float
+        val newEnd: Float
+        if (point == 0) {
+            // 拖动下限点: 下限 ≤ 上限
+            newStart = newValue.coerceIn(min, end)
+            newEnd = end
+        } else {
+            // 拖动上限点: 上限 ≥ 下限
+            newStart = start
+            newEnd = newValue.coerceIn(start, max)
+        }
+        when (actual.start) {
+            is Int -> trySetValue(v, newStart.toInt()..newEnd.toInt())
+            is Long -> trySetValue(v, newStart.toLong()..newEnd.toLong())
+            is Float -> trySetValue(v, newStart..newEnd)
+            is Double -> trySetValue(v, newStart.toDouble()..newEnd.toDouble())
         }
     }
 
@@ -1055,11 +1131,16 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             val progress = ((mx.toInt() - context.sliderX).toFloat() / context.sliderW).coerceIn(0f, 1f)
             val newValue = context.min + (context.max - context.min) * progress
             val actual = getActualValue(context.value)
-            applySliderValue(context.value, actual, newValue, context.rangeWidth)
+            // 【修复】范围双滑块: 按 rangePoint 分别拖动下限/上限点
+            if (context.rangePoint == -1) {
+                applySliderValue(context.value, actual, newValue, context.rangeWidth)
+            } else {
+                applyRangePoint(context.value, actual, newValue, context.rangePoint)
+            }
             return true
         }
 
-        for (panel in panels) {
+        for (panel in currentPanels()) {
             if (panel.draggingPanel) {
                 panel.x = mx - panel.dragOffsetX
                 panel.y = my - panel.dragOffsetY
@@ -1086,7 +1167,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     }
 
     override fun mouseReleased(event: MouseButtonEvent): Boolean {
-        for (panel in panels) {
+        for (panel in currentPanels()) {
             panel.draggingScroll = false
             panel.draggingPanel = false
         }
@@ -1096,7 +1177,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     }
 
     override fun mouseScrolled(mouseX: Double, mouseY: Double, horizontal: Double, vertical: Double): Boolean {
-        for (panel in panels) {
+        for (panel in currentPanels()) {
             if (panel.collapsed) continue
             if (mouseX in panel.x.toDouble()..(panel.x + panel.w).toDouble() &&
                 mouseY in panel.y.toDouble()..(panel.y + panel.h).toDouble()) {
@@ -1106,6 +1187,10 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         }
         return true
     }
+
+    /** 【修复】当前生效的面板列表: 搜索时只显示 searchPanel, 否则为分类面板 */
+    private fun currentPanels(): List<PanelData> =
+        if (searchText.isNotEmpty()) listOfNotNull(searchPanel) else panels
 
     private fun getModulesForPanel(panel: PanelData): List<ClientModule> {
         return if (searchText.isNotEmpty()) {

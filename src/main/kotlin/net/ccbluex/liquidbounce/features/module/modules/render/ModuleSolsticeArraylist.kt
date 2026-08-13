@@ -80,12 +80,12 @@ object ModuleSolsticeArraylist : ClientModule(
     private val topOffset by int("Top Offset", 10, 0..500)
     private val rightOffset by int("Right Offset", 30, 0..500)
     private val uiScale by float("Scale", 1f, 0.5f..2.5f)        // 整体缩放 (锚定右上角)
-    private val spacing by int("Spacing", 2, 0..12)              // 模块条目间距
+    private val spacing by int("Spacing", 0, 0..12)              // 模块条目间距
 
     // —— 水印 (原版 Solstice V4) ——
-    private val showWatermark by boolean("Show Watermark", false)
+    private val showWatermark by boolean("Show Watermark", true)
     private val watermarkText by text("Watermark Text", "Solstice V4")
-    private val watermarkGlow by boolean("Watermark Glow", false)
+    private val watermarkGlow by boolean("Watermark Glow", true)
     private val watermarkGlowRadius by int("Watermark Glow Radius", 10, 0..40)
     private val watermarkGlowDensity by int("Watermark Glow Density", 5, 1..8)
 
@@ -97,7 +97,7 @@ object ModuleSolsticeArraylist : ClientModule(
     private val textShadow by boolean("Text Shadow", true)
     private val shadowOffset by float("Shadow Offset", 1f, 0f..5f)
     private val clickToToggle by boolean("Click To Toggle", true)
-    private val animationSpeed by float("Animation Speed", 50f, 0.5f..50f)
+    private val animationSpeed by float("Animation Speed", 12f, 0.5f..30f)
 
     // —— 背景 ——
     private val listBackground by boolean("List Background", false)
@@ -148,43 +148,49 @@ object ModuleSolsticeArraylist : ClientModule(
         ColorMode.RAINBOW -> rainbowColor(index)
     }
 
-    /** 原版 drawShadowRectDense 移植: 多层描边光晕 (outline 模式, 不覆盖内部文字) */
+    /** 原版 drawShadowRectDense 移植: 多层描边光晕
+     *  【修复】描边完全向外扩散 (内缘贴齐文本边缘, 不覆盖文字不糊字), 强度适中
+     */
     private fun GuiGraphicsExtractor.drawGlowRect(
         x1: Float, y1: Float, x2: Float, y2: Float,
         color: Color4b, radius: Float, density: Int,
     ) {
         if (radius <= 0f || density <= 0) return
         if (density <= 1) {
+            val w = radius * 0.55f
             drawRoundedRect(
-                x1, y1, x2, y2,
-                radius * 0.5f, Color4b.TRANSPARENT, color, radius * 0.35f,
+                x1 - w, y1 - w, x2 + w, y2 + w,
+                w * 0.5f, Color4b.TRANSPARENT, color, w,
             )
             return
         }
         for (i in 0 until density) {
             val t = i / (density - 1).toFloat()
             val w = radius * (0.3f + 0.7f * t)          // 描边厚度逐层增加
-            val a = color.a * (0.25f + 0.25f * (1f - t))  // 透明度低且逐层递减
-            // 【修复】贴齐文本边缘 (不再外扩, 避免光晕偏移/糊成团)
+            val a = color.a * (0.55f + 0.3f * (1f - t)) // 强度适中, 逐层递减
+            // 外扩 w/2 + outline 宽 w → 内缘恰好贴齐文本边缘 (完全不覆盖文字)
+            val off = w * 0.5f
             drawRoundedRect(
-                x1, y1, x2, y2, w * 0.5f,
-                Color4b.TRANSPARENT, color.alpha(a.roundToInt().coerceIn(0, 255)), w * 0.4f,
+                x1 - off, y1 - off, x2 + off, y2 + off,
+                w * 0.5f, Color4b.TRANSPARENT, color.alpha(a.roundToInt().coerceIn(0, 255)), w,
             )
         }
     }
 
-    /** 原版 drawShadowCircleDense: 多层描边圆光晕 */
+    /** 原版 drawShadowCircleDense: 多层描边圆光晕
+     *  【修复】小半径 + 适中强度, 避免糊成一团圆形
+     */
     private fun GuiGraphicsExtractor.drawGlowCircle(
         cx: Float, cy: Float, radius: Float, color: Color4b, density: Int,
     ) {
         if (radius <= 0f || density <= 0) return
         for (i in 0 until density) {
             val t = i / (density - 1).coerceAtLeast(1).toFloat()
-            val r = radius * (0.4f + 0.6f * t)
-            val a = color.a * (0.3f + 0.3f * (1f - t))
+            val r = radius * (0.25f + 0.35f * t)        // 半径缩小 (不糊团)
+            val a = color.a * (0.4f + 0.3f * (1f - t))  // 强度适中
             drawRoundedRect(
                 cx - r, cy - r, cx + r, cy + r, r,
-                Color4b.TRANSPARENT, color.alpha(a.roundToInt().coerceIn(0, 255)), r * 0.35f,
+                Color4b.TRANSPARENT, color.alpha(a.roundToInt().coerceIn(0, 255)), r * 0.5f,
             )
         }
     }
@@ -320,15 +326,11 @@ object ModuleSolsticeArraylist : ClientModule(
             val rectZ = textX + textW + 4f + pad
 
             // 文字发光 (None/Bar/Split: 文字区域; Outline: 矩形区域)
+            // 【修复】所有模式 glow 统一贴齐文本边缘 (textX..textX+textW), 不再用含 padding 的矩形
             if (glow && glowStrength > 0f) {
-                // 原版 glowStrength*100 是 35px 字体下的数值, 9px 字体下换算为 *6
                 val glowR = glowStrength * 6f * anim
                 val glowColor = color.alpha((0.45f * 255 * anim).roundToInt().coerceIn(0, 255))
-                if (display == Display.OUTLINE) {
-                    ctx.drawGlowRect(rectX, posY, rectZ, posY + textH, glowColor, glowR, glowDensity)
-                } else {
-                    ctx.drawGlowRect(textX, posY, textX + textW, posY + textH, glowColor, glowR, glowDensity)
-                }
+                ctx.drawGlowRect(textX, posY, textX + textW, posY + textH, glowColor, glowR, glowDensity)
             }
 
             // 模式装饰
