@@ -584,8 +584,20 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             actual is Boolean -> {
                 val nameMaxW = (toggleX - labelX - 6).coerceAtLeast(10)
                 drawText(ctx, font, trimText(font, v.name, nameMaxW), labelX, (y + 4f).toInt(), TEXT_DIM)
-                val status = if (actual) "§aON" else "§cOFF"
-                drawText(ctx, font, status, toggleX, (y + 4f).toInt(), if (actual) ACCENT else TEXT_DIM)
+                // 方案2: 圆角方块填充开关（无文字）
+                val sqX = toggleX + 2
+                val sqY = y.toInt() + 2
+                val sqS = 12
+                if (actual) {
+                    // 外圈弱光晕（半透明紫，模拟 glow）
+                    fillRect(ctx, sqX - 1, sqY - 1, sqX + sqS + 1, sqY + sqS + 1, 0x309B59D6.toInt())
+                    // 内方块 — 紫色填充
+                    fillRect(ctx, sqX, sqY, sqX + sqS, sqY + sqS, ACCENT)
+                } else {
+                    // 关闭态 — 空心方块
+                    fillRect(ctx, sqX - 1, sqY - 1, sqX + sqS + 1, sqY + sqS + 1, 0x30555566.toInt())
+                    fillRect(ctx, sqX, sqY, sqX + sqS, sqY + sqS, 0xFF1E1E28.toInt())
+                }
             }
             isBindValue(v) -> {
                 drawText(ctx, font, trimText(font, v.name, labelMaxW), labelX, (y + 4f).toInt(), TEXT_DIM)
