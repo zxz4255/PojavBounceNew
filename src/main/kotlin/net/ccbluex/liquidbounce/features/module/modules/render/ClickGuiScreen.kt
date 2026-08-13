@@ -209,7 +209,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     }
 
     // 字体缩放比例 (0.8 = 比默认小一点)
-    private val TEXT_SCALE = 0.8f
+    private val TEXT_SCALE = 0.9f
 
     private fun trimText(font: Font, text: String, maxWidth: Int): String {
         if (font.width(text) <= maxWidth) return text
