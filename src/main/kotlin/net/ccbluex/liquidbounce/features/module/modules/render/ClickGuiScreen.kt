@@ -41,8 +41,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     private val TEXT_BRIGHT = 0xFF9B59D6.toInt()
     // 次要文字: 纯白不透明度
     private val TEXT_DIM get() = 0xFF000000.toInt() or (ModuleClickGui.getTextColor() and 0x00FFFFFF)
-    // 分类标题 — 更亮的紫色
-    private val CATEGORY_TITLE = 0xFFC77DFF.toInt()
+    // 分类标题 — 纯白色
+    private val CATEGORY_TITLE = 0xFFFFFFFF.toInt()
     private val TAB_BG = 0x8025252E.toInt()
     private val TAB_ACTIVE = 0xFF33333D.toInt()
     private val BORDER = 0x20FFFFFF.toInt()
@@ -60,7 +60,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     private val SETTING_BG = 0x50080810.toInt()
 
     // ==================== Layout ====================
-    private val CORNER = 5f                           // 圆角稍大, 更圆润
+    private val CORNER = 8f                           // 圆角更大, 更圆润
     private val ITEM_H = 17f                          // 行高稍紧凑
     private val SETTING_H = 17f
     private val SCROLL_W = 4f                         // 滚动条宽度
@@ -154,6 +154,20 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     }
 
     private fun drawText(ctx: GuiGraphicsExtractor, font: Font, text: String, x: Int, y: Int, color: Int) {
+        // 字体缩放: 使用 pose 矩阵 translate+scale, 失败时回退到原始尺寸
+        val pose = try { ctx.pose() } catch (_: Exception) { null }
+        if (pose != null) {
+            try {
+                pose.pushMatrix()
+                pose.translate(x.toFloat(), y.toFloat())
+                pose.scale(TEXT_SCALE, TEXT_SCALE)
+                ctx.text(font, text, 0, 0, color)
+                pose.popMatrix()
+                return
+            } catch (_: Exception) {
+                try { pose.popMatrix() } catch (_: Exception) {}
+            }
+        }
         ctx.text(font, text, x, y, color)
     }
 
@@ -191,17 +205,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         }
     }
 
-    // ==================== 扁平圆角开关 (参照图中样式) ====================
-    private fun drawToggle(ctx: GuiGraphicsExtractor, x: Int, y: Int, w: Int, h: Int, on: Boolean) {
-        val bg = if (on) 0x609B59D6.toInt() else 0x40404048
-        drawRoundedRect(ctx, x.toFloat(), y.toFloat(), w.toFloat(), h.toFloat(), (h / 2f).toFloat(), bg)
-        // 圆形滑块
-        val knobR = (h / 2f).toInt() - 1
-        val knobX = if (on) x + w - knobR - 2 else x + knobR + 1
-        val knobY = y + h / 2
-        fillRect(ctx, knobX - knobR, knobY - knobR, knobX + knobR, knobY + knobR,
-            if (on) ACCENT else 0xFFA0A0A8.toInt())
-    }
+    // 字体缩放比例 (0.8 = 比默认小一点)
+    private val TEXT_SCALE = 0.8f
 
     private fun trimText(font: Font, text: String, maxWidth: Int): String {
         if (font.width(text) <= maxWidth) return text
@@ -247,11 +252,9 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         return h
     }
 
-    // ==================== Background (加深遮罩模拟模糊) ====================
+    // ==================== Background (无面板外渲染层) ====================
     override fun extractBackground(ctx: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, delta: Float) {
-        val sc = minecraft!!.window.guiScaledWidth
-        val sh = minecraft!!.window.guiScaledHeight
-        fillRect(ctx, 0, 0, sc, sh, OVERLAY)
+        // 不再绘制面板以外的全屏遮罩层
     }
 
     // ==================== Main render ====================
@@ -394,12 +397,11 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     drawText(ctx, font, trimText(font, mod.name, nameMaxW),
                         (listAreaX + 4f).toInt(), (curY + 4f).toInt(), nameColor)
 
-                    // 开关 — 扁平圆角开关样式(参照图中)
-                    val swX = (listAreaX + listAreaW - 22f).toInt()
-                    val swY = curY.toInt() + 5
-                    val swW = 18
-                    val swH = 7
-                    drawToggle(ctx, swX, swY, swW, swH, mod.enabled)
+                    // 开关 — 原蓝点样式 (开启=紫色)
+                    val dotX = (listAreaX + listAreaW - 4f).toInt()
+                    val dotY = curY.toInt() + 7
+                    fillRect(ctx, dotX, dotY, dotX + 4, dotY + 4,
+                        if (mod.enabled) ACCENT else 0x40808080.toInt())
                 }
 
                 curY += ITEM_H
@@ -625,15 +627,16 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             }
         }
 
-        // 子模块开关 — 扁平圆角开关样式
+        // 子模块开关 — 原蓝点样式 (开启=紫色)
         if (depth > 0 && getActualValue(v) !is Boolean && !isEnumWithMultiple(getActualValue(v)) &&
             !isGroup && !isSliderValue(v) && !isColorValue(v) && !isBindValue(v)) {
             val va = getActualValue(v)
             if (va is Enum<*>) {
-                val swX2 = (x + w - 22f).toInt()
-                val swY2 = y.toInt() + 5
+                val dotX2 = (x + w - 4f).toInt()
+                val dotY2 = y.toInt() + 6
                 val isActive = getDisplayValue(v) == va.name
-                drawToggle(ctx, swX2, swY2, 18, 7, isActive)
+                fillRect(ctx, dotX2, dotY2, dotX2 + 4, dotY2 + 4,
+                    if (isActive) ACCENT else 0x40808080.toInt())
             }
         }
     }
@@ -664,11 +667,12 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 val displayName = const.toString()
                 val isActive = displayName == current.name
                 val dotX = nameX + 4
-                val dotY = yOff.toInt() + 5
+                val dotY = yOff.toInt() + 6
 
-                // 开关 — 扁平圆角开关样式
-                drawToggle(ctx, dotX, dotY, 18, 7, isActive)
-                val textX = dotX + 22
+                // 开关 — 原蓝点样式 (开启=紫色)
+                fillRect(ctx, dotX, dotY, dotX + dotSize, dotY + dotSize,
+                    if (isActive) ACCENT else 0x40808080.toInt())
+                val textX = dotX + dotSize + dotGap
                 val maxTextW = (x + w - 8 - textX).toInt().coerceAtLeast(10)
                 drawText(ctx, font, trimText(font, displayName, maxTextW), textX, (yOff + 4f).toInt(),
                     if (isActive) TEXT_BRIGHT else TEXT_DIM)
