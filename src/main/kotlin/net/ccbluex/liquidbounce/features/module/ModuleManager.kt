@@ -225,6 +225,7 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModuleRadar
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleRotations
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSilentHotbar
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSkinChanger
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeArraylist
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSmoothCamera
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleStorageESP
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleTNTTimer
@@ -659,6 +660,7 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleAutoF5,
             ModuleChams,
             ModuleBedPlates,
+            ModuleSolsticeArraylist,
             ModuleNoBob,
             ModuleNoFov,
             ModuleNoHurtCam,
