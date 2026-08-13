@@ -88,7 +88,6 @@ import net.ccbluex.liquidbounce.features.module.modules.`fun`.ModuleDerp
 import net.ccbluex.liquidbounce.features.module.modules.`fun`.ModuleHandDerp
 import net.ccbluex.liquidbounce.features.module.modules.`fun`.ModuleSkinDerp
 import net.ccbluex.liquidbounce.features.module.modules.`fun`.ModuleTwerk
-import net.ccbluex.liquidbounce.features.module.modules.`fun`.ModuleSolsticeNotifications
 import net.ccbluex.liquidbounce.features.module.modules.`fun`.ModuleVomit
 import net.ccbluex.liquidbounce.features.module.modules.`fun`.notebot.ModuleNotebot
 import net.ccbluex.liquidbounce.features.module.modules.misc.ModuleAntiCheatDetect
@@ -235,6 +234,7 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModuleTrueSight
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleVoidESP
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleXRay
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleZoom
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeNotifications
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleStatusBars
 import net.ccbluex.liquidbounce.features.module.modules.render.cameraclip.ModuleCameraClip
 import net.ccbluex.liquidbounce.features.module.modules.render.crosshair.ModuleCrosshair
@@ -525,7 +525,6 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleDerp,
             ModuleNotebot,
             ModuleSkinDerp,
-            ModuleSolsticeNotifications,
             ModuleHandDerp,
             ModuleTwerk,
             ModuleVomit,
@@ -639,6 +638,7 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleCameraClip,
             ModuleClickGui,
             ModuleDamageParticles,
+            ModuleSolsticeNotifications,
             ModuleParticles,
             ModuleESP,
             ModuleLogoffSpot,
