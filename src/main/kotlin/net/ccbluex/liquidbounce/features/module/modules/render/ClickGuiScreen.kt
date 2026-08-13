@@ -21,6 +21,7 @@ import java.util.IdentityHashMap
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import java.io.File
 
@@ -215,7 +216,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     }
 
     // 字体缩放比例 (0.8 = 比默认小一点)
-    private val TEXT_SCALE = 0.9f
+    private val TEXT_SCALE = 0.8f
 
     private fun trimText(font: Font, text: String, maxWidth: Int): String {
         if (font.width(text) <= maxWidth) return text
