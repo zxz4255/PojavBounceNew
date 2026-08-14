@@ -223,6 +223,7 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModuleProtectionZ
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleQuickPerspectiveSwap
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleRadar
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleRotations
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleWatermark
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSilentHotbar
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleTargetHud
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSkinChanger
@@ -650,6 +651,7 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleHoleESP,
             ModuleHud,
             ModuleHats,
+            ModuleWatermark,
             ModuleItemESP,
             ModuleItemTags,
             ModuleJumpEffect,
