@@ -118,7 +118,8 @@ object ModuleWatermark : ClientModule("Watermark", ModuleCategories.RENDER, alia
         open fun update() {
             if (expired) markedForDelete = true
         }
-        abstract fun draw(ctx: GuiGraphicsExtractor, font: Font, x: Float, y: Float, boardH: Float)
+        // 注意: draw 由对象内的扩展函数 Notification.draw(...) 实现,
+        // 基类不声明抽象成员, 否则子类必须 override 而扩展函数不算重写。
     }
 
     /** 模块开关通知 (开关按钮 + 标题 + 描述) */
