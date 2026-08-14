@@ -28,9 +28,9 @@ import net.minecraft.util.Mth
 import net.minecraft.world.InteractionHand
 import net.minecraft.world.entity.HumanoidArm
 
-object SwingAnimations : ToggleableValueGroup(ModuleAnimations, "SwingAnimations", false) {
+object SwingAnimations : ToggleableValueGroup(ModuleAnimations, "SwingAnimations", true) {
 
-    val mode by enumChoice("Mode", Mode.Spin)
+    val mode by enumChoice("Mode", Mode.Smooth)
 
     enum class Mode(override val tag: String) : Tagged {
         Swipe("Swipe"), Spin("Spin"), Hook("Hook"), Dash("Dash"),
