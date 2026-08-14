@@ -32,25 +32,18 @@ import java.io.File
 class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
     // ==================== Colors (紫色主题, 匹配参考图) ====================
-    // 开关/激活文字/蓝点 — 紫色
     private val ACCENT = 0xFF9B59D6.toInt()
     private val ACCENT_DARK = 0x669B59D6.toInt()
-    // 面板背景 — 深灰色
     private val BG = 0xE01A1A22.toInt()
     private val PANEL_BG = 0xD81C1C24.toInt()
-    // 未激活模块名 浅灰白
     private val TEXT get() = ModuleClickGui.getTextColor()
-    // 激活文字 — 紫色(与开关一致)
     private val TEXT_BRIGHT = 0xFF9B59D6.toInt()
-    // 次要文字: 纯白不透明度
     private val TEXT_DIM get() = 0xFF000000.toInt() or (ModuleClickGui.getTextColor() and 0x00FFFFFF)
-    // 分类标题 — 纯白色
     private val CATEGORY_TITLE = 0xFFFFFFFF.toInt()
     private val TAB_BG = 0x8025252E.toInt()
     private val TAB_ACTIVE = 0xFF33333D.toInt()
     private val BORDER = 0x20FFFFFF.toInt()
     private val HOVER = 0x15FFFFFF.toInt()
-    // 滚动条 — 紫色
     private val SCROLL_TRACK = 0x189B59D6.toInt()
     private val SCROLL_THUMB = 0x509B59D6.toInt()
     private val SCROLL_THUMB_HOVER = 0x789B59D6.toInt()
@@ -58,15 +51,14 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     private val GROUP_BG = 0x0C9B59D6.toInt()
     private val GROUP_LINE = 0x149B59D6.toInt()
     private val SETTING_CHILD_BG = 0x06FFFFFF.toInt()
-    // 遮罩 — 黑色 alpha=30%
     private val OVERLAY = 0x4D000000.toInt()
     private val SETTING_BG = 0x50080810.toInt()
 
     // ==================== Layout ====================
-    private val CORNER = 8f                           // 圆角更大, 更圆润
-    private val ITEM_H = 17f                          // 行高稍紧凑
+    private val CORNER = 8f
+    private val ITEM_H = 17f
     private val SETTING_H = 17f
-    private val SCROLL_W = 4f                         // 滚动条宽度
+    private val SCROLL_W = 4f
     private val PADDING = 5f
     private val SETTING_INDENT = 8f
     private val PANEL_GAP = 0f
@@ -83,8 +75,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val sliderW: Int,
         val min: Float,
         val max: Float,
-        val rangeWidth: Float = 0f,   // 范围值宽度 (如 12~14 → 2), 拖动时保持
-        val rangePoint: Int = -1      // 【修复】范围双滑块: -1=普通, 0=下限点, 1=上限点
+        val rangeWidth: Float = 0f,
+        val rangePoint: Int = -1
     )
     private var sliderContext: SliderContext? = null
 
@@ -95,12 +87,12 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     private var listeningValue: Value<*>? = null
     private val collapsedGroups = mutableSetOf<Value<*>>()
 
-    // ==================== 调色板 (color 选项) ====================
+    // ==================== 调色板 ====================
     private var activeColorValue: Value<*>? = null
     private var colorPickerX = 0f
     private var colorPickerY = 0f
-    private var colorPickerAlpha = 255               // 当前调色板 Alpha (0..255)
-    private var colorPickerAlphaDragging = false     // 正在拖动 Alpha 条
+    private var colorPickerAlpha = 255
+    private var colorPickerAlphaDragging = false
     private val PALETTE_ROWS = 9
     private val PALETTE_COLS = 5
     private val PALETTE_CELL = 10f
@@ -112,7 +104,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     private val PALETTE_H = PALETTE_ROWS * (PALETTE_CELL + PALETTE_GAP) - PALETTE_GAP + PALETTE_PAD * 2 +
         ALPHA_BAR_H + ALPHA_BAR_OFFSET
 
-    /** 预生成调色板 */
     private val paletteColors: List<Color4b> = buildList {
         for (row in 0 until 8) {
             val hue = row * 45f / 360f
@@ -129,10 +120,10 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
     private var fadeAnim = 0f
     private var isFirstLoad = true
+    private var layoutLoaded = false  // 【新增】确保布局只加载一次
 
     private val categories = ModuleCategories.entries.toList()
 
-    // ==================== 模式值缓存 ====================
     private val modeValueCache = IdentityHashMap<ClientModule, Value<*>?>()
 
     private data class PanelData(
@@ -164,7 +155,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     }
 
     private fun drawText(ctx: GuiGraphicsExtractor, font: Font, text: String, x: Int, y: Int, color: Int) {
-        // 字体缩放: 使用 pose 矩阵 translate+scale, 失败时回退到原始尺寸
         val pose = try { ctx.pose() } catch (_: Exception) { null }
         if (pose != null) {
             try {
@@ -215,7 +205,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         }
     }
 
-    // 字体缩放比例 (0.8 = 比默认小一点)
     private val TEXT_SCALE = 0.8f
 
     private fun trimText(font: Font, text: String, maxWidth: Int): String {
@@ -237,14 +226,12 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         }
     }
 
-    /** 计算展开后的总高度，Mode 竖排时高度 = (1 + constants数) * SETTING_H */
     private fun getExpandedHeight(mod: ClientModule): Float {
         if (expandedModule != mod) return 0f
         var h = 0f
         for ((v, _) in getVisibleValues(mod)) {
             val actual = getActualValue(v)
             if (v is ModeValueGroup<*>) {
-                // 【修复】Mode 组: 标题行 + 每个 mode 一行
                 h += max(1f, (1 + v.modes.size).toFloat()) * SETTING_H
             } else if (isEnumWithMultiple(actual)) {
                 val constants = getEnumConstants(actual)
@@ -265,7 +252,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         return h
     }
 
-    // ==================== Background (无面板外渲染层) ====================
     override fun extractBackground(ctx: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, delta: Float) {
         // 不再绘制面板以外的全屏遮罩层
     }
@@ -281,7 +267,14 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
         val isSearching = searchText.isNotEmpty()
 
-        val savedLayout = if (isFirstLoad) loadLayout() else LayoutState(emptyMap(), null, emptyList())
+        // 【修复】只在第一次加载时读取布局
+        val savedLayout = if (isFirstLoad && !layoutLoaded) {
+            layoutLoaded = true
+            loadLayout()
+        } else {
+            LayoutState(emptyMap(), null, emptyList())
+        }
+
         val targetPanels = mutableListOf<PanelData>()
 
         if (isSearching) {
@@ -292,8 +285,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             searchPanel = searchPanel ?: PanelData(null, x, y, w, h, 0f, 0f)
             searchPanel?.let { it.x = x; it.y = y; it.w = w; it.h = h }
             if (searchPanel != null) targetPanels.add(searchPanel!!)
-            // 【修复】搜索时不再替换 panels: 分类面板保留(位置/状态不丢),
-            // 绘制/交互时只使用 searchPanel (见 currentPanels)
         } else {
             searchPanel = null
             val count = categories.size
@@ -308,15 +299,16 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             for ((idx, cat) in categories.withIndex()) {
                 val panelX = startX + (panelW + PANEL_GAP) * idx
                 val existingPanel = panels.find { it.category == cat }
+                
                 if (existingPanel != null) {
-                    if (isFirstLoad) {
-                        savedLayout.panels[cat.tag]?.let {
-                            existingPanel.x = it.x.toFloat()
-                            existingPanel.y = it.y.toFloat()
-                            existingPanel.collapsed = it.collapsed
-                            existingPanel.targetScroll = it.scroll
-                            existingPanel.scrollOffset = it.scroll
-                        }
+                    // 【修复】每次渲染时都从 savedLayout 读取位置，而不只是在 isFirstLoad 时
+                    val saved = savedLayout.panels[cat.tag]
+                    if (saved != null) {
+                        existingPanel.x = saved.x.toFloat()
+                        existingPanel.y = saved.y.toFloat()
+                        existingPanel.collapsed = saved.collapsed
+                        existingPanel.targetScroll = saved.scroll
+                        existingPanel.scrollOffset = saved.scroll
                     }
                     existingPanel.w = panelW
                     existingPanel.h = panelH
@@ -332,12 +324,13 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     targetPanels.add(newPanel)
                 }
             }
+            
             panels.removeAll { targetPanels.contains(it).not() && it.category != null }
             panels = targetPanels
+            
             if (isFirstLoad) {
                 savedLayout.expandedModule?.let { name ->
                     val mod = ModuleManager.getModuleByName(name)
-                    // 【建议】OFF 模块不默认展开 (仅启用模块恢复展开状态)
                     expandedModule = if (mod != null && mod.enabled) mod else null
                 }
                 for (key in savedLayout.collapsedGroups) {
@@ -355,12 +348,11 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             }
         }
 
-        // 绘制面板循环 (【修复】搜索时只绘制 searchPanel, 分类面板保留在 panels 中)
+        // 绘制面板循环
         for (panel in if (isSearching) targetPanels else panels) {
             val px = panel.x; val py = panel.y; val pw = panel.w; val ph = panel.h
             val actualHeight = if (panel.collapsed) HEADER_H + 2f else ph
 
-            // 面板背景 — 深色半透明
             drawRoundedRect(ctx, px, py, pw, actualHeight, CORNER, BG)
 
             var panelModules: List<ClientModule>
@@ -370,7 +362,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             } else {
                 val category = panel.category ?: continue
                 panelModules = getCategoryModules(category)
-                // 分类标题 — 保持原天蓝色不变
                 val arrow = if (panel.collapsed) "▶ " else "▼ "
                 drawText(ctx, font, "§l$arrow${category.tag}", (px + 8f).toInt(), (py + 5f).toInt(), CATEGORY_TITLE)
                 val lineWidth = font.width(category.tag) + 10f
@@ -390,12 +381,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             panel.targetScroll = panel.targetScroll.coerceIn(0f, maxScroll)
             panel.scrollOffset += (panel.targetScroll - panel.scrollOffset) * 0.3f
 
-            // 【修复】裁剪区域：防止文字超出面板上下方
-            val clipTop = listAreaY.toInt().coerceAtLeast(0)
-            val clipBottom = (listAreaY + listAreaH).toInt().coerceAtMost(sh.toInt())
-
-            // 【修复】列表区域 scissor 裁剪: 部分可见的模块/设置也能渲染, 超出部分被裁剪
-            // 不再"整行必须在可视区才渲染"(那会隐藏列表底部最后一个模块)
             ctx.enableScissor(listAreaX.toInt(), listAreaY.toInt(),
                 (listAreaX + listAreaW).toInt(), (listAreaY + listAreaH).toInt())
 
@@ -405,7 +390,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 val isExpanded = expandedModule == mod
                 val modEndY = curY + ITEM_H
 
-                // 【修复】部分可见即渲染 (由 scissor 裁剪超出部分)
                 if (curY < listAreaY + listAreaH && modEndY > listAreaY) {
                     val isHover = mouseX in listAreaX.toInt()..(listAreaX + listAreaW).toInt() &&
                             mouseY in curY.toInt()..modEndY.toInt()
@@ -413,13 +397,11 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     if (isHover) fillRect(ctx, listAreaX, curY, listAreaX + listAreaW, modEndY, HOVER)
                     if (isExpanded) fillRect(ctx, listAreaX, curY, listAreaX + listAreaW, modEndY, EXPANDED_BG)
 
-                    // 【修改】激活文字=天蓝(TEXT_BRIGHT), 未激活=浅灰白(TEXT)
                     val nameColor = if (mod.enabled) TEXT_BRIGHT else TEXT
                     val nameMaxW = (listAreaW - 16).toInt()
                     drawText(ctx, font, trimText(font, mod.name, nameMaxW),
                         (listAreaX + 4f).toInt(), (curY + 4f).toInt(), nameColor)
 
-                    // 开关 — 原蓝点样式 (开启=紫色)
                     val dotX = (listAreaX + listAreaW - 4f).toInt()
                     val dotY = curY.toInt() + 7
                     fillRect(ctx, dotX, dotY, dotX + 4, dotY + 4,
@@ -430,7 +412,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
                 if (isExpanded) {
                     val values = getVisibleValues(mod)
-                    // 计算总背景高度（含 Mode 竖排增高）
                     var totalSettingH = 0f
                     for ((v, _) in values) {
                         val actual = getActualValue(v)
@@ -443,7 +424,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                         }
                     }
 
-                    // 【修复】设置区域背景严格限制在列表区域内
                     val bgStart = curY.coerceAtLeast(listAreaY)
                     val bgEnd = (curY + totalSettingH).coerceAtMost(listAreaY + listAreaH)
                     if (bgEnd > bgStart) {
@@ -453,7 +433,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     for ((v, depth) in values) {
                         val actual = getActualValue(v)
                         if (v is ModeValueGroup<*>) {
-                            // 【修复】Mode 选择器: 标题 + 每个 mode 一行
                             val rowCount = renderModeListForModeGroup(ctx, font, v,
                                 listAreaX, curY, listAreaW, depth, mouseX, mouseY)
                             curY += rowCount * SETTING_H
@@ -464,7 +443,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                             curY += rowCount * SETTING_H
                         } else {
                             val settingEndY = curY + SETTING_H
-                            // 【修复】部分可见即渲染 (由 scissor 裁剪)
                             if (curY < listAreaY + listAreaH && settingEndY > listAreaY) {
                                 val isSettingHover = mouseX in listAreaX.toInt()..(listAreaX + listAreaW).toInt() &&
                                         mouseY in curY.toInt()..settingEndY.toInt()
@@ -477,15 +455,12 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 }
             }
 
-            // 关闭列表裁剪 (滚动条/后续内容不受影响)
             ctx.disableScissor()
 
-            // 滚动条
             if (contentH > listAreaH) {
                 fillRect(ctx, listAreaX + listAreaW, listAreaY, listAreaX + listAreaW + SCROLL_W, listAreaY + listAreaH, SCROLL_TRACK)
                 val thumbH = (listAreaH * listAreaH / contentH).coerceAtLeast(12f)
                 val thumbY = listAreaY + if (maxScroll > 0f) (panel.scrollOffset / maxScroll) * (listAreaH - thumbH) else 0f
-                // 【修复】扩大滚动条命中区域到整个轨道
                 val isScrollHover = mouseX in (listAreaX + listAreaW - 4).toInt()..(listAreaX + listAreaW + SCROLL_W + 4).toInt() &&
                         mouseY in listAreaY.toInt()..(listAreaY + listAreaH).toInt()
                 val thumbColor = if (isScrollHover || panel.draggingScroll) SCROLL_THUMB_HOVER else SCROLL_THUMB
@@ -542,12 +517,10 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 }
             }
 
-            // —— 【新增】Alpha 透明度条 (底部): 透明 → 当前色, 拖动调节 ——
             val barY = py + PALETTE_H - ALPHA_BAR_H
             val barX = px + PALETTE_PAD
             val barW = PALETTE_W - PALETTE_PAD * 2
             val (cr, cg, cb) = currentColorRgb(colorVal)
-            // 渐变: 8 段, 每段当前色 alpha 递增
             for (s in 0 until 8) {
                 val a = (s * 255 / 7).coerceIn(0, 255)
                 val sx = barX + barW * s / 8
@@ -555,10 +528,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 fillRect(ctx, sx.toInt(), barY.toInt(), ex.toInt(), (barY + ALPHA_BAR_H).toInt(),
                     (a shl 24) or (cr shl 16) or (cg shl 8) or cb)
             }
-            // Alpha 滑块
             val knobX = barX + barW * colorPickerAlpha / 255
             fillRect(ctx, (knobX - 2).toInt(), (barY - 2).toInt(), (knobX + 2).toInt(), (barY + ALPHA_BAR_H + 2).toInt(), TEXT_BRIGHT)
-            // Alpha 数值
             drawText(ctx, font, "$colorPickerAlpha", (barX + barW + 3f).roundToInt(), (barY + 1f).toInt(), TEXT_DIM)
         }
     }
@@ -573,13 +544,11 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val minV: Float,
         val maxV: Float,
         val rangeWidth: Float = 0f,
-        // 【修复】范围值双滑块: 下限点/上限点在轨道内的位置 (仅 Range 使用)
         val lowerPointX: Int = 0,
         val upperPointX: Int = 0,
         val rangeEnd: Float = 0f,
     )
 
-    /** 范围值显示文本 (如 12..14 → "12~14") */
     private fun formatRange(r: ClosedRange<*>): String {
         val s = r.start
         return when (s) {
@@ -604,7 +573,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         var rangeWidth = 0f
         var rangeEnd = 0f
 
-        // 【修复】范围值支持: actual 可能是 ClosedRange (如 12..14)
         if (actual is ClosedRange<*>) {
             val start = (actual.start as? Number)?.toFloat() ?: 0f
             val endIncl = (actual.endInclusive as? Number)?.toFloat() ?: start
@@ -620,7 +588,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             maxV = (v.range.endInclusive as? Number)?.toFloat() ?: 100f
         }
 
-        // 【修复】滑条固定最右, 数值文本固定在滑条左侧, 不再随数值长度改变滑条坐标
         val rightEdge = (x + w - 2).toInt()
         val sliderW = 36
         val sliderX = rightEdge - 3 - sliderW
@@ -630,7 +597,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val valW = font.width(valText).coerceAtMost(maxValW)
         val valX = sliderX - 3 - valW
 
-        // 【修复】范围值: 计算轨道内下限点/上限点的 x 位置 (双滑块)
         var lowerPointX = 0
         var upperPointX = 0
         if (rangeWidth > 0f || actual is ClosedRange<*>) {
@@ -673,7 +639,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     labelX, (y + 4f).toInt(), if (isCollapsed) TEXT_DIM else ACCENT)
             }
             actual is Boolean -> {
-                // 【修复】label 充分利用到 ON/OFF 前方 (省略号贴近开关)
                 val nameMaxW = (toggleX - labelX - 2).coerceAtLeast(10)
                 drawText(ctx, font, trimText(font, v.name, nameMaxW), labelX, (y + 4f).toInt(), TEXT_DIM)
                 val status = if (actual) "§aON" else "§cOFF"
@@ -692,18 +657,13 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 val sliderY = y.toInt() + 8
                 val isRange = layout.rangeWidth > 0f || layout.upperPointX != 0
 
-                // 轨道 (固定)
                 fillRect(ctx, layout.sliderX, sliderY, layout.sliderX + layout.sliderW, sliderY + 2, 0x30FFFFFF.toInt())
 
                 if (isRange) {
-                    // 【修复】范围值双滑块: 下限点↔上限点之间填充, 两个可拖动的点
                     val lx = layout.lowerPointX
                     val ux = layout.upperPointX.coerceAtLeast(lx + 2)
-                    // 区间填充
                     fillRect(ctx, lx, sliderY, ux, sliderY + 2, ACCENT)
-                    // 下限点
                     fillRect(ctx, lx - 2, sliderY - 3, lx + 2, sliderY + 5, TEXT_BRIGHT)
-                    // 上限点
                     fillRect(ctx, ux - 2, sliderY - 3, ux + 2, sliderY + 5, TEXT_BRIGHT)
                 } else {
                     val progress = if (layout.maxV > layout.minV) {
@@ -734,7 +694,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             }
         }
 
-        // 子模块开关 — 原蓝点样式 (开启=紫色)
         if (depth > 0 && getActualValue(v) !is Boolean && !isEnumWithMultiple(getActualValue(v)) &&
             !isGroup && !isSliderValue(v) && !isColorValue(v) && !isBindValue(v)) {
             val va = getActualValue(v)
@@ -748,8 +707,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         }
     }
 
-    // ==================== Mode 组 (ModeValueGroup) 渲染 ====================
-    /** 【修复】ModeValueGroup 选择器: 标题行 + 每个 mode 一行(点+名称), 当前 mode 高亮 */
+    // ==================== Mode 组渲染 ====================
     private fun renderModeListForModeGroup(
         ctx: GuiGraphicsExtractor, font: Font,
         v: ModeValueGroup<*>, x: Float, curY: Float, w: Float, depth: Int,
@@ -759,13 +717,11 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val labelX = (x + 6 + indent).toInt()
         val collapsed = collapsedGroups.contains(v)
 
-        // 标题行
         fillRect(ctx, x, curY, x + w, curY + SETTING_H, GROUP_BG)
         drawText(ctx, font, "${if (collapsed) "▶" else "▼"} ${v.name}",
             labelX, (curY + 4f).toInt(), ACCENT)
         if (collapsed) return 1
 
-        // 每个 mode 一行
         var yOff = curY + SETTING_H
         for (mode in v.modes) {
             val isActive = mode === v.activeMode
@@ -793,7 +749,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val indent = depth * SETTING_INDENT
         val labelX = (x + 6 + indent).toInt()
         val nameMaxW = 50
-        // 标题行：部分可见即渲染 (由 scissor 裁剪)
         if (curY < listAreaY + listAreaH && curY + SETTING_H > listAreaY) {
             drawText(ctx, font, trimText(font, v.name, nameMaxW), labelX, (curY + 4f).toInt(), TEXT)
         }
@@ -803,14 +758,12 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val dotGap = 2
         val nameX = labelX
         for (const in constants) {
-            // 每行 Mode：部分可见即渲染 (由 scissor 裁剪)
             if (yOff < listAreaY + listAreaH && yOff + SETTING_H > listAreaY) {
                 val displayName = const.toString()
                 val isActive = displayName == current.name
                 val dotX = nameX + 4
                 val dotY = yOff.toInt() + 6
 
-                // 开关 — 原蓝点样式 (开启=紫色)
                 fillRect(ctx, dotX, dotY, dotX + dotSize, dotY + dotSize,
                     if (isActive) ACCENT else 0x40808080.toInt())
                 val textX = dotX + dotSize + dotGap
@@ -862,7 +815,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             val py = colorPickerY.coerceIn(0f, sh - PALETTE_H)
             if (mx in px.toInt()..(px + PALETTE_W).toInt() &&
                 my in py.toInt()..(py + PALETTE_H).toInt()) {
-                // 【新增】Alpha 条区域 → 设置透明度并开始拖动
                 val barY = py + PALETTE_H - ALPHA_BAR_H
                 if (my >= barY.toInt() && my <= (barY + ALPHA_BAR_H).toInt()) {
                     val barX = px + PALETTE_PAD
@@ -870,12 +822,10 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     val alpha = (((mx - barX) / barW) * 255).toInt().coerceIn(0, 255)
                     colorPickerAlpha = alpha
                     colorPickerAlphaDragging = true
-                    // 实时应用到当前颜色
                     val (r, g, b) = currentColorRgb(colorVal)
                     trySetValue(colorVal, Color4b(r, g, b, alpha))
                     return true
                 }
-                // 色块 → 选色 (应用当前 Alpha)
                 val col = ((mx - px - PALETTE_PAD) / (PALETTE_CELL + PALETTE_GAP)).toInt()
                 val row = ((my - py - PALETTE_PAD) / (PALETTE_CELL + PALETTE_GAP)).toInt()
                 val index = row * PALETTE_COLS + col
@@ -925,13 +875,11 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val listAreaY = panel.y + 28f
         val listAreaH = panel.h - 32f
 
-        // 【修复】滚动条点击 — 扩大命中范围到整个轨道区域
         if (mx in (listAreaX + listAreaW - 6).toInt()..(listAreaX + listAreaW + SCROLL_W + 6).toInt() &&
             my in listAreaY.toInt()..(listAreaY + listAreaH).toInt()) {
             val modules = getModulesForPanel(panel)
             val contentH = getContentHeight(modules)
             if (contentH > listAreaH) {
-                // 【修复】点击时直接跳转到对应位置
                 val clickRatio = (my - listAreaY) / listAreaH
                 val maxScroll = contentH - listAreaH
                 panel.targetScroll = clickRatio * maxScroll
@@ -955,7 +903,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                         0 -> {
                             if (mod.name != "ClickGUI") {
                                 try { mod.enabled = !mod.enabled } catch (_: Exception) {}
-                                // 【修复】模块关闭(OFF)后自动收起其展开的设置
                                 if (!mod.enabled && expandedModule == mod) {
                                     expandedModule = null
                                 }
@@ -974,7 +921,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                         val actual = getActualValue(v)
 
                         if (v is ModeValueGroup<*>) {
-                            // 【修复】Mode 组点击: 标题行折叠/展开, mode 行切换
                             val titleEndY = curY + SETTING_H
                             if (my in curY.toInt()..titleEndY.toInt()) {
                                 if (btn == 0) {
@@ -1051,7 +997,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 activeColorValue = null
             } else {
                 activeColorValue = v
-                // 【新增】打开调色板时同步当前颜色的 Alpha
                 colorPickerAlpha = currentColorAlpha(v)
                 colorPickerAlphaDragging = false
                 colorPickerX = x + w - PALETTE_W - 2f
@@ -1069,7 +1014,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 val progress = ((mx.toInt() - layout.sliderX).toFloat() / layout.sliderW).coerceIn(0f, 1f)
                 val newValue = layout.minV + (layout.maxV - layout.minV) * progress
 
-                // 【修复】范围双滑块: 判断点击离下限点/上限点哪个近
                 var rangePoint = -1
                 if (layout.upperPointX != 0) {
                     val mxInt = mx.toInt()
@@ -1093,7 +1037,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         }
     }
 
-    /** 应用范围值双滑块: 只移动下限点(point=0)或上限点(point=1), 另一端保持不动 */
     private fun applyRangePoint(v: Value<*>, actual: Any?, newValue: Float, point: Int) {
         if (actual !is ClosedRange<*>) return
         val start = (actual.start as? Number)?.toFloat() ?: return
@@ -1103,11 +1046,9 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val newStart: Float
         val newEnd: Float
         if (point == 0) {
-            // 拖动下限点: 下限 ≤ 上限
             newStart = newValue.coerceIn(min, end)
             newEnd = end
         } else {
-            // 拖动上限点: 上限 ≥ 下限
             newStart = start
             newEnd = newValue.coerceIn(start, max)
         }
@@ -1119,7 +1060,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         }
     }
 
-    /** 应用滑块值: 支持普通数值和范围值 (ClosedRange, 拖动时保持范围宽度) */
     private fun applySliderValue(v: Value<*>, actual: Any?, newValue: Float, rangeWidth: Float) {
         when (actual) {
             is ClosedRange<*> -> {
@@ -1147,14 +1087,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         }
     }
 
-    @Suppress("UNUSED_PARAMETER")
-    private fun handleModeClick(v: Value<*>, mx: Float, x: Float, w: Float, indent: Float,
-                                constants: List<Any>, current: Enum<*>) {}
-
-    @Suppress("UNUSED_PARAMETER")
-    private fun handleModeClick(v: Value<*>, mx: Float, rightEdge: Float,
-                                constants: List<Any>, current: Enum<*>) {}
-
     private fun trySetValue(v: Value<*>, value: Any) {
         try {
             val setMethod = v.javaClass.methods.firstOrNull {
@@ -1169,7 +1101,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val mx = event.x().toFloat()
         val my = event.y().toFloat()
 
-        // 【新增】Alpha 条拖动: 拖动时实时更新当前颜色的透明度
         if (colorPickerAlphaDragging) {
             val colorVal = activeColorValue
             if (colorVal != null) {
@@ -1185,13 +1116,11 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             return true
         }
 
-        // 滑块拖动
         val context = sliderContext
         if (context != null) {
             val progress = ((mx.toInt() - context.sliderX).toFloat() / context.sliderW).coerceIn(0f, 1f)
             val newValue = context.min + (context.max - context.min) * progress
             val actual = getActualValue(context.value)
-            // 【修复】范围双滑块: 按 rangePoint 分别拖动下限/上限点
             if (context.rangePoint == -1) {
                 applySliderValue(context.value, actual, newValue, context.rangeWidth)
             } else {
@@ -1211,7 +1140,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 }
                 return true
             }
-            // 【修复】滚动条拖拽方向: 鼠标向下(dy>0) → 内容向上滚(targetScroll 增大)
             if (panel.draggingScroll) {
                 val modules = getModulesForPanel(panel)
                 val contentH = getContentHeight(modules)
@@ -1249,7 +1177,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         return true
     }
 
-    /** 【修复】当前生效的面板列表: 搜索时只显示 searchPanel, 否则为分类面板 */
     private fun currentPanels(): List<PanelData> =
         if (searchText.isNotEmpty()) listOfNotNull(searchPanel) else panels
 
@@ -1267,8 +1194,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             listeningValue = null
             return true
         }
-        // ESC / 右 Shift 关闭: Android 环境 key() 可能是 scancode, 同时用 key() 和 scancode() 兜底
-        // (ESC scancode=1, 右 Shift scancode=54)
         if (event.key() == GLFW.GLFW_KEY_ESCAPE || event.scancode() == 1 ||
             event.key() == GLFW.GLFW_KEY_RIGHT_SHIFT || event.scancode() == 54) {
             if (searchFocused) { searchFocused = false; return true }
@@ -1336,7 +1261,10 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         saveLayout()
         setScreenCompat(null)
         fadeAnim = 0f
+        // 【修复】不要重置 isFirstLoad，保留 layoutLoaded 状态
+        // 但为了下次打开能重新加载，重置 isFirstLoad 但保留 layoutLoaded 为 false
         isFirstLoad = true
+        layoutLoaded = false  // 【修复】重置加载状态，下次打开会重新读取
     }
 
     override fun removed() {
@@ -1405,12 +1333,10 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
         fun process(v: Value<*>, depth: Int) {
             if (visited.containsKey(v)) return
-            // ModeValueGroup 不走按名过滤(由 activeMode 决定显示), 其余值正常过滤
             if (v !is ModeValueGroup<*> && isHiddenForCurrentMode(v)) { visited[v] = true; return }
             visited[v] = true
             result.add(Pair(v, depth))
             when {
-                // 【修复】ModeValueGroup: 只展开当前激活的 Mode 的设置, 其他 mode 的设置不再混入
                 v is ModeValueGroup<*> -> {
                     if (!collapsedGroups.contains(v)) {
                         getGroupChildren(v.activeMode).forEach { child ->
@@ -1513,14 +1439,12 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         return Color.WHITE
     }
 
-    /** 当前颜色 Alpha (Color4b.a) */
     private fun currentColorAlpha(v: Value<*>): Int {
         val actual = getActualValue(v)
         if (actual is Color4b) return actual.a
         return 255
     }
 
-    /** 当前颜色 RGB 分量 */
     private fun currentColorRgb(v: Value<*>): Triple<Int, Int, Int> {
         val actual = getActualValue(v)
         if (actual is Color4b) return Triple(actual.r, actual.g, actual.b)
@@ -1562,13 +1486,17 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val collapsedGroups: List<String>
     )
 
+    // 【修复】使用更可靠的 JSON 解析方式
     private fun saveLayout() {
         try {
             if (searchText.isNotEmpty()) return
-            val panelsJson = panels.filter { it.category != null }.joinToString(",") { p ->
+            
+            // 使用 StringBuilder 手动构建 JSON，确保格式一致
+            val panelEntries = panels.filter { it.category != null }.joinToString(",") { p ->
                 val tag = p.category?.tag ?: ""
                 """{"tag":"$tag","x":${p.x.toInt()},"y":${p.y.toInt()},"collapsed":${p.collapsed},"scroll":${p.scrollOffset}}"""
             }
+            
             val expandedName = expandedModule?.name ?: ""
             val groups = mutableListOf<String>()
             try {
@@ -1578,43 +1506,69 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     }
                 }
             } catch (_: Exception) { }
-            val groupsJson = groups.joinToString(",") { "\"$it\"" }
+            
+            val groupsJson = if (groups.isEmpty()) "" else groups.joinToString(",") { "\"$it\"" }
             val sb = StringBuilder()
-            sb.append("{\"panels\":[").append(panelsJson).append("],")
+            sb.append("{\"panels\":[").append(panelEntries).append("],")
             sb.append("\"expanded\":\"").append(expandedName).append("\",")
             sb.append("\"groups\":[").append(groupsJson).append("]}")
+            
             val file = getLayoutFile()
             file.parentFile?.mkdirs()
             file.writeText(sb.toString())
+            
+            println("[ClickGui] Layout saved: ${sb.length} bytes")
         } catch (e: Exception) {
             println("[ClickGui] saveLayout failed: ${e.message}")
         }
     }
 
+    // 【修复】重写 loadLayout，使用更可靠的解析方式
     private fun loadLayout(): LayoutState {
         return try {
             val file = getLayoutFile()
-            if (!file.exists()) return LayoutState(emptyMap(), null, emptyList())
+            if (!file.exists()) {
+                println("[ClickGui] Layout file not found")
+                return LayoutState(emptyMap(), null, emptyList())
+            }
+            
             val content = file.readText()
+            println("[ClickGui] Loaded layout: ${content.take(200)}...")
+            
             val panels = mutableMapOf<String, PanelState>()
+            
+            // 【修复】更灵活的正则，支持 scroll 字段可选
             val panelRegex = Regex(
-                """\{"tag":"([^"]+)","x":(-?[0-9]+),"y":(-?[0-9]+),"collapsed":(true|false)(,"scroll":(-?[0-9.]+))?\}"""
+                """\{\s*"tag"\s*:\s*"([^"]+)"\s*,\s*"x"\s*:\s*(-?\d+)\s*,\s*"y"\s*:\s*(-?\d+)\s*,\s*"collapsed"\s*:\s*(true|false)\s*(?:,\s*"scroll"\s*:\s*(-?\d+(?:\.\d+)?))?\s*\}"""
             )
+            
             for (match in panelRegex.findAll(content)) {
                 val tag = match.groupValues[1]
                 val x = match.groupValues[2].toInt()
                 val y = match.groupValues[3].toInt()
                 val collapsed = match.groupValues[4].toBoolean()
-                val scroll = match.groupValues[6].takeIf { it.isNotEmpty() }?.toFloat() ?: 0f
+                val scroll = match.groupValues[5].takeIf { it.isNotEmpty() }?.toFloat() ?: 0f
                 panels[tag] = PanelState(x, y, collapsed, scroll)
+                println("[ClickGui] Parsed panel: $tag -> ($x, $y), collapsed=$collapsed, scroll=$scroll")
             }
-            val expanded = Regex(""""expanded":"([^"]*)"""").find(content)?.groupValues?.get(1)?.takeIf { it.isNotEmpty() }
+            
+            // 提取 expanded
+            val expandedRegex = Regex(""""expanded"\s*:\s*"([^"]*)"""")
+            val expanded = expandedRegex.find(content)?.groupValues?.get(1)?.takeIf { it.isNotEmpty() }
+            
+            // 提取 groups
             val groups = mutableListOf<String>()
-            Regex(""""groups":\[(.*?)\]""").find(content)?.groupValues?.get(1)?.let { gs ->
-                Regex(""""([^"]+)"""").findAll(gs).forEach { groups.add(it.groupValues[1]) }
+            val groupsRegex = Regex(""""groups"\s*:\s*\[(.*?)\]""")
+            groupsRegex.find(content)?.groupValues?.get(1)?.let { gs ->
+                val itemRegex = Regex(""""([^"]+)"""")
+                itemRegex.findAll(gs).forEach { groups.add(it.groupValues[1]) }
             }
+            
+            println("[ClickGui] Loaded ${panels.size} panels, expanded=$expanded, ${groups.size} groups")
             LayoutState(panels, expanded, groups)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            println("[ClickGui] loadLayout failed: ${e.message}")
+            e.printStackTrace()
             LayoutState(emptyMap(), null, emptyList())
         }
     }
