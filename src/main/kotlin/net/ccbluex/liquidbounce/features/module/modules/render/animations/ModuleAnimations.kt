@@ -45,7 +45,7 @@ import org.joml.Quaternionf
  */
 @Suppress("MagicNumber")
 object ModuleAnimations : ClientModule("Animations", ModuleCategories.RENDER, aliases = listOf("ViewModel")) {
-
+init { enabled = true }
     init {
         tree(MainHand)
         tree(OffHand)
@@ -53,11 +53,11 @@ object ModuleAnimations : ClientModule("Animations", ModuleCategories.RENDER, al
         tree(SwingAnimations)
     }
 
-    object MainHand : ToggleableValueGroup(this, "MainHand", false) {
-        val mainHandItemScale by float("ItemScale", 0f, -5f..5f)
+    object MainHand : ToggleableValueGroup(this, "MainHand", true) {
+        val mainHandItemScale by float("ItemScale", -0.2f, -5f..5f)
         val mainHandX by float("X", 0f, -5f..5f)
         val mainHandY by float("Y", 0f, -5f..5f)
-        val mainHandPositiveX by float("PositiveRotationX", 0f, -50f..50f)
+        val mainHandPositiveX by float("PositiveRotationX", 0.2f, -50f..50f)
         val mainHandPositiveY by float("PositiveRotationY", 0f, -50f..50f)
         val mainHandPositiveZ by float("PositiveRotationZ", 0f, -50f..50f)
     }
