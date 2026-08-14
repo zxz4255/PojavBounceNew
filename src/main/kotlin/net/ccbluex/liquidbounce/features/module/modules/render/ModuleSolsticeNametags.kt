@@ -71,14 +71,14 @@ object ModuleSolsticeNametags : ClientModule(
     private val renderLocal by boolean("Render Local", false)         // 渲染本地玩家
     private val distanceScaledFont by boolean("Distance Scaled Font", true)
     private val blurStrength by float("Blur Strength", 0f, 0f..10f)  // 原生近似: 背景透明度递减
-    private val fontSize by float("Font Size", 23f, 1f..40f)         // 基础字体大小(px, 映射 9px 基准)
+    private val fontSize by float("Font Size", 15f, 1f..40f)         // 基础字体大小(px, 映射 9px 基准)
     private val scalingMultiplier by float("Scaling Multiplier", 0f, 0f..5f)
-    private val minScale by float("Minimum Scale", 20f, 0.01f..20f)
-    private val showBps by boolean("Show BPS", false)
+    private val minScale by float("Minimum Scale", 5f, 0.01f..20f)
+    private val showBps by boolean("Show BPS", true)
     private val averageBps by boolean("Average BPS", true)
     private val textShadow by boolean("Text Shadow", true)
-    private val background by boolean("Background", true)
-    private val maxDistance by float("Max Distance", 128f, 16f..512f)  // 渲染距离上限
+    private val background by boolean("Background", false)
+    private val maxDistance by float("Max Distance", 512f, 16f..512f)  // 渲染距离上限
 
     /* ============================= 内部状态 ============================= */
 
