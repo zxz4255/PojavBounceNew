@@ -1,10 +1,11 @@
 /*
- * ModuleClickGui —— 打开 ClickGuiScreen 的模块
+ * ModuleClickGui —— 打开 ClickGuiScreen 的模块 (修复版)
  *
- * 功能:
- *   - 快捷键(RightShift/ESC)打开/关闭 ClickGUI
- *   - 自定义 ClickGUI 颜色、不透明度、大小
- *   - 兼容所有现有 API
+ * 修复内容:
+ *   1. 新增 disableActivation = true — 防止框架自动重新激活导致 GUI 关不掉
+ *   2. running 始终返回 true (打开状态由屏幕本身管理)
+ *   3. closeGui() 不再依赖 ModuleClickGui.enabled 属性 (Nextgen 的 object 没有 enabled setter)
+ *   4. enabledEffect 只负责打开一次屏幕; 屏幕关闭由 ClickGuiScreen.onClose() 处理
  */
 package net.ccbluex.liquidbounce.features.module.modules.render
 
@@ -12,10 +13,16 @@ import net.ccbluex.liquidbounce.features.module.ClientModule
 import net.ccbluex.liquidbounce.features.module.ModuleCategories
 import net.ccbluex.liquidbounce.event.events.KeyboardKeyEvent
 import net.ccbluex.liquidbounce.event.handler
+import net.ccbluex.liquidbounce.utils.client.mc
 import org.lwjgl.glfw.GLFW
 
 object ModuleClickGui :
-    ClientModule("ClickGUI", ModuleCategories.RENDER, bind = GLFW.GLFW_KEY_RIGHT_SHIFT) {
+    ClientModule(
+        "ClickGUI",
+        ModuleCategories.RENDER,
+        bind = GLFW.GLFW_KEY_RIGHT_SHIFT,
+        disableActivation = true,
+    ) {
 
     // ==================== 自定义设置 ====================
     /** GUI 整体缩放 (0.5 ~ 2.0) */
@@ -66,6 +73,7 @@ object ModuleClickGui :
     }
 
     // ==================== 模块行为 ====================
+    // 修复: 模块常开, 开关状态不驱动 GUI 的开关 (避免框架自动重开)
     override val running get() = true
 
     @Suppress("unused")
@@ -91,6 +99,7 @@ object ModuleClickGui :
     }
 
     override suspend fun enabledEffect() {
+        // 修复: 只在没有 ClickGuiScreen 时打开一次, 不做任何 disable 处理
         if (mc.gui.screen() !is ClickGuiScreen) {
             openGui()
         }
