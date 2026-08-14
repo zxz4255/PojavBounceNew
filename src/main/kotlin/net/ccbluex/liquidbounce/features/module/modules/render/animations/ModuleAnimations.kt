@@ -55,16 +55,16 @@ init { enabled = true }
 
     object MainHand : ToggleableValueGroup(this, "MainHand", true) {
         val mainHandItemScale by float("ItemScale", -0.2f, -5f..5f)
-        val mainHandX by float("X", 0f, -5f..5f)
+        val mainHandX by float("X", 0.2f, -5f..5f)
         val mainHandY by float("Y", 0f, -5f..5f)
         val mainHandPositiveX by float("PositiveRotationX", 0.2f, -50f..50f)
         val mainHandPositiveY by float("PositiveRotationY", 0f, -50f..50f)
         val mainHandPositiveZ by float("PositiveRotationZ", 0f, -50f..50f)
     }
 
-    object OffHand : ToggleableValueGroup(this, "OffHand", false) {
-        val offHandItemScale by float("ItemScale", 0f, -5f..5f)
-        val offHandX by float("X", 0f, -1f..1f)
+    object OffHand : ToggleableValueGroup(this, "OffHand", true) {
+        val offHandItemScale by float("ItemScale", -0.2f, -5f..5f)
+        val offHandX by float("X", 0.2f, -1f..1f)
         val offHandY by float("Y", 0f, -1f..1f)
         val OffHandPositiveX by float("PositiveRotationX", 0f, -50f..50f)
         val OffHandPositiveY by float("PositiveRotationY", 0f, -50f..50f)
