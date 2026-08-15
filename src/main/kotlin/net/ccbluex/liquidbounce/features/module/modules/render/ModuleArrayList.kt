@@ -89,8 +89,8 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
 
     // —— 布局 (支持正负数: 负数 = 从屏幕右/下边缘回退) ——
     private val side by enumChoice("Side", Side.RIGHT)
-    private val offsetX by int("Offset X", 4, -300..300)
-    private val offsetY by int("Offset Y", 4, -300..300)
+    private val offsetX by int("Offset X", 4, 0..200)
+    private val offsetY by int("Offset Y", 4, 0..200)
     private val spacing by int("Spacing", 0, 0..12)
     private val padding by int("Padding", 0, 0..16)
     private val customScale by float("Scale", 1.0f, 0.5f..3.0f)
@@ -125,9 +125,9 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
     // —— Glow 边缘发光 (参考 Solstice 描边多层写法, 颜色跟随文字颜色模式) ——
     private val glowEnabled by boolean("Glow", true)
     private val glowMode by enumChoice("Glow Mode", GlowMode.TEXT)   // 【新增】字体发光模式
-    private val glowRange by float("Glow Range", 24f, 0f..24f)
-    private val glowStrength by float("Glow Strength", 0.1f, 0f..2f)
-    private val glowDensity by int("Glow Density", 6, 1..12)
+    private val glowRange by float("Glow Range", 24f, 0f..30f)
+    private val glowStrength by float("Glow Strength", 0.1f, 0.01f..1f)
+    private val glowDensity by int("Glow Density", 8, 1..12)
     private val glowOffsetX by float("Glow Offset X", 0f, -16f..16f)
     private val glowOffsetY by float("Glow Offset Y", 0f, -16f..16f)
 
@@ -138,11 +138,11 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
 
     // —— Shadow 阴影 (黑色沿边缘多层描边, 同 Glow 写法) ——
     private val shadowEnabled by boolean("Shadow", false)
-    private val shadowRange by float("Shadow Range", 6f, 0f..24f)
+    private val shadowRange by float("Shadow Range", 20f, 0f..24f)
     private val shadowOffsetX by float("Shadow Offset X", 3f, -20f..20f)
     private val shadowOffsetY by float("Shadow Offset Y", 3f, -20f..20f)
-    private val shadowStrength by float("Shadow Strength", 0.5f, 0.1f..2f)
-    private val shadowDensity by int("Shadow Density", 3, 0..10)
+    private val shadowStrength by float("Shadow Strength", 0.1f, 0.1f..2f)
+    private val shadowDensity by int("Shadow Density", 10, 0..10)
 
     // ==================== 水印 ====================
     private val waterMarkEnabled by boolean("WaterMark", true)
