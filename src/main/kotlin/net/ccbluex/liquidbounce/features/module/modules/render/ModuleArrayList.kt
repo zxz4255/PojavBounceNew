@@ -106,7 +106,7 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
     private val border by boolean("Border", false)
 
     // —— 颜色 ——
-    private val colorMode by enumChoice("Color Mode", ColorMode.SKY)
+    private val colorMode by enumChoice("Color Mode", ColorMode.RAINBOW)
     private val customColor by color("Color", Color4b(0, 160, 255))
     private val rainbowSpeed by float("Rainbow Speed", 6f, 0.1f..10f)
     private val rainbowOffset by int("Rainbow Offset", 5, 0..90)
@@ -125,9 +125,9 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
     // —— Glow 边缘发光 (参考 Solstice 描边多层写法, 颜色跟随文字颜色模式) ——
     private val glowEnabled by boolean("Glow", true)
     private val glowMode by enumChoice("Glow Mode", GlowMode.TEXT)   // 【新增】字体发光模式
-    private val glowRange by float("Glow Range", 16f, 0f..30f)
-    private val glowStrength by float("Glow Strength", 0.05f, 0.01f..1f)
-    private val glowDensity by int("Glow Density", 8, 1..12)
+    private val glowRange by float("Glow Range", 24f, 0f..30f)
+    private val glowStrength by float("Glow Strength", 0.07f, 0.01f..1f)
+    private val glowDensity by int("Glow Density", 6, 1..12)
     private val glowOffsetX by float("Glow Offset X", 0f, -16f..16f)
     private val glowOffsetY by float("Glow Offset Y", 0f, -16f..16f)
 
