@@ -12,7 +12,7 @@
  *  - 自定义整体大小 Scale
  *  - 水印支持多种颜色模式: SkyBlue / Fade / Rainbow / Custom
  *
- *  【ModuleArraylist24 新增】
+ *  【ModuleArrayList77 新增】
  *  - Arraylist 位置支持正/负数自定义 (负数=从屏幕右/下边缘回退)
  *  - Glow 边缘发光 (参考 Solstice 描边多层写法): 总开关 / 强度 / 范围 / 密度 / 位置偏移,
  *    可选 每条模块背景边缘 / 整个列表背景边缘, 颜色跟随文字颜色模式
@@ -40,16 +40,21 @@ import kotlin.math.exp
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
-object ModuleArrayList : ClientModule("ArrayList", ModuleCategories.RENDER) {
+object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RENDER) {
     init { enabled = true }
 
     /* ============================= 可调节项 ============================= */
 
     private enum class Side(override val tag: String) : Tagged { LEFT("Left"), RIGHT("Right") }
 
-    // 边缘渲染模式 (Glow = 参考 Solstice 描边发光; Shadow = 多层偏移叠影)
+    // 边缘渲染模式 (Glow = 参考 Solstice 描边发光; Shadow = 黑色沿边缘多层描边)
     private enum class EdgeMode(override val tag: String) : Tagged {
         NONE("None"), GLOW("Glow"), SHADOW("Shadow"), BOTH("Both")
+    }
+
+    // Glow 发光目标: 背景边缘 / 字体 / 两者
+    private enum class GlowMode(override val tag: String) : Tagged {
+        EDGE("Edge"), TEXT("Text"), BOTH("Both")
     }
 
     // 文字颜色模式
@@ -84,8 +89,8 @@ object ModuleArrayList : ClientModule("ArrayList", ModuleCategories.RENDER) {
 
     // —— 布局 (支持正负数: 负数 = 从屏幕右/下边缘回退) ——
     private val side by enumChoice("Side", Side.RIGHT)
-    private val offsetX by int("Offset X", 4, -400..400)
-    private val offsetY by int("Offset Y", 4, -400..400)
+    private val offsetX by int("Offset X", 4, -2000..2000)
+    private val offsetY by int("Offset Y", 4, -2000..2000)
     private val spacing by int("Spacing", 0, 0..12)
     private val padding by int("Padding", 3, 0..16)
     private val customScale by float("Scale", 1.0f, 0.5f..3.0f)
@@ -99,27 +104,6 @@ object ModuleArrayList : ClientModule("ArrayList", ModuleCategories.RENDER) {
     private val backgroundAlpha by int("Background Alpha", 80, 0..255)
     private val backgroundRadius by int("Background Radius", 2, 0..6)
     private val border by boolean("Border", false)
-
-    // —— Glow 边缘发光 (参考 Solstice 描边多层写法, 颜色跟随文字颜色模式) ——
-    private val glowEnabled by boolean("Glow", false)
-    private val glowRange by float("Glow Range", 6f, 0f..24f)
-    private val glowStrength by float("Glow Strength", 1.9f, 0f..5f)
-    private val glowDensity by int("Glow Density", 2, 1..8)
-    private val glowOffsetX by float("Glow Offset X", 0f, -16f..16f)
-    private val glowOffsetY by float("Glow Offset Y", 0f, -16f..16f)
-
-    // —— 背景边缘渲染模式 + 自定义边缘大小 (Edge Size 缩放边缘带厚度) ——
-    private val perItemEdgeMode by enumChoice("Item Edge Mode", EdgeMode.NONE)
-    private val listEdgeMode by enumChoice("List Edge Mode", EdgeMode.NONE)
-    private val edgeSize by float("Edge Size", 8f, 0f..32f)
-
-    // —— Shadow 阴影 (多层偏移叠影, 非描边) ——
-    private val shadowEnabled by boolean("Shadow", false)
-    private val shadowRange by float("Shadow Range", 6f, 0f..24f)
-    private val shadowOffsetX by float("Shadow Offset X", 3f, -20f..20f)
-    private val shadowOffsetY by float("Shadow Offset Y", 3f, -20f..20f)
-    private val shadowStrength by float("Shadow Strength", 0.5f, 0f..2f)
-    private val shadowDensity by int("Shadow Density", 3, 1..8)
 
     // —— 颜色 ——
     private val colorMode by enumChoice("Color Mode", ColorMode.SKY)
@@ -137,6 +121,28 @@ object ModuleArrayList : ClientModule("ArrayList", ModuleCategories.RENDER) {
     // —— 动画 ——
     private val animationSpeed by float("Animation Speed", 50f, 1f..50f)
     private val slideIn by boolean("Slide In", true)
+
+    // —— Glow 边缘发光 (参考 Solstice 描边多层写法, 颜色跟随文字颜色模式) ——
+    private val glowEnabled by boolean("Glow", false)
+    private val glowMode by enumChoice("Glow Mode", GlowMode.EDGE)   // 【新增】字体发光模式
+    private val glowRange by float("Glow Range", 6f, 0f..24f)
+    private val glowStrength by float("Glow Strength", 1.9f, 0f..5f)
+    private val glowDensity by int("Glow Density", 2, 1..12)
+    private val glowOffsetX by float("Glow Offset X", 0f, -16f..16f)
+    private val glowOffsetY by float("Glow Offset Y", 0f, -16f..16f)
+
+    // —— 背景边缘渲染模式 + 自定义边缘大小 (Edge Size 缩放边缘带厚度) ——
+    private val perItemEdgeMode by enumChoice("Item Edge Mode", EdgeMode.NONE)
+    private val listEdgeMode by enumChoice("List Edge Mode", EdgeMode.NONE)
+    private val edgeSize by float("Edge Size", 8f, 0f..32f)
+
+    // —— Shadow 阴影 (黑色沿边缘多层描边, 同 Glow 写法) ——
+    private val shadowEnabled by boolean("Shadow", false)
+    private val shadowRange by float("Shadow Range", 6f, 0f..24f)
+    private val shadowOffsetX by float("Shadow Offset X", 3f, -20f..20f)
+    private val shadowOffsetY by float("Shadow Offset Y", 3f, -20f..20f)
+    private val shadowStrength by float("Shadow Strength", 0.5f, 0.1f..2f)
+    private val shadowDensity by int("Shadow Density", 3, 0..10)
 
     // ==================== 水印 ====================
     private val waterMarkEnabled by boolean("WaterMark", true)
@@ -190,22 +196,20 @@ object ModuleArrayList : ClientModule("ArrayList", ModuleCategories.RENDER) {
         if (y < 0) screenH + y - h else y
 
     /**
-     * 描边发光 (严格参考 ModuleSolsticeArraylist.drawGlowRect 写法):
-     * 多层描边, 内缘贴齐矩形边缘向外扩散, 自定义范围/强度/密度
+     * 发光边缘 (写法与 drawShadowEdge 完全一致, 仅颜色/参数来源不同):
+     * 多层描边逐层外扩, 内缘贴齐矩形边缘, 支持自定义位置偏移
      */
     private fun drawGlowEdge(
         ctx: net.minecraft.client.gui.GuiGraphicsExtractor,
         x1: Float, y1: Float, x2: Float, y2: Float,
-        color: Color4b, range: Float, strength: Float, density: Int,
+        color: Color4b, offX: Float, offY: Float, strength: Float, density: Int,
     ) {
-        if (range <= 0f || density <= 0) return
-        // 【自定义位置】Glow Offset X/Y 整体位移
-        val gx = glowOffsetX
-        val gy = glowOffsetY
+        val range = glowRange
+        if (range <= 0f || strength <= 0f || density <= 0) return
         if (density <= 1) {
             val w = range * 0.55f
             ctx.drawRoundedRect(
-                x1 - w + gx, y1 - w + gy, x2 + w + gx, y2 + w + gy,
+                x1 - w + offX, y1 - w + offY, x2 + w + offX, y2 + w + offY,
                 w * 0.5f, Color4b.TRANSPARENT, color.alpha((strength * 255).roundToInt().coerceIn(0, 255)), w,
             )
             return
@@ -216,7 +220,7 @@ object ModuleArrayList : ClientModule("ArrayList", ModuleCategories.RENDER) {
             val a = (strength * (0.55f + 0.3f * (1f - t)) * 255).roundToInt().coerceIn(0, 255)
             val off = w * 0.5f
             ctx.drawRoundedRect(
-                x1 - off + gx, y1 - off + gy, x2 + off + gx, y2 + off + gy,
+                x1 - off + offX, y1 - off + offY, x2 + off + offX, y2 + off + offY,
                 w * 0.5f, Color4b.TRANSPARENT, color.alpha(a), w,
             )
         }
@@ -265,16 +269,19 @@ object ModuleArrayList : ClientModule("ArrayList", ModuleCategories.RENDER) {
         val edgeScale = (edgeSize / 8f).coerceAtLeast(0f)
         when (mode) {
             EdgeMode.NONE -> Unit
-            EdgeMode.GLOW -> if (glowEnabled && edgeScale > 0f) {
-                drawGlowEdge(ctx, x1, y1, x2, y2, color, glowRange * edgeScale, glowStrength, glowDensity)
+            // 边缘发光仅在 GlowMode != TEXT 时绘制 (TEXT = 纯字体发光)
+            EdgeMode.GLOW -> if (glowEnabled && glowMode != GlowMode.TEXT && edgeScale > 0f) {
+                drawGlowEdge(ctx, x1, y1, x2, y2, color,
+                    glowOffsetX * edgeScale, glowOffsetY * edgeScale, glowStrength, glowDensity)
             }
             EdgeMode.SHADOW -> if (shadowEnabled && edgeScale > 0f) {
                 drawShadowEdge(ctx, x1, y1, x2, y2,
                     shadowOffsetX * edgeScale, shadowOffsetY * edgeScale, shadowStrength, shadowDensity)
             }
             EdgeMode.BOTH -> {
-                if (glowEnabled && edgeScale > 0f) {
-                    drawGlowEdge(ctx, x1, y1, x2, y2, color, glowRange * edgeScale, glowStrength, glowDensity)
+                if (glowEnabled && glowMode != GlowMode.TEXT && edgeScale > 0f) {
+                    drawGlowEdge(ctx, x1, y1, x2, y2, color,
+                        glowOffsetX * edgeScale, glowOffsetY * edgeScale, glowStrength, glowDensity)
                 }
                 if (shadowEnabled && edgeScale > 0f) {
                     drawShadowEdge(ctx, x1, y1, x2, y2,
@@ -334,7 +341,7 @@ object ModuleArrayList : ClientModule("ArrayList", ModuleCategories.RENDER) {
         val barEnabled = barMode != BarMode.NONE && barWidth > 0
         val barGap = if (barEnabled) barWidth + 3f else 0f
 
-        // 【ModuleArraylist24】负数 Y = 整个列表底部距屏幕下边缘回退
+        // 【ModuleArrayList77】负数 Y = 整个列表底部距屏幕下边缘回退
         val totalH = entries.sumOf { it.height + spacing } - (if (entries.isNotEmpty()) spacing else 0)
         var cursorY = (if (offsetY < 0) screenHeight + offsetY - totalH else offsetY).toFloat()
 
@@ -349,7 +356,7 @@ object ModuleArrayList : ClientModule("ArrayList", ModuleCategories.RENDER) {
             anim.slide += (1f - anim.slide) * smoothing
 
             val itemWidth = entry.width + barGap + padding * 2f
-            // 【ModuleArraylist24】正负数位置: 负数 = 从屏幕右/下边缘回退
+            // 【ModuleArrayList77】正负数位置: 负数 = 从屏幕右/下边缘回退
             val offX = resolveX(offsetX, itemWidth.roundToInt(), side == Side.RIGHT, screenWidth)
             val baseX = offX.toFloat()
             val x = if (slideIn) {
@@ -440,6 +447,17 @@ object ModuleArrayList : ClientModule("ArrayList", ModuleCategories.RENDER) {
                     else -> d.color.argb
                 }
 
+                // —— 字体发光 (GlowMode.TEXT / BOTH) ——
+                if (glowEnabled && glowMode != GlowMode.EDGE) {
+                    val tw = font.width(d.entry.text).toFloat()
+                    val th = fontHeight.toFloat()
+                    drawGlowEdge(
+                        context,
+                        textX.toFloat(), textY.toFloat(), textX.toFloat() + tw, textY.toFloat() + th,
+                        d.color, glowOffsetX, glowOffsetY, glowStrength, glowDensity,
+                    )
+                }
+
                 // 文字
                 context.text(font, d.entry.text, textX.roundToInt(), textY.roundToInt(), textDrawColor, textShadow)
 
@@ -469,7 +487,7 @@ object ModuleArrayList : ClientModule("ArrayList", ModuleCategories.RENDER) {
         val wmText = waterMarkText
         val wmScale = waterMarkScale
         val wmPad = 4f * wmScale
-        // 【ModuleArraylist24】水印位置支持负数: 负数 = 从屏幕右/下边缘回退
+        // 【ModuleArrayList77】水印位置支持负数: 负数 = 从屏幕右/下边缘回退
         val wmW = f.width(wmText) * wmScale + wmPad * 2f
         val wmH = f.lineHeight * wmScale + wmPad * 2f
         val wmBgX = resolveX(waterMarkX, wmW.roundToInt(), false, ctx.guiWidth()).toFloat() - wmPad
