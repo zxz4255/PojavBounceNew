@@ -40,7 +40,7 @@ import kotlin.math.exp
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
-object ModuleArraylist : ClientModule("ArrayList", ModuleCategories.RENDER) {
+object ModuleArrayList : ClientModule("ArrayList", ModuleCategories.RENDER) {
     init { enabled = true }
 
     /* ============================= 可调节项 ============================= */
