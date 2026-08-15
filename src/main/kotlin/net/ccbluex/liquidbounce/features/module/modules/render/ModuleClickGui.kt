@@ -75,21 +75,21 @@ object ModuleClickGui :
 
     @Suppress("unused")
     private val keyHandler = handler<KeyboardKeyEvent> { event ->
-        if (event.action == 1 &&
-            (event.keyCode == GLFW.GLFW_KEY_RIGHT_SHIFT || event.keyCode == 54)
-        ) {
+        if (event.action != 1) return@handler
+        val code = event.keyCode
+        // ESC 关闭: GLFW_KEY_ESCAPE = 256 (不再额外接受 scancode 1, 避免误触)
+        if (code == GLFW.GLFW_KEY_ESCAPE && mc.gui.screen() is ClickGuiScreen) {
+            closeGui()
+            return@handler
+        }
+        // 只精确响应右 Shift (GLFW_KEY_RIGHT_SHIFT = 344)
+        // 【修复】删除原 "keyCode == 54" 判断: GLFW 键码里 54 = 数字 6 (GLFW_KEY_6),
+        // 所以按快捷栏第 6 槽会误唤 ClickGUI。右 Shift 只有 344 一种键码。
+        if (code == GLFW.GLFW_KEY_RIGHT_SHIFT) {
             val currentScreen = mc.gui.screen()
             if (currentScreen == null) {
                 openGui()
             } else if (currentScreen is ClickGuiScreen) {
-                closeGui()
-            }
-        }
-        // ESC 关闭: Android 环境 keyCode 是 scancode, ESC 的 scancode = 1
-        if (event.action == 1 &&
-            (event.keyCode == GLFW.GLFW_KEY_ESCAPE || event.keyCode == 1)
-        ) {
-            if (mc.gui.screen() is ClickGuiScreen) {
                 closeGui()
             }
         }

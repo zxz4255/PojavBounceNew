@@ -89,10 +89,10 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
 
     // —— 布局 (支持正负数: 负数 = 从屏幕右/下边缘回退) ——
     private val side by enumChoice("Side", Side.RIGHT)
-    private val offsetX by int("Offset X", 4, -2000..2000)
-    private val offsetY by int("Offset Y", 4, -2000..2000)
+    private val offsetX by int("Offset X", 4, -300..300)
+    private val offsetY by int("Offset Y", 4, -300..300)
     private val spacing by int("Spacing", 0, 0..12)
-    private val padding by int("Padding", 3, 0..16)
+    private val padding by int("Padding", 0, 0..16)
     private val customScale by float("Scale", 1.0f, 0.5f..3.0f)
     private val upperCase by boolean("Uppercase", false)
     private val sortMode by enumChoice("Sort Mode", SortMode.LENGTH)
@@ -100,7 +100,7 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
 
     // —— 外观 ——
     private val textShadow by boolean("Text Shadow", true)
-    private val background by boolean("Background", true)
+    private val background by boolean("Background", false)
     private val backgroundAlpha by int("Background Alpha", 80, 0..255)
     private val backgroundRadius by int("Background Radius", 2, 0..6)
     private val border by boolean("Border", false)
@@ -123,11 +123,11 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
     private val slideIn by boolean("Slide In", true)
 
     // —— Glow 边缘发光 (参考 Solstice 描边多层写法, 颜色跟随文字颜色模式) ——
-    private val glowEnabled by boolean("Glow", false)
-    private val glowMode by enumChoice("Glow Mode", GlowMode.EDGE)   // 【新增】字体发光模式
-    private val glowRange by float("Glow Range", 6f, 0f..24f)
-    private val glowStrength by float("Glow Strength", 1.9f, 0f..5f)
-    private val glowDensity by int("Glow Density", 2, 1..12)
+    private val glowEnabled by boolean("Glow", true)
+    private val glowMode by enumChoice("Glow Mode", GlowMode.TEXT)   // 【新增】字体发光模式
+    private val glowRange by float("Glow Range", 24f, 0f..24f)
+    private val glowStrength by float("Glow Strength", 0.1f, 0f..2f)
+    private val glowDensity by int("Glow Density", 6, 1..12)
     private val glowOffsetX by float("Glow Offset X", 0f, -16f..16f)
     private val glowOffsetY by float("Glow Offset Y", 0f, -16f..16f)
 
