@@ -120,6 +120,10 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     private var isFirstLoad = true
     private var layoutDirty = false
     private var layoutLastSave = 0L
+    private val valuesCache = IdentityHashMap<ClientModule, List<Pair<Value<*>, Int>>>()
+    private var valuesCacheTime = 0L
+    private var cachedAllModules = emptyList<ClientModule>()
+    private var cachedAllModulesTime = 0L
     private val categories = ModuleCategories.entries.toList()
     private val modeValueCache = IdentityHashMap<ClientModule, Value<*>?>()
 
@@ -238,7 +242,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
     private fun getCategoryModules(category: ModuleCategory): List<ClientModule> {
         return try {
-            ModuleManager.getModules().toList()
+            getAllModulesCached()
                 .filter { it.category == category }
                 .filter { searchText.isEmpty() || it.name.contains(searchText, ignoreCase = true) }
         } catch (_: Exception) {
@@ -246,12 +250,22 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         }
     }
 
+    /** 模块列表缓存: GUI 开启期间模块集合基本不变, 避免每帧重复复制/过滤全部模块 */
+    private fun getAllModulesCached(): List<ClientModule> {
+        val now = System.currentTimeMillis()
+        if (cachedAllModules.isEmpty() || now - cachedAllModulesTime > 1000L) {
+            cachedAllModules = ModuleManager.getModules().toList()
+            cachedAllModulesTime = now
+        }
+        return cachedAllModules
+    }
+
     private fun getExpandedHeight(mod: ClientModule): Float {
         if (expandedModule != mod) {
             return 0f
         }
         var h = 0f
-        for ((v, _) in getVisibleValues(mod)) {
+        for ((v, _) in getVisibleValuesCached(mod)) {
             val actual = getActualValue(v)
             if (v is ModeValueGroup<*>) {
                 h += max(1f, (1 + v.modes.size).toFloat()) * SETTING_H
@@ -288,10 +302,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val font = minecraft!!.font
         val isSearching = searchText.isNotEmpty()
 
-        // 【修复】开启期间每隔一段时间自动保存布局，防止 mouseReleased / onClose / removed 未触发导致丢失
-        if (!isSearching && layoutDirty && System.currentTimeMillis() - layoutLastSave >= 400) {
-            saveLayout()
-        }
+        // 【优化】不在渲染帧里做自动保存(文件 IO + 全模块扫描会卡帧)。
+        // JSON 改为仅在 onClose()/removed() 关闭时保存一次。
 
         val savedLayout = if (isFirstLoad) {
             loadLayout()
@@ -458,7 +470,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
                 curY += ITEM_H
                 if (isExpanded) {
-                    val values = getVisibleValues(mod)
+                    val values = getVisibleValuesCached(mod)
                     var totalSettingH = 0f
                     for ((v, _) in values) {
                         val actual = getActualValue(v)
@@ -955,7 +967,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 }
                 curY += ITEM_H
                 if (isExpanded) {
-                    val values = getVisibleValues(mod)
+                    val values = getVisibleValuesCached(mod)
                     for ((v, depth) in values) {
                         val actual = getActualValue(v)
                         if (v is ModeValueGroup<*>) {
@@ -980,6 +992,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                                             v.setByString(mode.name)
                                         } catch (_: Exception) {
                                         }
+                                        valuesCache.clear()
+                                        valuesCacheTime = 0L
                                     }
                                     return true
                                 }
@@ -1133,6 +1147,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     }
 
     private fun trySetValue(v: Value<*>, value: Any) {
+        valuesCache.clear()
+        valuesCacheTime = 0L
         try {
             val setMethod = v.javaClass.methods.firstOrNull {
                 it.name == "set" && it.parameterCount == 1
@@ -1351,6 +1367,16 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         }
         modeValueCache[mod] = null
         return null
+    }
+
+    /** 【优化】getVisibleValues 缓存: 每帧只对展开模块做一次反射, 改动设置时由 trySetValue 清空 */
+    private fun getVisibleValuesCached(module: ClientModule): List<Pair<Value<*>, Int>> {
+        val now = System.currentTimeMillis()
+        if (now - valuesCacheTime > 250L) {
+            valuesCacheTime = now
+            valuesCache.clear()
+        }
+        return valuesCache.getOrPut(module) { getVisibleValues(module) }
     }
 
     private fun getVisibleValues(module: ClientModule): List<Pair<Value<*>, Int>> {
