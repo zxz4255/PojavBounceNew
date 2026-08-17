@@ -137,9 +137,9 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     private var layoutLastSave = 0L
 
     // ==================== Smooth Animation State ====================
-    private val panelExpandAnim = mutableMap<PanelData, Float>()   // 面板展开动画: 0=折叠, 1=完全展开
-    private val settingsExpandAnim = mutableMap<ClientModule, Float>() // 模块设置展开动画
-    private val groupCollapseAnim = mutableMap<Value<*>, Float>()   // 设置组折叠动画
+    private val panelExpandAnim = mutableMapOf<PanelData, Float>()   // 面板展开动画: 0=折叠, 1=完全展开
+    private val settingsExpandAnim = mutableMapOf<ClientModule, Float>() // 模块设置展开动画
+    private val groupCollapseAnim = mutableMapOf<Value<*>, Float>()   // 设置组折叠动画
     private var guiOpenAnim = 0f        // GUI 整体打开动画 (0→1)
 
     private val valuesCache = IdentityHashMap<ClientModule, List<Pair<Value<*>, Int>>>()

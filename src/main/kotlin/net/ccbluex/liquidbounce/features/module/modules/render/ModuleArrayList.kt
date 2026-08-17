@@ -439,6 +439,24 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
                             (barX + barWidth).roundToInt(), (d.y + d.entry.height - 2f).roundToInt(),
                             effectiveBarColor.argb, effectiveBarColor.copy(alpha = 0).argb
                         )
+                        BarMode.STRIP -> {
+                            // 【新增】条状条纹: 沿条高度交替颜色, 形成不间断连续条纹
+                            val stripH = 4f
+                            val top = d.y + 2f
+                            val bottom = d.y + d.entry.height - 2f
+                            var sy = top
+                            var idx = 0
+                            while (sy < bottom) {
+                                val sh = minOf(stripH, bottom - sy)
+                                val c = if (idx % 2 == 0) effectiveBarColor
+                                else effectiveBarColor.copy(
+                                    alpha = (effectiveBarColor.a * 0.45f).roundToInt().coerceIn(0, 255)
+                                )
+                                context.drawQuad(barX, sy, barX + barWidth, sy + sh, c)
+                                sy += sh
+                                idx++
+                            }
+                        }
                     }
                 }
 
@@ -577,15 +595,13 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
 
     // ----- 新增：Solstice 三色流水渐变 (参考 RAINBOW_TEXT 写法，同帧多色流动) -----
     private fun themedColor(index: Float, time: Float): Color4b {
-        // 同 RAINBOW_TEXT 风格: 每个 index 偏移不同相位，在同一帧中看到粉/白/蓝多色流水跑动
-        val cycle = 10000f // 完整周期 ms
-        val phase = ((time * 1000f * rainbowTextSpeed + index * 20f) % cycle) / cycle // 0..1
-        // 将 phase 映射到三色环上
-        val segCount = SOLSTICE_COLORS.size
-        val segFloat = phase * segCount
-        val seg = segFloat.toInt().coerceIn(0, segCount - 1)
+        // 与 RAINBOW_TEXT 同款相位公式: time(秒) × 60° × 速度 + index 相位偏移 → 同一帧内不同条目
+        // 处于不同相位, 整列呈现粉→白→浅天蓝连续渐变、如流水般跑动
+        val angle = (time * 60f * rainbowTextSpeed + index * 20f) % 360f
+        val segFloat = angle / 360f * SOLSTICE_COLORS.size
+        val seg = segFloat.toInt().coerceIn(0, SOLSTICE_COLORS.size - 1)
         val t = (segFloat - seg).coerceIn(0f, 1f)
-        val next = (seg + 1) % segCount
+        val next = (seg + 1) % SOLSTICE_COLORS.size
         return lerpColor(SOLSTICE_COLORS[seg], SOLSTICE_COLORS[next], t)
     }
     // ----------------------------------------------------------------
