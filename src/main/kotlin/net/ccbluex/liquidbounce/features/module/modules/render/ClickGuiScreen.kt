@@ -56,8 +56,9 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
     // ==================== Layout ====================
     private val CORNER = 8f
-    private val ITEM_H = 17f
-    private val SETTING_H = 17f
+    // 【美化】每竖列增加高度 (17→19)
+    private val ITEM_H = 19f
+    private val SETTING_H = 19f
     private val SCROLL_W = 4f
     private val PADDING = 5f
     private val SETTING_INDENT = 8f
@@ -65,6 +66,14 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     private val PANEL_MIN_W = 125
     private val PANEL_MAX_H = 400
     private val HEADER_H = 24f
+
+    // ==================== Glow (参考 ModuleArrayList 多层叠写法, 微弱发光) ====================
+    private val GLOW_PURPLE = Color4b(0x9B, 0x59, 0xD6, 255)
+    private val PANEL_HEADER_BG = 0xB09B59D6L.toInt()   // 半透明亮紫 (标题栏背景)
+    private val BRIGHT_ACCENT = 0xFFC580FFL.toInt()     // 亮紫细条
+    private val GLOW_DENSITY = 6
+    private val GLOW_RANGE = 5f
+    private val GLOW_STRENGTH = 0.12f
 
     // ==================== Slider Drag State ====================
     private data class SliderContext(
@@ -221,6 +230,82 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             fillRect(ctx, minX, minY, max(minX + 1, maxX), max(minY + 1, maxY), color)
             a += 6f
         }
+    }
+
+    // ==================== Glow 绘制 (参考 ModuleArrayList 多层叠 background 写法) ====================
+
+    /**
+     * 整个面板发光 (非边缘发光): 叠很多层半透明亮紫 background,
+     * 参照 ModuleArrayList glow 多层叠写法: 逐层外扩, 越外层越大越淡, 形成从面板向外散开的光晕
+     */
+    private fun drawFillGlow(
+        ctx: GuiGraphicsExtractor,
+        x1: Float, y1: Float, x2: Float, y2: Float,
+        color: Color4b, range: Float, strength: Float, density: Int,
+        radius: Float,
+    ) {
+        if (range <= 0f || strength <= 0f || density <= 0) {
+            return
+        }
+        for (i in 0 until density) {
+            val t = i / (density - 1).toFloat()
+            // 光晕逐层向外扩展, 透明度逐层递减 (内亮外淡)
+            val off = range * (0.15f + 0.85f * t)
+            val a = (strength * (0.55f + 0.3f * (1f - t)) * 255).roundToInt().coerceIn(0, 255)
+            if (a <= 0) {
+                continue
+            }
+            val c = color.alpha(a)
+            drawRoundedRect(
+                ctx, x1 - off, y1 - off,
+                (x2 - x1) + off * 2f, (y2 - y1) + off * 2f,
+                radius + off, c.argb,
+            )
+        }
+    }
+
+    /** 圆形 (实心, 用圆角矩形近似: radius = 边长一半) */
+    private fun drawCircle(ctx: GuiGraphicsExtractor, cx: Float, cy: Float, r: Float, color: Int) {
+        val size = r * 2f
+        drawRoundedRect(ctx, cx - r, cy - r, size, size, r, color)
+    }
+
+    /**
+     * 圆形的微弱发光 (参考 ModuleArrayList glow 多层叠写法):
+     * 多层圆环状半透明光晕, 由内向外透明度递减
+     */
+    private fun drawDotGlow(
+        ctx: GuiGraphicsExtractor,
+        cx: Float, cy: Float, r: Float,
+        color: Color4b, range: Float, strength: Float, density: Int,
+    ) {
+        if (range <= 0f || strength <= 0f || density <= 0) {
+            return
+        }
+        for (i in 0 until density) {
+            val t = i / (density - 1).toFloat()
+            // 光晕半径逐层外扩, 透明度逐层递减 (内亮外淡)
+            val gr = r + range * (0.3f + 0.7f * t)
+            val a = (strength * (0.55f + 0.3f * (1f - t)) * 255).roundToInt().coerceIn(0, 255)
+            if (a <= 0) {
+                continue
+            }
+            drawCircle(ctx, cx, cy, gr, color.alpha(a).argb)
+        }
+    }
+
+    /**
+     * 文字的微弱发光 (参考 ModuleArrayList GlowMode.TEXT 写法):
+     * 在文字包围盒上叠多层半透明紫, 由内向外透明度递减
+     */
+    private fun drawTextGlow(
+        ctx: GuiGraphicsExtractor, font: Font, text: String,
+        x: Float, y: Float,
+        color: Color4b, range: Float, strength: Float, density: Int,
+    ) {
+        val tw = font.width(text).toFloat()
+        val th = font.lineHeight.toFloat()
+        drawFillGlow(ctx, x - 1f, y - 1f, x + tw + 1f, y + th + 1f, color, range, strength, density, 2f)
     }
 
     private val TEXT_SCALE = 0.8f
@@ -419,10 +504,20 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             }
             drawRoundedRect(ctx, px, py, pw, actualHeight, CORNER, BG)
 
+            // 【美化】分类标题栏: 微弱发光半透明亮紫背景 (参考 ModuleArrayList glow 多层叠写法)
+            val headerGlowH = (HEADER_H + 2f).coerceAtMost(actualHeight)
+            drawFillGlow(ctx, px, py, px + pw, py + headerGlowH,
+                GLOW_PURPLE, GLOW_RANGE * 2f, GLOW_STRENGTH * 0.8f, GLOW_DENSITY, CORNER)
+            // 标题栏底层: 半透明亮紫
+            drawRoundedRect(ctx, px, py, pw, headerGlowH, CORNER, PANEL_HEADER_BG)
+            // 【美化】标题栏底部: 又细又亮的紫色条
+            fillRect(ctx, px + 4f, py + headerGlowH - 1f, px + pw - 4f, py + headerGlowH, BRIGHT_ACCENT)
+
             var panelModules: List<ClientModule>
             if (isSearching) {
                 panelModules = categories.flatMap { getCategoryModules(it) }.distinct()
-                drawText(ctx, font, "§lSearch Results", (px + 8f).toInt(), (py + 5f).toInt(), ACCENT)
+                // 【美化】亮紫背景上用白色标题保证对比度
+                drawText(ctx, font, "§lSearch Results", (px + 8f).toInt(), (py + 5f).toInt(), CATEGORY_TITLE)
             } else {
                 val category = panel.category ?: continue
                 panelModules = getCategoryModules(category)
@@ -432,8 +527,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                     "▼ "
                 }
                 drawText(ctx, font, "§l$arrow${category.tag}", (px + 8f).toInt(), (py + 5f).toInt(), CATEGORY_TITLE)
-                val lineWidth = font.width(category.tag) + 10f
-                fillRect(ctx, px + 8f, py + 18f, px + 8f + lineWidth, py + 19f, ACCENT_DARK)
+                // 【美化】旧的下划线移除, 改为底部亮紫细条 (已在标题栏渲染)
             }
 
             if (panel.collapsed) {
@@ -478,10 +572,25 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                         TEXT
                     }
                     val nameMaxW = (listAreaW - 16).toInt()
-                    drawText(ctx, font, trimText(font, mod.name, nameMaxW), (listAreaX + 4f).toInt(), (curY + 4f).toInt(), nameColor)
-                    val dotX = (listAreaX + listAreaW - 4f).toInt()
-                    val dotY = curY.toInt() + 7
-                    fillRect(ctx, dotX, dotY, dotX + 4, dotY + 4, if (mod.enabled) ACCENT else 0x40808080.toInt())
+                    val trimmedName = trimText(font, mod.name, nameMaxW)
+                    val nameX = (listAreaX + 4f).toInt()
+                    val nameY = (curY + 4f).toInt()
+                    // 【美化】开启模块: 紫色字体微弱 glow 发光 (参考 ModuleArrayList GlowMode.TEXT)
+                    if (mod.enabled) {
+                        drawTextGlow(ctx, font, trimmedName, nameX.toFloat(), nameY.toFloat(),
+                            GLOW_PURPLE, GLOW_RANGE, GLOW_STRENGTH, GLOW_DENSITY)
+                    }
+                    drawText(ctx, font, trimmedName, nameX, nameY, nameColor)
+                    // 【美化】方形开关 → 圆形开关 (大小与原来一致, 4x4 → 直径4的圆)
+                    val dotCX = listAreaX + listAreaW - 2f
+                    val dotCY = curY + 9.5f
+                    val dotR = 2f
+                    if (mod.enabled) {
+                        // 圆形微弱发光 (参考 ModuleArrayList glow 多层叠写法)
+                        drawDotGlow(ctx, dotCX, dotCY, dotR,
+                            GLOW_PURPLE, GLOW_RANGE * 0.8f, GLOW_STRENGTH * 1.2f, GLOW_DENSITY)
+                    }
+                    drawCircle(ctx, dotCX, dotCY, dotR, if (mod.enabled) ACCENT else 0x40808080.toInt())
                 }
 
                 curY += ITEM_H
@@ -774,10 +883,16 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             !isGroup && !isSliderValue(v) && !isColorValue(v) && !isBindValue(v)) {
             val va = getActualValue(v)
             if (va is Enum<*>) {
-                val dotX2 = (x + w - 4f).toInt()
-                val dotY2 = y.toInt() + 6
+                // 【美化】圆形开关 + 微弱发光
+                val dotCX2 = x + w - 2f
+                val dotCY2 = y + 9.5f
+                val dotR2 = 2f
                 val isActive = getDisplayValue(v) == va.name
-                fillRect(ctx, dotX2, dotY2, dotX2 + 4, dotY2 + 4, if (isActive) ACCENT else 0x40808080.toInt())
+                if (isActive) {
+                    drawDotGlow(ctx, dotCX2, dotCY2, dotR2,
+                        GLOW_PURPLE, GLOW_RANGE * 0.8f, GLOW_STRENGTH * 1.2f, GLOW_DENSITY)
+                }
+                drawCircle(ctx, dotCX2, dotCY2, dotR2, if (isActive) ACCENT else 0x40808080.toInt())
             }
         }
     }
@@ -796,10 +911,16 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         var yOff = curY + SETTING_H
         for (mode in v.modes) {
             val isActive = mode === v.activeMode
-            val dotX = labelX + 4
-            val dotY = yOff.toInt() + 6
-            fillRect(ctx, dotX, dotY, dotX + 4, dotY + 4, if (isActive) ACCENT else 0x40808080.toInt())
-            val textX = dotX + 6
+            // 【美化】圆形开关 + 微弱发光
+            val dotCX = (labelX + 6).toFloat()
+            val dotCY = yOff + 9.5f
+            val dotR = 2f
+            if (isActive) {
+                drawDotGlow(ctx, dotCX, dotCY, dotR,
+                    GLOW_PURPLE, GLOW_RANGE * 0.8f, GLOW_STRENGTH * 1.2f, GLOW_DENSITY)
+            }
+            drawCircle(ctx, dotCX, dotCY, dotR, if (isActive) ACCENT else 0x40808080.toInt())
+            val textX = (dotCX + dotR + 3f).toInt()
             val maxTextW = (x + w - 8 - textX).toInt().coerceAtLeast(10)
             drawText(ctx, font, trimText(font, mode.name, maxTextW), textX, (yOff + 4f).toInt(), if (isActive) TEXT_BRIGHT else TEXT_DIM)
             yOff += SETTING_H
@@ -816,18 +937,22 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         }
         var yOff = curY + SETTING_H
 
-        val dotSize = 4
-        val dotGap = 2
+        val dotR = 2f
+        val dotGap = 3
         val nameX = labelX
         for (const in constants) {
             if (yOff < listAreaY + listAreaH && yOff + SETTING_H > listAreaY) {
                 val displayName = const.toString()
                 val isActive = displayName == current.name
-                val dotX = nameX + 4
-                val dotY = yOff.toInt() + 6
-
-                fillRect(ctx, dotX, dotY, dotX + dotSize, dotY + dotSize, if (isActive) ACCENT else 0x40808080.toInt())
-                val textX = dotX + dotSize + dotGap
+                // 【美化】圆形开关 + 微弱发光
+                val dotCX = (nameX + 6).toFloat()
+                val dotCY = yOff + 9.5f
+                if (isActive) {
+                    drawDotGlow(ctx, dotCX, dotCY, dotR,
+                        GLOW_PURPLE, GLOW_RANGE * 0.8f, GLOW_STRENGTH * 1.2f, GLOW_DENSITY)
+                }
+                drawCircle(ctx, dotCX, dotCY, dotR, if (isActive) ACCENT else 0x40808080.toInt())
+                val textX = (dotCX + dotR + dotGap).toInt()
                 val maxTextW = (x + w - 8 - textX).toInt().coerceAtLeast(10)
                 drawText(ctx, font, trimText(font, displayName, maxTextW), textX, (yOff + 4f).toInt(), if (isActive) TEXT_BRIGHT else TEXT_DIM)
             }

@@ -40,7 +40,7 @@ import kotlin.math.exp
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
-object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RENDER) {
+object ModuleArrayList : ClientModule("ArrayList[35]", ModuleCategories.RENDER) {
     init { enabled = true }
 
     /* ============================= 可调节项 ============================= */
@@ -74,7 +74,8 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
     private enum class BarMode(override val tag: String) : Tagged {
         NONE("None"), SOLID("Solid"), GRADIENT("Gradient"),
         FOLLOW("Follow"),   // 跟随文字颜色模式
-        CUSTOM("Custom")    // 自定义 Bar 颜色
+        CUSTOM("Custom"),   // 自定义 Bar 颜色
+        STICK("Stick")      // 【新增】整体条状模式 (整个列表一个连续条)
     }
 
     // Bar 左右方向 (【修复】独立于 Side 切换 Bar 在条目左侧/右侧)
@@ -171,14 +172,6 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
     private val WHITE = Color4b(255, 255, 255, 255)
     private val SKY_BLUE = Color4b(0, 160, 255, 255)
 
-    // ----- 新增：Solstice 三色板 (取自 ModuleSolsticeArraylist) -----
-    private val SOLSTICE_COLORS = listOf(
-        Color4b(0xE9, 0xA8, 0xBC),    // 粉
-        Color4b(0x6E, 0xC8, 0xF1),    // 蓝
-        Color4b(255, 255, 255)        // 白
-    )
-    // ------------------------------------------------------------
-
     /* =============================== 渲染 =============================== */
 
     /**
@@ -258,34 +251,70 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
         }
     }
 
-    /** 条目/列表边缘渲染: 按 EdgeMode 选择 Glow / Shadow / Both, Edge Size 缩放边缘大小 */
+    /**
+     * 【修改】字体中心发光 (从文字包围盒中心向外扩散叠 background):
+     * 多层半透明矩形逐层向外扩展, 内层最亮、外层最淡,
+     * 形成从文字向外散开的光晕效果 (非边缘描边)
+     */
+    private fun drawTextFillGlow(
+        ctx: net.minecraft.client.gui.GuiGraphicsExtractor,
+        x1: Float, y1: Float, x2: Float, y2: Float,
+        color: Color4b, strength: Float, density: Int,
+    ) {
+        if (glowRange <= 0f || strength <= 0f || density <= 0) return
+        val cx = (x1 + x2) / 2f   // 中心 X
+        val cy = (y1 + y2) / 2f   // 中心 Y
+        val hw = (x2 - x1) / 2f      // 半宽
+        val hh = (y2 - y1) / 2f      // 半高
+        if (density <= 1) {
+            // 单层: 直接画一个比文字大 glowRange 的矩形
+            val r = glowRange * 0.6f
+            val a = (strength * 255).roundToInt().coerceIn(0, 255)
+            ctx.fill(cx - hw - r, cy - hh - r, cx + hw + r, cy + hh + r, color.alpha(a))
+            return
+        }
+        for (i in 0 until density) {
+            val t = i / (density - 1).toFloat()
+            // 从内到外扩展: 内层小且亮, 外层大且淡
+            val expand = glowRange * (0.15f + 0.85f * t)
+            val a = (strength * (0.55f + 0.35f * (1f - t)) * 255).roundToInt().coerceIn(0, 255)
+            if (a <= 0) continue
+            val lx = cx - hw - expand
+            val ly = cy - hh - expand
+            val rx = cx + hw + expand
+            val ry = cy + hh + expand
+            ctx.fill(lx, ly, rx, ry, color.alpha(a))
+        }
+    }
+
+    /** 条目/列表边缘渲染: Shadow 最垫底 → Glow 在上面 */
     private fun renderEdge(
         ctx: net.minecraft.client.gui.GuiGraphicsExtractor,
         x1: Float, y1: Float, x2: Float, y2: Float,
         color: Color4b, mode: EdgeMode,
     ) {
         if (mode == EdgeMode.NONE) return
-        // 【自定义边缘大小】Edge Size 默认 8 = 1x, 范围 0~32
         val edgeScale = (edgeSize / 8f).coerceAtLeast(0f)
+        // 【修改】Shadow 先画(最底层), Glow 后画(上层)
         when (mode) {
             EdgeMode.NONE -> Unit
-            // 边缘发光仅在 GlowMode != TEXT 时绘制 (TEXT = 纯字体发光)
-            EdgeMode.GLOW -> if (glowEnabled && glowMode != GlowMode.TEXT && edgeScale > 0f) {
-                drawGlowEdge(ctx, x1, y1, x2, y2, color,
-                    glowOffsetX * edgeScale, glowOffsetY * edgeScale, glowStrength, glowDensity)
-            }
             EdgeMode.SHADOW -> if (shadowEnabled && edgeScale > 0f) {
                 drawShadowEdge(ctx, x1, y1, x2, y2,
                     shadowOffsetX * edgeScale, shadowOffsetY * edgeScale, shadowStrength, shadowDensity)
             }
+            EdgeMode.GLOW -> if (glowEnabled && glowMode != GlowMode.TEXT && edgeScale > 0f) {
+                drawGlowEdge(ctx, x1, y1, x2, y2, color,
+                    glowOffsetX * edgeScale, glowOffsetY * edgeScale, glowStrength, glowDensity)
+            }
             EdgeMode.BOTH -> {
-                if (glowEnabled && glowMode != GlowMode.TEXT && edgeScale > 0f) {
-                    drawGlowEdge(ctx, x1, y1, x2, y2, color,
-                        glowOffsetX * edgeScale, glowOffsetY * edgeScale, glowStrength, glowDensity)
-                }
+                // 【修改】先 Shadow(底), 再 Glow(顶)
                 if (shadowEnabled && edgeScale > 0f) {
                     drawShadowEdge(ctx, x1, y1, x2, y2,
                         shadowOffsetX * edgeScale, shadowOffsetY * edgeScale, shadowStrength, shadowDensity)
+                }
+                if (glowEnabled && glowMode != GlowMode.TEXT && edgeScale > 0f) {
+                    drawGlowEdge(ctx, x1, y1, x2, y2, color,
+                        glowOffsetX * edgeScale, glowOffsetY * edgeScale, glowStrength, glowDensity)
                 }
             }
         }
@@ -425,7 +454,7 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
                 }
 
                 // —— 侧边装饰条 ——
-                if (barEnabled) {
+                if (barEnabled && barMode != BarMode.STICK) {
                     when (barMode) {
                         BarMode.NONE -> Unit
                         BarMode.SOLID, BarMode.FOLLOW, BarMode.CUSTOM -> context.drawQuad(
@@ -438,6 +467,7 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
                             (barX + barWidth).roundToInt(), (d.y + d.entry.height - 2f).roundToInt(),
                             effectiveBarColor.argb, effectiveBarColor.copy(alpha = 0).argb
                         )
+                        BarMode.STICK -> Unit  // Stick 在列表整体渲染后统一绘制
                     }
                 }
 
@@ -448,13 +478,14 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
                 }
 
                 // —— 字体发光 (GlowMode.TEXT / BOTH) ——
+                // 【修改】从边缘描边改为中心向外扩散叠 background (drawTextFillGlow)
                 if (glowEnabled && glowMode != GlowMode.EDGE) {
                     val tw = font.width(d.entry.text).toFloat()
                     val th = fontHeight.toFloat()
-                    drawGlowEdge(
+                    drawTextFillGlow(
                         context,
                         textX.toFloat(), textY.toFloat(), textX.toFloat() + tw, textY.toFloat() + th,
-                        d.color, glowOffsetX, glowOffsetY, glowStrength, glowDensity,
+                        d.color, glowStrength, glowDensity,
                     )
                 }
 
@@ -472,6 +503,51 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
                 val maxY = drawnItemRects.maxOf { it.y2 } + 2f
                 val listColor = resolveColor(0, minY)
                 renderEdge(context, minX, minY, maxX, maxY, listColor, listEdgeMode)
+            }
+
+            // —— 【新增】Stick 条状模式: 整个列表一个连续条 ——
+            if (barEnabled && barMode == BarMode.STICK && drawn.isNotEmpty()) {
+                val stickMinY = drawnItemRects.minOf { it.y1 }
+                val stickMaxY = drawnItemRects.maxOf { it.y2 }
+                // Bar 方向与单条一致
+                val stickBarLeft = when (barSide) {
+                    BarSide.AUTO -> side == Side.LEFT
+                    BarSide.LEFT -> true
+                    BarSide.RIGHT -> false
+                }
+                // 取第一条的 barX 作为整体条的 X
+                val firstD = drawn.first()
+                val stickBarGap = if (barEnabled) barWidth + 3f else 0f
+                val firstItemW = firstD.entry.width + stickBarGap + padding * 2f
+                val firstOffX = resolveX(offsetX, firstItemW.roundToInt(), side == Side.RIGHT, context.guiWidth())
+                val stickBarX = if (stickBarLeft) firstOffX.toFloat()
+                else firstOffX.toFloat() + firstItemW - padding - barWidth
+
+                // Stick 条颜色: 跟随文字颜色模式渐变 (从上到下颜色变化)
+                when {
+                    barMode == BarMode.CUSTOM -> context.drawQuad(
+                        stickBarX, stickMinY,
+                        stickBarX + barWidth, stickMaxY,
+                        barCustomColor
+                    )
+                    else -> {
+                        // 渐变条: 从第一条到最后一条颜色渐变
+                        val segCount = drawn.size.coerceAtLeast(2)
+                        for (i in 0 until segCount) {
+                            val t1 = i / segCount.toFloat()
+                            val t2 = (i + 1) / segCount.toFloat()
+                            val y1 = stickMinY + t1 * (stickMaxY - stickMinY)
+                            val y2 = stickMinY + t2 * (stickMaxY - stickMinY)
+                            val c1 = resolveColor(i, y1)
+                            val c2 = resolveColor(i + 1, y2)
+                            context.fillGradient(
+                                stickBarX.roundToInt(), y1.roundToInt(),
+                                (stickBarX + barWidth).roundToInt(), y2.roundToInt(),
+                                c1.argb, c2.argb
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -554,16 +630,12 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
         }
     }
 
-    // ----- 新增：Solstice 三色渐变（取自 ModuleSolsticeArraylist）-----
+    // ----- Solstice 动态彩虹模式 (同一时刻不同条目显示不同颜色) -----
     private fun themedColor(index: Float): Color4b {
-        val totalTime = 10000f / 3f          // 总循环周期（毫秒）
-        val now = System.currentTimeMillis()
-        val angle = ((now + index.toLong()) % totalTime.toLong()).toFloat()
-        val segmentTime = totalTime / SOLSTICE_COLORS.size
-        val seg = (angle / segmentTime).toInt().coerceIn(0, SOLSTICE_COLORS.size - 1)
-        val t = (angle / segmentTime - seg).coerceIn(0f, 1f)
-        val next = (seg + 1) % SOLSTICE_COLORS.size
-        return lerpColor(SOLSTICE_COLORS[seg], SOLSTICE_COLORS[next], t)
+        val time = System.currentTimeMillis() / 1000f
+        // 基于索引 + 时间产生连续色相偏移, 同一帧不同模块显示不同颜色
+        val hue = (time * 36f * rainbowSpeed + index * rainbowOffset) % 360f
+        return hueColor(hue)
     }
     // ----------------------------------------------------------------
 
