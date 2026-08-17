@@ -8,7 +8,12 @@
  *  - 按像素宽度从长到短排序
  *  - 每条模块独立矩形背景
  *  - 文字颜色模式: CUSTOM / RAINBOW / FADE / SKY / RAINBOW_TEXT / FADE2 / LB / SOLSTICE (新增)
- *  - Bar 模式: NONE / SOLID / GRADIENT / FOLLOW(跟随文字) / CUSTOM(自定义) / STRIP(条状)
+ *  - Bar 模式: NONE / SOLID / GRADIENT / FOLLOW(跟随文字) / CUSTOM(自定义) / STRIP(连续条形)
+ *
+ *  【ModuleArrayList_8 新增】
+ *  - Shadow 增加与 Glow 一致的 Shadow Mode (EDGE / TEXT / BOTH / PER_CHAR),
+ *    字体阴影精确到文本像素(黑字偏移叠影), Shadow 图层永远绘制在最底部
+ *  - 修复 Bar STRIP: 改为整条通高一次性绘制的连续条形 (不再交替分段断连)
  *  - 自定义整体大小 Scale
  *  - 水印支持多种颜色模式: SkyBlue / Fade / Rainbow / Custom
  *
@@ -18,8 +23,8 @@
  *    可选 每条模块背景边缘 / 整个列表背景边缘 / 逐字像素发光, 颜色跟随文字颜色模式
  *  - 背景边缘渲染模式: Glow(发光) / Shadow(阴影) / Both / None,
  *    Edge Size 自定义边缘带大小
- *  - Shadow 阴影: 黑色沿边缘多层描边(同 Glow 写法, 非偏移叠影),
- *    支持范围 / 强度 / 密度 / 位置偏移
+ *  - Shadow 阴影: 目标模式与 Glow 一致 (EDGE / TEXT / BOTH / PER_CHAR),
+ *    支持范围 / 强度 / 密度 / 位置偏移, 图层固定在最底部
  *  - 水印位置同样支持负数自定义
  * ============================================================================
  */
@@ -54,6 +59,11 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
 
     // Glow 发光目标: 背景边缘 / 字体(整段) / 两者 / 逐字像素
     private enum class GlowMode(override val tag: String) : Tagged {
+        EDGE("Edge"), TEXT("Text"), BOTH("Both"), PER_CHAR("PerChar")
+    }
+
+    // Shadow 阴影目标 (与 GlowMode 同结构): 背景边缘 / 字体(整段) / 两者 / 逐字像素
+    private enum class ShadowMode(override val tag: String) : Tagged {
         EDGE("Edge"), TEXT("Text"), BOTH("Both"), PER_CHAR("PerChar")
     }
 
@@ -137,12 +147,13 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
     private val listEdgeMode by enumChoice("List Edge Mode", EdgeMode.NONE)
     private val edgeSize by float("Edge Size", 8f, 0f..32f)
 
-    // —— Shadow 阴影 (黑色沿边缘多层描边, 同 Glow 写法) ——
+    // —— Shadow 阴影 (黑色, 图层永远在最底部; 目标模式与 Glow 一致) ——
     private val shadowEnabled by boolean("Shadow", false)
+    private val shadowMode by enumChoice("Shadow Mode", ShadowMode.TEXT)   // 【新增】阴影目标: EDGE/TEXT/BOTH/PER_CHAR
     private val shadowRange by float("Shadow Range", 20f, 0f..24f)
-    private val shadowOffsetX by float("Shadow Offset X", 3f, -20f..20f)
-    private val shadowOffsetY by float("Shadow Offset Y", 3f, -20f..20f)
-    private val shadowStrength by float("Shadow Strength", 0.1f, 0.1f..2f)
+    private val shadowOffsetX by float("Shadow Offset X", 2f, -20f..20f)
+    private val shadowOffsetY by float("Shadow Offset Y", 2f, -20f..20f)
+    private val shadowStrength by float("Shadow Strength", 0.7f, 0.1f..2f)
     private val shadowDensity by int("Shadow Density", 10, 0..10)
 
     // ==================== 水印 ====================
@@ -161,6 +172,12 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
     private class Animation(var y: Float, var slide: Float)
     private data class Entry(val module: ClientModule, val text: String, val width: Int, val height: Int)
     private data class Drawn(val entry: Entry, val y: Float, val x: Float, val color: Color4b)
+
+    /** 条目布局: Bar / 文字 / 背景 矩形位置 */
+    private data class ItemLayout(
+        val barX: Float, val textX: Float, val textY: Float,
+        val bgX: Float, val bgY: Float, val bgW: Float, val bgH: Float,
+    )
 
     private val animations = HashMap<ClientModule, Animation>()
     private var lastFrameNs = 0L
@@ -259,7 +276,10 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
         }
     }
 
-    /** 条目/列表边缘渲染: 按 EdgeMode 选择 Glow / Shadow / Both, Edge Size 缩放边缘大小 */
+    /**
+     * 条目/列表边缘渲染: 仅负责 Glow (Shadow 已移入最底部独立图层,
+     * 由渲染主循环中的 Shadow Pass 统一在最底部绘制)
+     */
     private fun renderEdge(
         ctx: net.minecraft.client.gui.GuiGraphicsExtractor,
         x1: Float, y1: Float, x2: Float, y2: Float,
@@ -268,26 +288,19 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
         if (mode == EdgeMode.NONE) return
         // 【自定义边缘大小】Edge Size 默认 8 = 1x, 范围 0~32
         val edgeScale = (edgeSize / 8f).coerceAtLeast(0f)
+        val glowEdge = glowEnabled && glowMode != GlowMode.TEXT && glowMode != GlowMode.PER_CHAR && edgeScale > 0f
         when (mode) {
             EdgeMode.NONE -> Unit
-            // 边缘发光仅在 GlowMode != TEXT 时绘制 (TEXT = 纯字体发光)
-            EdgeMode.GLOW -> if (glowEnabled && glowMode != GlowMode.TEXT && glowMode != GlowMode.PER_CHAR && edgeScale > 0f) {
+            // 边缘发光仅在 GlowMode != TEXT/PER_CHAR 时绘制 (TEXT/PER_CHAR = 纯字体发光)
+            EdgeMode.GLOW -> if (glowEdge) {
                 drawGlowEdge(ctx, x1, y1, x2, y2, color,
                     glowOffsetX * edgeScale, glowOffsetY * edgeScale, glowStrength, glowDensity)
             }
-            EdgeMode.SHADOW -> if (shadowEnabled && edgeScale > 0f) {
-                drawShadowEdge(ctx, x1, y1, x2, y2,
-                    shadowOffsetX * edgeScale, shadowOffsetY * edgeScale, shadowStrength, shadowDensity)
-            }
-            EdgeMode.BOTH -> {
-                if (glowEnabled && glowMode != GlowMode.TEXT && glowMode != GlowMode.PER_CHAR && edgeScale > 0f) {
-                    drawGlowEdge(ctx, x1, y1, x2, y2, color,
-                        glowOffsetX * edgeScale, glowOffsetY * edgeScale, glowStrength, glowDensity)
-                }
-                if (shadowEnabled && edgeScale > 0f) {
-                    drawShadowEdge(ctx, x1, y1, x2, y2,
-                        shadowOffsetX * edgeScale, shadowOffsetY * edgeScale, shadowStrength, shadowDensity)
-                }
+            // Shadow 统一在最底部图层绘制 (见渲染主循环 Shadow Pass)
+            EdgeMode.SHADOW -> Unit
+            EdgeMode.BOTH -> if (glowEdge) {
+                drawGlowEdge(ctx, x1, y1, x2, y2, color,
+                    glowOffsetX * edgeScale, glowOffsetY * edgeScale, glowStrength, glowDensity)
             }
         }
     }
@@ -377,25 +390,91 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
 
             drawnItemRects.clear()
 
-            // 绘制每条模块
-            drawn.forEach { d ->
-                // 【修复】Bar 方向独立切换: AUTO 跟随 Side, 也可手动 LEFT/RIGHT
+            // —— 条目布局计算 (Bar 方向 / 文字 / 背景矩形) ——
+            // 【修复】Bar 方向独立切换: AUTO 跟随 Side, 也可手动 LEFT/RIGHT
+            val layouts = drawn.map { d ->
                 val barLeft = when (barSide) {
                     BarSide.AUTO -> side == Side.LEFT
                     BarSide.LEFT -> true
                     BarSide.RIGHT -> false
                 }
-                val barX = if (barLeft) d.x
+                val lBarX = if (barLeft) d.x
                 else d.x + d.entry.width + barGap + padding * 2f - padding - barWidth
-                val textX = if (barLeft) d.x + barWidth + 3f + padding
+                val lTextX = if (barLeft) d.x + barWidth + 3f + padding
                 else d.x + padding
-                val textY = d.y + (d.entry.height - fontHeight) / 2f
+                val lTextY = d.y + (d.entry.height - fontHeight) / 2f
+                ItemLayout(
+                    lBarX, lTextX, lTextY,
+                    d.x, d.y,
+                    d.entry.width + barGap + padding * 2f,
+                    d.entry.height.toFloat(),
+                )
+            }
 
-                // 背景
-                val bgX = d.x
-                val bgY = d.y
-                val bgW = d.entry.width + barGap + padding * 2f
-                val bgH = d.entry.height.toFloat()
+            // ================= Shadow 图层 (最底部: 先于背景 / Bar / 发光 / 文字) =================
+            if (shadowEnabled) {
+                val shadowScale = (edgeSize / 8f).coerceAtLeast(0f)
+                // 逐条目阴影: 背景边缘阴影 + 字体阴影 (精确到文本像素)
+                drawn.forEachIndexed { i, d ->
+                    val (_, sTextX, sTextY, sBgX, sBgY, sBgW, sBgH) = layouts[i]
+                    // 背景边缘阴影 (与 Glow 的 EDGE 判定一致: 仅 EDGE/BOTH 目标生效)
+                    val edgeShadowOn = (perItemEdgeMode == EdgeMode.SHADOW || perItemEdgeMode == EdgeMode.BOTH) &&
+                        (shadowMode == ShadowMode.EDGE || shadowMode == ShadowMode.BOTH)
+                    if (edgeShadowOn && shadowScale > 0f) {
+                        drawShadowEdge(
+                            context, sBgX, sBgY, sBgX + sBgW, sBgY + sBgH,
+                            shadowOffsetX * shadowScale, shadowOffsetY * shadowScale,
+                            shadowStrength, shadowDensity,
+                        )
+                    }
+                    // 字体阴影: 黑色文字偏移叠影 (PER_CHAR = 逐字符, 精确到文本像素, 同图中效果)
+                    if (shadowMode != ShadowMode.EDGE) {
+                        val shadowColor = Color4b(0, 0, 0, (shadowStrength * 255f).roundToInt().coerceIn(0, 255))
+                        when (shadowMode) {
+                            ShadowMode.PER_CHAR -> {
+                                var cx = sTextX
+                                for (ch in d.entry.text) {
+                                    val chStr = ch.toString()
+                                    context.text(
+                                        font, chStr,
+                                        (cx + shadowOffsetX).roundToInt(),
+                                        (sTextY + shadowOffsetY).roundToInt(),
+                                        shadowColor.argb, false,
+                                    )
+                                    cx += font.width(chStr)
+                                }
+                            }
+                            else -> {
+                                context.text(
+                                    font, d.entry.text,
+                                    (sTextX + shadowOffsetX).roundToInt(),
+                                    (sTextY + shadowOffsetY).roundToInt(),
+                                    shadowColor.argb, false,
+                                )
+                            }
+                        }
+                    }
+                }
+                // 列表级阴影 (同样在最底部)
+                if ((listEdgeMode == EdgeMode.SHADOW || listEdgeMode == EdgeMode.BOTH) &&
+                    (shadowMode == ShadowMode.EDGE || shadowMode == ShadowMode.BOTH) &&
+                    shadowScale > 0f && layouts.isNotEmpty()
+                ) {
+                    val minX = layouts.minOf { it.bgX } - 3f
+                    val maxX = layouts.maxOf { it.bgX + it.bgW } + 3f
+                    val minY = layouts.minOf { it.bgY } - 2f
+                    val maxY = layouts.maxOf { it.bgY + it.bgH } + 2f
+                    drawShadowEdge(
+                        context, minX, minY, maxX, maxY,
+                        shadowOffsetX * shadowScale, shadowOffsetY * shadowScale,
+                        shadowStrength, shadowDensity,
+                    )
+                }
+            }
+
+            // 绘制每条模块
+            drawn.forEachIndexed { i, d ->
+                val (barX, textX, textY, bgX, bgY, bgW, bgH) = layouts[i]
 
                 // —— 单条目边缘渲染 (Glow 颜色跟随文字颜色模式) ——
                 renderEdge(context, bgX, bgY, bgX + bgW, bgY + bgH, d.color, perItemEdgeMode)
@@ -440,22 +519,12 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
                             effectiveBarColor.argb, effectiveBarColor.copy(alpha = 0).argb
                         )
                         BarMode.STRIP -> {
-                            // 【新增】条状条纹: 沿条高度交替颜色, 形成不间断连续条纹
-                            val stripH = 4f
-                            val top = d.y + 2f
-                            val bottom = d.y + d.entry.height - 2f
-                            var sy = top
-                            var idx = 0
-                            while (sy < bottom) {
-                                val sh = minOf(stripH, bottom - sy)
-                                val c = if (idx % 2 == 0) effectiveBarColor
-                                else effectiveBarColor.copy(
-                                    alpha = (effectiveBarColor.a * 0.45f).roundToInt().coerceIn(0, 255)
-                                )
-                                context.drawQuad(barX, sy, barX + barWidth, sy + sh, c)
-                                sy += sh
-                                idx++
-                            }
+                            // 【修复】连续条形: 整条通高一次性绘制, 无断连, 与参考图中条状样式一致
+                            context.drawQuad(
+                                barX, d.y,
+                                barX + barWidth, d.y + d.entry.height,
+                                effectiveBarColor
+                            )
                         }
                     }
                 }
@@ -503,7 +572,7 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
                 drawnItemRects += RectF(bgX, bgY, bgX + bgW, bgY + bgH)
             }
 
-            // —— 整个列表的边缘渲染 (沿列表整体外轮廓, 小外扩包住列表) ——
+            // —— 整个列表的边缘渲染 (沿列表整体外轮廓, 小外扩包住列表; Shadow 已在最底部图层绘制) ——
             if (listEdgeMode != EdgeMode.NONE && drawnItemRects.isNotEmpty()) {
                 val minX = drawnItemRects.minOf { it.x1 } - 3f
                 val maxX = drawnItemRects.maxOf { it.x2 } + 3f
