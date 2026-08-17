@@ -40,7 +40,7 @@ import kotlin.math.exp
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
-object ModuleArrayList : ClientModule("ArrayList[35]", ModuleCategories.RENDER) {
+object ModuleArrayList : ClientModule("ArrayList[Fix+Skid]", ModuleCategories.RENDER) {
     init { enabled = true }
 
     /* ============================= 可调节项 ============================= */
@@ -270,7 +270,7 @@ object ModuleArrayList : ClientModule("ArrayList[35]", ModuleCategories.RENDER) 
             // 单层: 直接画一个比文字大 glowRange 的矩形
             val r = glowRange * 0.6f
             val a = (strength * 255).roundToInt().coerceIn(0, 255)
-            ctx.fill(cx - hw - r, cy - hh - r, cx + hw + r, cy + hh + r, color.alpha(a))
+            ctx.drawQuad(cx - hw - r, cy - hh - r, cx + hw + r, cy + hh + r, color.alpha(a), Color4b.TRANSPARENT)
             return
         }
         for (i in 0 until density) {
@@ -283,7 +283,7 @@ object ModuleArrayList : ClientModule("ArrayList[35]", ModuleCategories.RENDER) 
             val ly = cy - hh - expand
             val rx = cx + hw + expand
             val ry = cy + hh + expand
-            ctx.fill(lx, ly, rx, ry, color.alpha(a))
+            ctx.drawQuad(lx, ly, rx, ry, color.alpha(a), Color4b.TRANSPARENT)
         }
     }
 
@@ -317,6 +317,7 @@ object ModuleArrayList : ClientModule("ArrayList[35]", ModuleCategories.RENDER) 
                         glowOffsetX * edgeScale, glowOffsetY * edgeScale, glowStrength, glowDensity)
                 }
             }
+            else -> Unit
         }
     }
 
@@ -353,6 +354,7 @@ object ModuleArrayList : ClientModule("ArrayList[35]", ModuleCategories.RENDER) 
             }
             SortMode.ALPHABETICAL -> modules.sortedBy { it.name.lowercase() }
             SortMode.NONE -> modules
+            else -> modules
         }
 
         if (modules.isEmpty()) return@handler
@@ -412,6 +414,7 @@ object ModuleArrayList : ClientModule("ArrayList[35]", ModuleCategories.RENDER) 
                     BarSide.AUTO -> side == Side.LEFT
                     BarSide.LEFT -> true
                     BarSide.RIGHT -> false
+                    else -> side == Side.LEFT
                 }
                 val barX = if (barLeft) d.x
                 else d.x + d.entry.width + barGap + padding * 2f - padding - barWidth
@@ -468,6 +471,7 @@ object ModuleArrayList : ClientModule("ArrayList[35]", ModuleCategories.RENDER) 
                             effectiveBarColor.argb, effectiveBarColor.copy(alpha = 0).argb
                         )
                         BarMode.STICK -> Unit  // Stick 在列表整体渲染后统一绘制
+                        else -> Unit
                     }
                 }
 
@@ -514,6 +518,7 @@ object ModuleArrayList : ClientModule("ArrayList[35]", ModuleCategories.RENDER) 
                     BarSide.AUTO -> side == Side.LEFT
                     BarSide.LEFT -> true
                     BarSide.RIGHT -> false
+                    else -> side == Side.LEFT
                 }
                 // 取第一条的 barX 作为整体条的 X
                 val firstD = drawn.first()
@@ -587,6 +592,7 @@ object ModuleArrayList : ClientModule("ArrayList[35]", ModuleCategories.RENDER) 
                 hueColor(hue).argb
             }
             WaterMarkColorMode.CUSTOM -> waterMarkCustomColor.argb
+            else -> null
         }
 
         val wmTextX = wmBgX + wmPad
@@ -613,7 +619,6 @@ object ModuleArrayList : ClientModule("ArrayList[35]", ModuleCategories.RENDER) 
         return when (colorMode) {
             ColorMode.CUSTOM -> customColor
             ColorMode.RAINBOW -> hueColor(time * 36f * rainbowSpeed + index * rainbowOffset)
-            // 【修复】FADE: 随时间流动的渐变色 (原来每条固定色相, 无渐变效果)
             ColorMode.FADE -> hueColor(time * 36f * rainbowSpeed + index * rainbowOffset, saturation = 0.65f)
             ColorMode.SKY -> hueColor(y / 720f * 360f + time * 18f * rainbowSpeed, saturation = 0.65f)
             ColorMode.RAINBOW_TEXT -> {
@@ -625,8 +630,8 @@ object ModuleArrayList : ClientModule("ArrayList[35]", ModuleCategories.RENDER) 
                 lerpColor(WHITE, SKY_BLUE, t)
             }
             ColorMode.LB -> SKY_BLUE
-            // ----- 新增 Solstice 分支 -----
             ColorMode.SOLSTICE -> themedColor(index.toFloat())
+            else -> customColor
         }
     }
 
