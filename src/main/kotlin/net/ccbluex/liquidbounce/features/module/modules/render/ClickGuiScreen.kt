@@ -32,42 +32,38 @@ import java.io.File
 class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
     // ==================== Colors (紫色主题, 匹配参考图) ====================
-    private val ACCENT = 0xFFC77DFFL.toInt()          // 更亮的紫色
-    private val ACCENT_DARK = 0x99C77DFFL.toInt()      // 更亮紫色(半透明)
+    private val ACCENT = 0xFF9B59D6L.toInt()
+    private val ACCENT_DARK = 0x669B59D6L.toInt()
     private val BG = 0xE01A1A22L.toInt()
     private val PANEL_BG = 0xD81C1C24L.toInt()
     private val TEXT get() = ModuleClickGui.getTextColor()
-    private val TEXT_BRIGHT = 0xFFC77DFFL.toInt()       // 更亮紫色-开启模块文字
+    private val TEXT_BRIGHT = 0xFF9B59D6L.toInt()
     private val TEXT_DIM get() = 0xFF000000L.toInt() or (ModuleClickGui.getTextColor() and 0x00FFFFFF)
     private val CATEGORY_TITLE = 0xFFFFFFFFL.toInt()
     private val TAB_BG = 0x8025252EL.toInt()
     private val TAB_ACTIVE = 0xFF33333DL.toInt()
     private val BORDER = 0x20FFFFFFL.toInt()
     private val HOVER = 0x15FFFFFFL.toInt()
-    private val SCROLL_TRACK = 0x30C77DFFL.toInt()      // 更亮紫色滚动条轨道
-    private val SCROLL_THUMB = 0x70C77DFFL.toInt()      // 更亮紫色滚动条滑块
-    private val SCROLL_THUMB_HOVER = 0x9AC77DFFL.toInt()// 更亮紫色滚动条悬停
-    private val EXPANDED_BG = 0x0CC77DFFL.toInt()      // 更亮紫色展开背景
-    private val GROUP_BG = 0x0EC77DFFL.toInt()          // 更亮紫色分组背景
-    private val GROUP_LINE = 0x1AC77DFFL.toInt()        // 更亮紫色分组线
+    private val SCROLL_TRACK = 0x189B59D6L.toInt()
+    private val SCROLL_THUMB = 0x509B59D6L.toInt()
+    private val SCROLL_THUMB_HOVER = 0x789B59D6L.toInt()
+    private val EXPANDED_BG = 0x0A9B59D6L.toInt()
+    private val GROUP_BG = 0x0C9B59D6L.toInt()
+    private val GROUP_LINE = 0x149B59D6L.toInt()
     private val SETTING_CHILD_BG = 0x06FFFFFFL.toInt()
     private val OVERLAY = 0x4D000000L.toInt()
     private val SETTING_BG = 0x50080810L.toInt()
-    // 分类标题栏背景面板(alpha=80 紫色)
-    private val CATEGORY_HEADER_BG = 0x809B59D6L.toInt()
-    // 标题栏底部亮紫细条
-    private val CATEGORY_BOTTOM_BAR = 0xFFC77DFFL.toInt()
 
     // ==================== Layout ====================
     private val CORNER = 8f
     private val ITEM_H = 17f
     private val SETTING_H = 17f
-    private val SCROLL_W = 3f
+    private val SCROLL_W = 4f
     private val PADDING = 5f
     private val SETTING_INDENT = 8f
     private val PANEL_GAP = 0f
     private val PANEL_MIN_W = 125
-    private val PANEL_MAX_H = 520
+    private val PANEL_MAX_H = 400
     private val HEADER_H = 24f
 
     // ==================== Slider Drag State ====================
@@ -435,11 +431,9 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 } else {
                     "▼ "
                 }
-                // 分类标题栏: alpha=80 紫色背景面板
-                drawRoundedRect(ctx, px + 2f, py + 2f, pw - 4f, HEADER_H - 2f, 4f, CATEGORY_HEADER_BG)
                 drawText(ctx, font, "§l$arrow${category.tag}", (px + 8f).toInt(), (py + 5f).toInt(), CATEGORY_TITLE)
-                // 标题栏底部: 亮紫色细条(贯穿全宽)
-                fillRect(ctx, px.toInt(), (py + HEADER_H - 1).toInt(), (px + pw).toInt(), (py + HEADER_H).toInt(), CATEGORY_BOTTOM_BAR)
+                val lineWidth = font.width(category.tag) + 10f
+                fillRect(ctx, px + 8f, py + 18f, px + 8f + lineWidth, py + 19f, ACCENT_DARK)
             }
 
             if (panel.collapsed) {
@@ -737,27 +731,22 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 val sliderY = y.toInt() + 8
                 val isRange = layout.rangeWidth > 0f || layout.upperPointX != 0
 
-                // 滑动条轨道(更细: 1px高)
-                fillRect(ctx, layout.sliderX, sliderY, layout.sliderX + layout.sliderW, sliderY + 1, 0x30FFFFFF.toInt())
+                fillRect(ctx, layout.sliderX, sliderY, layout.sliderX + layout.sliderW, sliderY + 2, 0x30FFFFFF.toInt())
 
                 if (isRange) {
                     val lx = layout.lowerPointX
                     val ux = layout.upperPointX.coerceAtLeast(lx + 2)
-                    // 范围滑动条填充(更亮紫色, 1px高)
-                    fillRect(ctx, lx, sliderY, ux, sliderY + 1, ACCENT)
-                    // 范围端点手柄(更亮紫色)
-                    fillRect(ctx, lx - 2, sliderY - 3, lx + 2, sliderY + 4, TEXT_BRIGHT)
-                    fillRect(ctx, ux - 2, sliderY - 3, ux + 2, sliderY + 4, TEXT_BRIGHT)
+                    fillRect(ctx, lx, sliderY, ux, sliderY + 2, ACCENT)
+                    fillRect(ctx, lx - 2, sliderY - 3, lx + 2, sliderY + 5, TEXT_BRIGHT)
+                    fillRect(ctx, ux - 2, sliderY - 3, ux + 2, sliderY + 5, TEXT_BRIGHT)
                 } else {
                     val progress = if (layout.maxV > layout.minV) {
                         ((layout.fv - layout.minV) / (layout.maxV - layout.minV)).coerceIn(0f, 1f)
                     } else {
                         0f
                     }
-                    // 单值滑动条填充(更亮紫色, 1px高)
-                    fillRect(ctx, layout.sliderX, sliderY, layout.sliderX + (layout.sliderW * progress).toInt(), sliderY + 1, ACCENT)
-                    // 滑块指示器(更亮紫色)
-                    fillRect(ctx, layout.sliderX + (layout.sliderW * progress).toInt() - 1, sliderY - 1, layout.sliderX + (layout.sliderW * progress).toInt() + 1, sliderY + 2, TEXT_BRIGHT)
+                    fillRect(ctx, layout.sliderX, sliderY, layout.sliderX + (layout.sliderW * progress).toInt(), sliderY + 2, ACCENT)
+                    fillRect(ctx, layout.sliderX + (layout.sliderW * progress).toInt() - 1, sliderY - 1, layout.sliderX + (layout.sliderW * progress).toInt() + 1, sliderY + 3, TEXT_BRIGHT)
                 }
                 drawText(ctx, font, layout.valText, layout.valX, (y + 3f).toInt(), TEXT_DIM)
             }
