@@ -331,17 +331,22 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             searchPanel = null
             val count = categories.size
             // 【修改】单列居中布局: 每个分类一个面板, 从上到下排列在屏幕正中间
-            val panelW = (sc * 0.35f).coerceAtLeast(PANEL_MIN_W.toFloat()).coerceAtMost(220f)
-            val panelH = HEADER_H + 2f  // 默认折叠高度
+            // 面板尺寸: 宽度与原版一致(按分类数均分屏宽), 高度为可展开的完整面板高
+            val totalGap = PANEL_GAP * (count - 1)
+            val widthPerPanel = ((sc - totalGap) / count).coerceAtMost(PANEL_MIN_W * 1.6f)
+            val panelW = widthPerPanel.coerceAtLeast(PANEL_MIN_W.toFloat())
+            val panelH = (sh * 0.7f).coerceAtMost(PANEL_MAX_H.toFloat())
             val panelGap = 4f          // 面板之间的小间隙
-            val totalH = panelH * count + panelGap * (count - 1)
+            // 【修复】折叠面板的槽位用折叠高度(26px)紧凑排列居中; 面板保留完整高度用于展开
+            val slotH = HEADER_H + 2f  // 折叠时的视觉高度
+            val totalH = slotH * count + panelGap * (count - 1)
             val startX = (sc - panelW) / 2f  // 水平居中
             var startY = (sh - totalH) / 2f   // 垂直居中（整体）
 
             for ((idx, cat) in categories.withIndex()) {
                 val panelX = startX
                 val panelY = startY
-                startY += panelH + panelGap  // 下一个面板往下排
+                startY += slotH + panelGap  // 下一个面板往下排
 
                 val existingPanel = panels.find { it.category == cat }
                 if (existingPanel != null) {
@@ -352,13 +357,15 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                             existingPanel.collapsed = it.collapsed
                             existingPanel.targetScroll = it.scroll
                             existingPanel.scrollOffset = it.scroll
+                        } ?: run {
+                            // 无存档 → 复位到默认槽位
+                            existingPanel.x = panelX
+                            existingPanel.y = panelY
                         }
                     }
-                    // 有保存位置时用保存的尺寸, 否则用默认单列尺寸
-                    if (!savedLayout.panels.containsKey(cat.tag)) {
-                        existingPanel.w = panelW
-                        existingPanel.h = panelH
-                    }
+                    // 【修复】始终更新面板尺寸(宽高), 保证能正常展开列表
+                    existingPanel.w = panelW
+                    existingPanel.h = panelH
                     targetPanels.add(existingPanel)
                 } else {
                     val saved = savedLayout.panels[cat.tag]
@@ -398,11 +405,13 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             }
         }
 
-        for (panel in if (isSearching) targetPanels else panels) {
-            val px = panel.x
-            val py = panel.y
-            val pw = panel.w
-            val ph = panel.h
+        // 【修复】展开的面板最后渲染(置顶), 避免被下方折叠面板盖住
+        val panelRenderList = if (isSearching) targetPanels else panels.sortedBy { it.collapsed }
+        for (panel in panelRenderList) {
+                val px = panel.x
+                val py = panel.y
+                val pw = panel.w
+                val ph = panel.h
             val actualHeight = if (panel.collapsed) {
                 HEADER_H + 2f
             } else {
@@ -891,12 +900,13 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         }
 
         var targetPanel: PanelData? = null
-        // 【修复】从后往前遍历: 后渲染的面板在视觉上层, 应优先接收点击事件
-        // 这样重叠时上面的面板能正常响应, 不会被下面的面板"挡住"
-        val allPanels = currentPanels()
+        // 【修复】与渲染顺序一致: 折叠面板先、展开面板后(置顶); 从后往前遍历使上层面板优先接收事件
+        val allPanels = currentPanels().sortedBy { it.collapsed }
         for (i in allPanels.lastIndex downTo 0) {
             val panel = allPanels[i]
-            if (mx in panel.x.toInt()..(panel.x + panel.w).toInt() && my in panel.y.toInt()..(panel.y + panel.h).toInt()) {
+            // 【修复】命中范围用实际绘制高度: 折叠时只占标题栏(26px)
+            val hitH = if (panel.collapsed) (HEADER_H + 2f) else panel.h
+            if (mx in panel.x.toInt()..(panel.x + panel.w).toInt() && my in panel.y.toInt()..(panel.y + hitH).toInt()) {
                 targetPanel = panel
                 break
             }
@@ -1233,8 +1243,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     }
 
     override fun mouseScrolled(mouseX: Double, mouseY: Double, horizontal: Double, vertical: Double): Boolean {
-        // 【修复】从后往前遍历: 上层面板优先接收滚动事件
-        val allPanels = currentPanels()
+        // 【修复】与渲染顺序一致: 展开面板置顶优先接收滚动事件
+        val allPanels = currentPanels().sortedBy { it.collapsed }
         for (i in allPanels.lastIndex downTo 0) {
             val panel = allPanels[i]
             if (panel.collapsed) {
