@@ -223,9 +223,10 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModuleProtectionZ
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleQuickPerspectiveSwap
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleRadar
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleRotations
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleWatermark
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSilentHotbar
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSkinChanger
-import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeArrayList
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeArraylist
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeClickgui
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleRiseClickgui
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeModernTargetInfo
