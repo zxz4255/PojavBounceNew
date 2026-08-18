@@ -9,6 +9,7 @@ import net.ccbluex.liquidbounce.event.handler
 import net.ccbluex.liquidbounce.features.module.ClientModule
 import net.ccbluex.liquidbounce.features.module.ModuleCategories
 import net.ccbluex.liquidbounce.render.drawRoundedRect
+import net.ccbluex.liquidbounce.render.withPush
 import net.ccbluex.liquidbounce.render.engine.type.Color4b
 import net.ccbluex.liquidbounce.utils.client.mc
 import kotlin.math.max
@@ -132,26 +133,26 @@ object ModuleSolsticeWatermark : ClientModule(
             val mainA = (255 * aMul).roundToInt().coerceIn(0, 255)
             val mainCol = Color4b(color.r, color.g, color.b, mainA)
 
-            ctx.pose().pushPose()
-            ctx.pose().translate(drawX.toDouble(), drawY.toDouble(), 0.0)
-            ctx.pose().scale(scale, scale, 1f)
+            // 本 fork 为 2D Matrix3x2f pose：用 withPush + Float
+            ctx.pose().withPush {
+                translate(drawX, drawY)
+                scale(scale, scale)
 
-            if (dropShadow) {
-                val sh = Color4b(
-                    (color.r * 0.15f).toInt().coerceIn(0, 40),
-                    (color.g * 0.15f).toInt().coerceIn(0, 40),
-                    (color.b * 0.15f).toInt().coerceIn(0, 40),
-                    (mainA * 0.45f).toInt().coerceIn(0, 120),
-                )
-                ctx.text(font, ch, shadowOffset.roundToInt(), shadowOffset.roundToInt(), sh.argb, false)
+                if (dropShadow) {
+                    val sh = Color4b(
+                        (color.r * 0.15f).toInt().coerceIn(0, 40),
+                        (color.g * 0.15f).toInt().coerceIn(0, 40),
+                        (color.b * 0.15f).toInt().coerceIn(0, 40),
+                        (mainA * 0.45f).toInt().coerceIn(0, 120),
+                    )
+                    ctx.text(font, ch, shadowOffset.roundToInt(), shadowOffset.roundToInt(), sh.argb, false)
+                }
+
+                ctx.text(font, ch, 0, 0, mainCol.argb, false)
+                if (bold) {
+                    ctx.text(font, ch, 1, 0, mainCol.alpha((mainA * 0.85f).toInt()).argb, false)
+                }
             }
-
-            ctx.text(font, ch, 0, 0, mainCol.argb, false)
-            if (bold) {
-                ctx.text(font, ch, 1, 0, mainCol.alpha((mainA * 0.85f).toInt()).argb, false)
-            }
-
-            ctx.pose().popPose()
             drawX += charW
         }
     }
