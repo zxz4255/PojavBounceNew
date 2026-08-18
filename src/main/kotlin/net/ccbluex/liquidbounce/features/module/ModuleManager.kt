@@ -227,7 +227,6 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSilentHotba
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSkinChanger
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeArrayList
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeClickgui
-import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeArrayList2
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleRiseClickgui
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeModernTargetInfo
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSmoothCamera
