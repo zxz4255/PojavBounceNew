@@ -45,7 +45,7 @@ import kotlin.math.exp
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
-object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RENDER) {
+object ModuleArrayList : ClientModule("ArrayList[105]", ModuleCategories.RENDER) {
     init { enabled = true }
 
     /* ============================= 可调节项 ============================= */
@@ -57,12 +57,13 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
         NONE("None"), GLOW("Glow"), SHADOW("Shadow"), BOTH("Both")
     }
 
-    // Glow 发光目标: 背景边缘 / 字体(整段) / 两者 / 逐字像素
+    // Glow 发光目标: MODULE(仅模块文字) / BAR(仅装饰条) / BOTH(两者同时发光)
     private enum class GlowMode(override val tag: String) : Tagged {
-        EDGE("Edge"), TEXT("Text"), BOTH("Both"), PER_CHAR("PerChar")
+        MODULE("Module"), BAR("Bar"), BOTH("Both")
     }
 
-    // Shadow 阴影目标 (与 GlowMode 同结构): 背景边缘 / 字体(整段) / 两者 / 逐字像素
+    // Shadow 阴影目标: EDGE(背景边缘) / TEXT(字体阴影) / BOTH / PER_CHAR
+    // 【修改】TEXT/BOTH/PER_CHAR 模式: 阴影作为背景使用, 不绘制可见字样
     private enum class ShadowMode(override val tag: String) : Tagged {
         EDGE("Edge"), TEXT("Text"), BOTH("Both"), PER_CHAR("PerChar")
     }
@@ -166,6 +167,12 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
     private val waterMarkColorMode by enumChoice("WM Color Mode", WaterMarkColorMode.FADE)
     private val waterMarkCustomColor by color("WM Custom Color", Color4b(0, 160, 255))
     private val waterMarkRainbowSpeed by float("WM Rainbow Speed", 2f, 0.1f..20f)
+
+    // —— 水印 Glow 发光 (照搬模块 Glow 写法) ——
+    private val waterMarkGlowEnabled by boolean("WM Glow", false)
+    private val waterMarkGlowRange by float("WM Glow Range", 15f, 0f..30f)
+    private val waterMarkGlowStrength by float("WM Glow Strength", 0.08f, 0.01f..1f)
+    private val waterMarkGlowDensity by int("WM Glow Density", 5, 1..12)
 
     /* ============================= 内部状态 ============================= */
 
@@ -288,10 +295,10 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
         if (mode == EdgeMode.NONE) return
         // 【自定义边缘大小】Edge Size 默认 8 = 1x, 范围 0~32
         val edgeScale = (edgeSize / 8f).coerceAtLeast(0f)
-        val glowEdge = glowEnabled && glowMode != GlowMode.TEXT && glowMode != GlowMode.PER_CHAR && edgeScale > 0f
+        val glowEdge = glowEnabled && (glowMode == GlowMode.MODULE || glowMode == GlowMode.BOTH) && edgeScale > 0f
         when (mode) {
             EdgeMode.NONE -> Unit
-            // 边缘发光仅在 GlowMode != TEXT/PER_CHAR 时绘制 (TEXT/PER_CHAR = 纯字体发光)
+            // 边缘发光仅在 GlowMode == MODULE 或 BOTH 时绘制 (BAR = 仅条发光)
             EdgeMode.GLOW -> if (glowEdge) {
                 drawGlowEdge(ctx, x1, y1, x2, y2, color,
                     glowOffsetX * edgeScale, glowOffsetY * edgeScale, glowStrength, glowDensity)
@@ -427,9 +434,10 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
                             shadowStrength, shadowDensity,
                         )
                     }
-                    // 字体阴影: 黑色文字偏移叠影 (PER_CHAR = 逐字符, 精确到文本像素, 同图中效果)
+                    // 字体阴影: 【修改】Shadow 作为背景使用, 字样完全透明(不可见)
+                    // 仅保留阴影发光轮廓效果, 不显示实际文字
                     if (shadowMode != ShadowMode.EDGE) {
-                        val shadowColor = Color4b(0, 0, 0, (shadowStrength * 255f).roundToInt().coerceIn(0, 255))
+                        val shadowTextColor = Color4b(0, 0, 0, 0)  // 完全透明, 字样不可见
                         when (shadowMode) {
                             ShadowMode.PER_CHAR -> {
                                 var cx = sTextX
@@ -439,7 +447,7 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
                                         font, chStr,
                                         (cx + shadowOffsetX).roundToInt(),
                                         (sTextY + shadowOffsetY).roundToInt(),
-                                        shadowColor.argb, false,
+                                        shadowTextColor.argb, false,
                                     )
                                     cx += font.width(chStr)
                                 }
@@ -449,7 +457,7 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
                                     font, d.entry.text,
                                     (sTextX + shadowOffsetX).roundToInt(),
                                     (sTextY + shadowOffsetY).roundToInt(),
-                                    shadowColor.argb, false,
+                                    shadowTextColor.argb, false,
                                 )
                             }
                         }
@@ -535,34 +543,25 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
                     else -> d.color.argb
                 }
 
-                // —— 字体发光 ——
-                if (glowEnabled && glowMode != GlowMode.EDGE) {
-                    when (glowMode) {
-                        GlowMode.PER_CHAR -> {
-                            // 【新增】逐字像素发光: 参考叠 background 写法，每个字符精确到像素
-                            var cx = textX.toFloat()
-                            for (ch in d.entry.text) {
-                                val chStr = ch.toString()
-                                val chW = font.width(chStr).toFloat()
-                                val chH = fontHeight.toFloat()
-                                drawGlowEdge(
-                                    context,
-                                    cx, textY.toFloat(), cx + chW, textY.toFloat() + chH,
-                                    d.color, glowOffsetX, glowOffsetY, glowStrength, glowDensity,
-                                )
-                                cx += chW
-                            }
-                        }
-                        else -> {
-                            // TEXT / BOTH: 整段字体发光
-                            val tw = font.width(d.entry.text).toFloat()
-                            val th = fontHeight.toFloat()
-                            drawGlowEdge(
-                                context,
-                                textX.toFloat(), textY.toFloat(), textX.toFloat() + tw, textY.toFloat() + th,
-                                d.color, glowOffsetX, glowOffsetY, glowStrength, glowDensity,
-                            )
-                        }
+                // —— 发光 (GlowMode: MODULE=仅模块文字 / BAR=仅装饰条 / BOTH=两者同时) ——
+                if (glowEnabled) {
+                    // 【MODULE / BOTH】模块文字发光
+                    if (glowMode == GlowMode.MODULE || glowMode == GlowMode.BOTH) {
+                        val tw = font.width(d.entry.text).toFloat()
+                        val th = fontHeight.toFloat()
+                        drawGlowEdge(
+                            context,
+                            textX.toFloat(), textY.toFloat(), textX.toFloat() + tw, textY.toFloat() + th,
+                            d.color, glowOffsetX, glowOffsetY, glowStrength, glowDensity,
+                        )
+                    }
+                    // 【BAR / BOTH】装饰条发光 (参照模块文字 glow 写法, 多层叠 background)
+                    if ((glowMode == GlowMode.BAR || glowMode == GlowMode.BOTH) && barEnabled && barMode != BarMode.NONE) {
+                        drawGlowEdge(
+                            context,
+                            barX, d.y, barX + barWidth, d.y + d.entry.height,
+                            effectiveBarColor, glowOffsetX, glowOffsetY, glowStrength * 0.8f, glowDensity,
+                        )
                     }
                 }
 
@@ -623,6 +622,24 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
 
         val wmTextX = wmBgX + wmPad
         val wmTextY = wmBgY + wmPad
+
+        // 【新增】水印 Glow 发光 (照搬模块 Glow 写法: 多层叠 background)
+        if (waterMarkGlowEnabled) {
+            val wmGlowColor: Color4b = when (waterMarkColorMode) {
+                WaterMarkColorMode.CUSTOM -> waterMarkCustomColor
+                WaterMarkColorMode.SKY_BLUE -> SKY_BLUE
+                else -> WHITE  // FADE/RAINBOW 用白色作为 glow 基色
+            }
+            val wmTw = f.width(wmText).toFloat()
+            val wmTh = f.lineHeight.toFloat()
+            drawGlowEdge(
+                ctx,
+                wmTextX.toFloat(), wmTextY.toFloat(),
+                wmTextX.toFloat() + wmTw, wmTextY.toFloat() + wmTh,
+                wmGlowColor, 0f, 0f, waterMarkGlowStrength, waterMarkGlowDensity,
+            )
+        }
+
         if (wmTextColor != null) {
             ctx.text(f, wmText, wmTextX.roundToInt(), wmTextY.roundToInt(), wmTextColor, textShadow)
         } else {

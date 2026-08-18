@@ -56,8 +56,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
     // ==================== Layout ====================
     private val CORNER = 8f
-    private val ITEM_H = 17f
-    private val SETTING_H = 17f
+    private val ITEM_H = 20f
+    private val SETTING_H = 20f
     private val SCROLL_W = 4f
     private val PADDING = 5f
     private val SETTING_INDENT = 8f
@@ -120,6 +120,14 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     private var isFirstLoad = true
     private var layoutDirty = false
     private var layoutLastSave = 0L
+
+    // ==================== Smooth Animation State ====================
+    private val panelExpandAnim = mutableMapOf<PanelData, Float>()   // 面板展开: 0=折叠, 1=完全展开
+    private val settingsExpandAnim = mutableMap<ClientModule, Float>() // 模块设置展开: 0=关闭, 1=完全展开
+    private var guiOpenAnim = 0f        // GUI 整体打开动画 (0→1)
+    private val ANIM_SPEED_EXPAND = 0.18f   // 展开/折叠速度
+    private val ANIM_SPEED_SETTINGS = 0.20f  // 设置展开/收起速度
+    private val ANIM_SPEED_FADE = 0.22f     // 整体淡入速度
     private val valuesCache = IdentityHashMap<ClientModule, List<Pair<Value<*>, Int>>>()
     private var valuesCacheTime = 0L
     private var cachedAllModules = emptyList<ClientModule>()
@@ -292,9 +300,23 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     }
 
     override fun extractRenderState(ctx: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, delta: Float) {
-        fadeAnim += (1f - fadeAnim) * 0.25f
-        if (fadeAnim < 0.01f) {
-            return
+        // 【丝滑动画】整体淡入 + 面板展开/折叠 + 设置展开/收起
+        guiOpenAnim += (1f - guiOpenAnim) * ANIM_SPEED_FADE
+        fadeAnim = guiOpenAnim
+        if (fadeAnim < 0.01f) return
+
+        // 【丝滑】面板折叠/展开动画: 0=完全折叠(26px), 1=完全展开(fullH)
+        for (panel in panels) {
+            val targetExpand = if (panel.collapsed) 0f else 1f
+            val current = panelExpandAnim.getOrDefault(panel, targetExpand)
+            val next = current + (targetExpand - current) * ANIM_SPEED_EXPAND
+            panelExpandAnim[panel] = next
+        }
+        // 【丝滑】模块设置展开/收起动画: 0=关闭, 1=完全展开
+        for (mod in getAllModulesCached()) {
+            val targetSettings = if (expandedModule == mod) 1f else 0f
+            val current = settingsExpandAnim.getOrDefault(mod, targetSettings)
+            settingsExpandAnim[mod] = current + (targetSettings - current) * ANIM_SPEED_SETTINGS
         }
 
         val sc = minecraft!!.window.guiScaledWidth
@@ -412,11 +434,11 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                 val py = panel.y
                 val pw = panel.w
                 val ph = panel.h
-            val actualHeight = if (panel.collapsed) {
-                HEADER_H + 2f
-            } else {
-                ph
-            }
+            // 【丝滑动画】面板高度用动画值插值: 折叠(26px) ↔ 展开(fullH)
+            val expandT = panelExpandAnim.getOrDefault(panel, if (panel.collapsed) 0f else 1f)
+            val collapsedH = HEADER_H + 2f
+            val expandedH = ph
+            val actualHeight = collapsedH + (expandedH - collapsedH) * expandT
             drawRoundedRect(ctx, px, py, pw, actualHeight, CORNER, BG)
 
             var panelModules: List<ClientModule>
@@ -486,6 +508,8 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
                 curY += ITEM_H
                 if (isExpanded) {
+                    // 【丝滑动画】设置区域高度用动画值插值: 0=关闭, 1=完全展开
+                    val settingsT = settingsExpandAnim.getOrDefault(mod, 1f)
                     val values = getVisibleValuesCached(mod)
                     var totalSettingH = 0f
                     for ((v, _) in values) {
@@ -498,10 +522,19 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                             totalSettingH += SETTING_H
                         }
                     }
+                    // 动画缩放实际渲染高度 (从上往下生长效果)
+                    val animatedTotalH = totalSettingH * settingsT
                     val bgStart = curY.coerceAtLeast(listAreaY)
-                    val bgEnd = (curY + totalSettingH).coerceAtMost(listAreaY + listAreaH)
-                    if (bgEnd > bgStart) {
+                    val bgEnd = (curY + animatedTotalH).coerceAtMost(listAreaY + listAreaH)
+                    if (bgEnd > bgStart && settingsT > 0.01f) {
                         fillRect(ctx, listAreaX, bgStart, listAreaX + listAreaW, bgEnd, SETTING_BG)
+                        // 【丝滑】用 scissor 裁剪动画中的设置区域
+                        ctx.enableScissor(
+                            listAreaX.toInt(),
+                            bgStart.toInt(),
+                            (listAreaX + listAreaW).toInt(),
+                            bgEnd.toInt()
+                        )
                     }
 
                     for ((v, depth) in values) {
@@ -524,6 +557,10 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
                             }
                             curY += SETTING_H
                         }
+                    }
+                    // 关闭设置的 scissor
+                    if (bgEnd > bgStart && settingsT > 0.01f) {
+                        ctx.disableScissor()
                     }
                 }
             }
