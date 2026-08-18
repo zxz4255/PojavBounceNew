@@ -77,13 +77,19 @@ object ModuleClickGui :
     private val keyHandler = handler<KeyboardKeyEvent> { event ->
         if (event.action != 1) return@handler
         val code = event.keyCode
-        // ESC 关闭: GLFW_KEY_ESCAPE = 256 (不再额外接受 scancode 1, 避免误触)
-        if (code == GLFW.GLFW_KEY_ESCAPE && mc.gui.screen() is ClickGuiScreen) {
-            // 【修复】不再在这里直接关闭 GUI！
-            // 因为 closeGui() 调用的 setScreen(null) 可能无法阻止 ESC 事件继续触发游戏暂停菜单
-            // 让 ClickGuiScreen 自己处理 ESC 关闭，这样可以在 ClickGuiScreen 内部消费掉 ESC 键
-            // 这里只做标记，让 ClickGuiScreen 知道需要关闭
-            // 实际上: ClickGuiScreen 的 keyPressed() 已经处理了 ESC，所以这里直接返回即可
+        // ESC 关闭: GLFW_KEY_ESCAPE = 256
+        if (code == GLFW.GLFW_KEY_ESCAPE) {
+            val currentScreen = mc.gui.screen()
+            // 【新增】当前屏幕是 ClickGuiScreen 时, 主动关闭 GUI
+            if (currentScreen is ClickGuiScreen) {
+                closeGui()
+                return@handler
+            }
+            // 若当前屏幕为空(游戏内), 也触发打开 GUI (ESC 也可作为打开快捷键)
+            if (currentScreen == null) {
+                openGui()
+                return@handler
+            }
             return@handler
         }
         // 只精确响应右 Shift (GLFW_KEY_RIGHT_SHIFT = 344)

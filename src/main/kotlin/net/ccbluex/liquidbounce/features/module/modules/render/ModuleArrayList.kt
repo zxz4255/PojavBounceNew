@@ -45,7 +45,7 @@ import kotlin.math.exp
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
-object ModuleArrayList : ClientModule("ArrayList[105]", ModuleCategories.RENDER) {
+object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RENDER) {
     init { enabled = true }
 
     /* ============================= 可调节项 ============================= */
@@ -118,7 +118,7 @@ object ModuleArrayList : ClientModule("ArrayList[105]", ModuleCategories.RENDER)
     private val border by boolean("Border", false)
 
     // —— 颜色 ——
-    private val colorMode by enumChoice("Color Mode", ColorMode.RAINBOW)
+    private val colorMode by enumChoice("Color Mode", ColorMode.RAINBOW_TEXT)
     private val customColor by color("Color", Color4b(0, 160, 255))
     private val rainbowSpeed by float("Rainbow Speed", 6f, 0.1f..10f)
     private val rainbowOffset by int("Rainbow Offset", 5, 0..90)
@@ -136,26 +136,26 @@ object ModuleArrayList : ClientModule("ArrayList[105]", ModuleCategories.RENDER)
 
     // —— Glow 边缘发光 (参考 Solstice 描边多层写法, 颜色跟随文字颜色模式) ——
     private val glowEnabled by boolean("Glow", true)
-    private val glowMode by enumChoice("Glow Mode", GlowMode.MODULE)   // 【新增】字体发光模式
-    private val glowRange by float("Glow Range", 20f, 0f..30f)
-    private val glowStrength by float("Glow Strength", 0.05f, 0.01f..1f)
+    private val glowMode by enumChoice("Glow Mode", GlowMode.BOTH)   // 【新增】字体发光模式
+    private val glowRange by float("Glow Range", 18f, 0f..30f)
+    private val glowStrength by float("Glow Strength", 0.04f, 0.01f..1f)
     private val glowDensity by int("Glow Density", 6, 1..12)
     private val glowOffsetX by float("Glow Offset X", 0f, -16f..16f)
     private val glowOffsetY by float("Glow Offset Y", 0f, -16f..16f)
 
     // —— 背景边缘渲染模式 + 自定义边缘大小 (Edge Size 缩放边缘带厚度) ——
-    private val perItemEdgeMode by enumChoice("Item Edge Mode", EdgeMode.NONE)
+    private val perItemEdgeMode by enumChoice("Item Edge Mode", EdgeMode.EDGE)
     private val listEdgeMode by enumChoice("List Edge Mode", EdgeMode.NONE)
     private val edgeSize by float("Edge Size", 8f, 0f..32f)
 
     // —— Shadow 阴影 (黑色, 图层永远在最底部; 目标模式与 Glow 一致) ——
     private val shadowEnabled by boolean("Shadow", false)
     private val shadowMode by enumChoice("Shadow Mode", ShadowMode.TEXT)   // 【新增】阴影目标: EDGE/TEXT/BOTH/PER_CHAR
-    private val shadowRange by float("Shadow Range", 20f, 0f..24f)
-    private val shadowOffsetX by float("Shadow Offset X", 2f, -20f..20f)
-    private val shadowOffsetY by float("Shadow Offset Y", 2f, -20f..20f)
-    private val shadowStrength by float("Shadow Strength", 0.7f, 0.1f..2f)
-    private val shadowDensity by int("Shadow Density", 10, 0..10)
+    private val shadowRange by float("Shadow Range", 24f, 0f..30f)
+    private val shadowOffsetX by float("Shadow Offset X", -1.1f, -20f..20f)
+    private val shadowOffsetY by float("Shadow Offset Y", 2.2f, -20f..20f)
+    private val shadowStrength by float("Shadow Strength", 0.1f, 0.01f..1f)
+    private val shadowDensity by int("Shadow Density", 6, 0..10)
 
     // ==================== 水印 ====================
     private val waterMarkEnabled by boolean("WaterMark", true)
@@ -169,10 +169,10 @@ object ModuleArrayList : ClientModule("ArrayList[105]", ModuleCategories.RENDER)
     private val waterMarkRainbowSpeed by float("WM Rainbow Speed", 2f, 0.1f..20f)
 
     // —— 水印 Glow 发光 (照搬模块 Glow 写法) ——
-    private val waterMarkGlowEnabled by boolean("WM Glow", false)
+    private val waterMarkGlowEnabled by boolean("WM Glow", true)
     private val waterMarkGlowRange by float("WM Glow Range", 15f, 0f..30f)
-    private val waterMarkGlowStrength by float("WM Glow Strength", 0.08f, 0.01f..1f)
-    private val waterMarkGlowDensity by int("WM Glow Density", 5, 1..12)
+    private val waterMarkGlowStrength by float("WM Glow Strength", 0.04f, 0.01f..1f)
+    private val waterMarkGlowDensity by int("WM Glow Density", 6, 1..12)
 
     /* ============================= 内部状态 ============================= */
 

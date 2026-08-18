@@ -31,39 +31,39 @@ import java.io.File
  */
 class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
-    // ==================== Colors (紫色主题, 匹配参考图) ====================
-    private val ACCENT = 0xFF9B59D6L.toInt()
-    private val ACCENT_DARK = 0x669B59D6L.toInt()
-    private val BG = 0xE01A1A22L.toInt()
-    private val PANEL_BG = 0xD81C1C24L.toInt()
-    private val TEXT get() = ModuleClickGui.getTextColor()
-    private val TEXT_BRIGHT = 0xFF9B59D6L.toInt()
-    private val TEXT_DIM get() = 0xFF000000L.toInt() or (ModuleClickGui.getTextColor() and 0x00FFFFFF)
-    private val CATEGORY_TITLE = 0xFFFFFFFFL.toInt()
-    private val TAB_BG = 0x8025252EL.toInt()
-    private val TAB_ACTIVE = 0xFF33333DL.toInt()
-    private val BORDER = 0x20FFFFFFL.toInt()
-    private val HOVER = 0x15FFFFFFL.toInt()
-    private val SCROLL_TRACK = 0x189B59D6L.toInt()
-    private val SCROLL_THUMB = 0x509B59D6L.toInt()
-    private val SCROLL_THUMB_HOVER = 0x789B59D6L.toInt()
-    private val EXPANDED_BG = 0x0A9B59D6L.toInt()
-    private val GROUP_BG = 0x0C9B59D6L.toInt()
-    private val GROUP_LINE = 0x149B59D6L.toInt()
-    private val SETTING_CHILD_BG = 0x06FFFFFFL.toInt()
-    private val OVERLAY = 0x4D000000L.toInt()
-    private val SETTING_BG = 0x50080810L.toInt()
+// ==================== Colors (青蓝主题, 匹配参考图) ====================
+private val ACCENT = 0xFF4DD0E1L.toInt()
+private val ACCENT_DARK = 0x664DD0E1L.toInt()
+private val BG = 0xE01A1A22L.toInt()
+private val PANEL_BG = 0xD81C1C24L.toInt()
+private val TEXT get() = ModuleClickGui.getTextColor()
+private val TEXT_BRIGHT = 0xFF4DD0E1L.toInt()
+private val TEXT_DIM get() = 0xFF000000L.toInt() or (ModuleClickGui.getTextColor() and 0x00FFFFFF)
+private val CATEGORY_TITLE = 0xFFFFFFFFL.toInt()
+private val TAB_BG = 0x8025252EL.toInt()
+private val TAB_ACTIVE = 0xFF33333DL.toInt()
+private val BORDER = 0x20FFFFFFL.toInt()
+private val HOVER = 0x15FFFFFFL.toInt()
+private val SCROLL_TRACK = 0x184DD0E1L.toInt()
+private val SCROLL_THUMB = 0x504DD0E1L.toInt()
+private val SCROLL_THUMB_HOVER = 0x784DD0E1L.toInt()
+private val EXPANDED_BG = 0x0A4DD0E1L.toInt()
+private val GROUP_BG = 0x0C4DD0E1L.toInt()
+private val GROUP_LINE = 0x144DD0E1L.toInt()
+private val SETTING_CHILD_BG = 0x06FFFFFFL.toInt()
+private val OVERLAY = 0x4D000000L.toInt()
+private val SETTING_BG = 0x50080810L.toInt()
 
     // ==================== Layout ====================
     private val CORNER = 8f
-    private val ITEM_H = 20f
-    private val SETTING_H = 20f
+    private val ITEM_H = 17f
+    private val SETTING_H = 17f
     private val SCROLL_W = 4f
     private val PADDING = 5f
     private val SETTING_INDENT = 8f
     private val PANEL_GAP = 0f
-    private val PANEL_MIN_W = 125
-    private val PANEL_MAX_H = 400
+    private val PANEL_MIN_W = 130
+    private val PANEL_MAX_H = 460
     private val HEADER_H = 24f
 
     // ==================== Slider Drag State ====================
@@ -125,9 +125,9 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     private val panelExpandAnim = mutableMapOf<PanelData, Float>()   // 面板展开: 0=折叠, 1=完全展开
     private val settingsExpandAnim = mutableMapOf<ClientModule, Float>() // 模块设置展开: 0=关闭, 1=完全展开
     private var guiOpenAnim = 0f        // GUI 整体打开动画 (0→1)
-    private val ANIM_SPEED_EXPAND = 0.18f   // 展开/折叠速度
-    private val ANIM_SPEED_SETTINGS = 0.20f  // 设置展开/收起速度
-    private val ANIM_SPEED_FADE = 0.22f     // 整体淡入速度
+    private val ANIM_SPEED_EXPAND = 0.12f   // 展开/折叠速度
+    private val ANIM_SPEED_SETTINGS = 0.14f  // 设置展开/收起速度
+    private val ANIM_SPEED_FADE = 0.15f     // 整体淡入速度
     private val valuesCache = IdentityHashMap<ClientModule, List<Pair<Value<*>, Int>>>()
     private var valuesCacheTime = 0L
     private var cachedAllModules = emptyList<ClientModule>()
@@ -231,7 +231,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         }
     }
 
-    private val TEXT_SCALE = 0.8f
+    private val TEXT_SCALE = 0.9f
 
     private fun trimText(font: Font, text: String, maxWidth: Int): String {
         if (font.width(text) <= maxWidth) {
