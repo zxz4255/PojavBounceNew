@@ -33,7 +33,7 @@ import kotlin.math.roundToInt
 object ModuleSolsticeNotification : ClientModule(
     "SolsticeNotification",
     ModuleCategories.RENDER,
-    aliases = listOf("Notifications", "SolsticeNotification"),
+    aliases = listOf("Notifications", "SolsticeNotif"),
 ) {
     init { enabled = true }
 
