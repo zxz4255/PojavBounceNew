@@ -223,11 +223,13 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModuleProtectionZ
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleQuickPerspectiveSwap
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleRadar
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleRotations
-import net.ccbluex.liquidbounce.features.module.modules.render.ModuleWatermark
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSilentHotbar
-import net.ccbluex.liquidbounce.features.module.modules.render.ModuleTargetHud
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSkinChanger
-import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeArraylist
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeArrayList
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeClickgui
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeArrayList2
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleRiseClickgui
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeModernTargetInfo
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSmoothCamera
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleStorageESP
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleTNTTimer
@@ -236,8 +238,7 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModuleTrueSight
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleVoidESP
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleXRay
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleZoom
-import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeNotifications
-import net.ccbluex.liquidbounce.features.module.modules.render.ModuleStatusBars
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeNotification
 import net.ccbluex.liquidbounce.features.module.modules.render.cameraclip.ModuleCameraClip
 import net.ccbluex.liquidbounce.features.module.modules.render.crosshair.ModuleCrosshair
 import net.ccbluex.liquidbounce.features.module.modules.render.esp.ModuleESP
@@ -640,7 +641,7 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleCameraClip,
             ModuleClickGui,
             ModuleDamageParticles,
-            ModuleSolsticeNotifications,
+            ModuleSolsticeNotification,
             ModuleParticles,
             ModuleESP,
             ModuleLogoffSpot,
@@ -651,13 +652,11 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleHoleESP,
             ModuleHud,
             ModuleHats,
-            ModuleWatermark,
             ModuleItemESP,
             ModuleItemTags,
             ModuleJumpEffect,
             ModuleMobOwners,
             ModuleMurderMystery,
-            ModuleTargetHud,
             ModuleHitFX,
             ModuleNametags,
             ModuleCombineMobs,
@@ -666,7 +665,11 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleAutoF5,
             ModuleChams,
             ModuleBedPlates,
-            ModuleSolsticeArraylist,
+            ModuleSolsticeArrayList,
+            ModuleSolsticeArrayList2,
+            ModuleSolsticeClickgui,
+            ModuleSolsticeModernTargetInfo,
+            ModuleRiseClickgui,
             ModuleNoBob,
             ModuleNoFov,
             ModuleNoHurtCam,
@@ -685,7 +688,6 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleVoidESP,
             ModuleXRay,
             ModuleDebug,
-            ModuleStatusBars,
             ModuleZoom,
             ModuleItemChams,
             ModuleCrystalView,
