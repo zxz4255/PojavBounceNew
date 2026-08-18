@@ -125,9 +125,9 @@ private val SETTING_BG = 0x50080810L.toInt()
     private val panelExpandAnim = mutableMapOf<PanelData, Float>()   // 面板展开: 0=折叠, 1=完全展开
     private val settingsExpandAnim = mutableMapOf<ClientModule, Float>() // 模块设置展开: 0=关闭, 1=完全展开
     private var guiOpenAnim = 0f        // GUI 整体打开动画 (0→1)
-    private val ANIM_SPEED_EXPAND = 0.12f   // 展开/折叠速度
-    private val ANIM_SPEED_SETTINGS = 0.14f  // 设置展开/收起速度
-    private val ANIM_SPEED_FADE = 0.15f     // 整体淡入速度
+    private val ANIM_SPEED_EXPAND = 0.08f   // 展开/折叠速度
+    private val ANIM_SPEED_SETTINGS = 0.08f  // 设置展开/收起速度
+    private val ANIM_SPEED_FADE = 0.10f     // 整体淡入速度
     private val valuesCache = IdentityHashMap<ClientModule, List<Pair<Value<*>, Int>>>()
     private var valuesCacheTime = 0L
     private var cachedAllModules = emptyList<ClientModule>()

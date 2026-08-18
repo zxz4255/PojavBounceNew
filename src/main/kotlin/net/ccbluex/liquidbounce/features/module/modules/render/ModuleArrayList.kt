@@ -149,29 +149,29 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
     private val edgeSize by float("Edge Size", 8f, 0f..32f)
 
     // —— Shadow 阴影 (黑色, 图层永远在最底部; 目标模式与 Glow 一致) ——
-    private val shadowEnabled by boolean("Shadow", false)
-    private val shadowMode by enumChoice("Shadow Mode", ShadowMode.TEXT)   // 【新增】阴影目标: EDGE/TEXT/BOTH/PER_CHAR
+    private val shadowEnabled by boolean("Shadow", true)
+    private val shadowMode by enumChoice("Shadow Mode", ShadowMode.EDGE)   // 【新增】阴影目标: EDGE/TEXT/BOTH/PER_CHAR
     private val shadowRange by float("Shadow Range", 24f, 0f..30f)
-    private val shadowOffsetX by float("Shadow Offset X", -1.1f, -20f..20f)
+    private val shadowOffsetX by float("Shadow Offset X", 0f, -20f..20f)
     private val shadowOffsetY by float("Shadow Offset Y", 2.2f, -20f..20f)
     private val shadowStrength by float("Shadow Strength", 0.1f, 0.01f..1f)
     private val shadowDensity by int("Shadow Density", 6, 0..10)
 
     // ==================== 水印 ====================
     private val waterMarkEnabled by boolean("WaterMark", true)
-    private val waterMarkText by text("WaterMark Text", "LiquidBounce0.39")
+    private val waterMarkText by text("WaterMark Text", "LiquidBounce 0.39")
     private val waterMarkScale by float("WaterMark Scale", 1.0f, 0.5f..3.0f)
     private val waterMarkX by int("WaterMark X", 4, -2000..2000)
     private val waterMarkY by int("WaterMark Y", 4, -2000..2000)
-    private val waterMarkBgAlpha by int("WaterMark Bg Alpha", 80, 0..255)
+    private val waterMarkBgAlpha by int("WaterMark Bg Alpha", 0, 0..255)
     private val waterMarkColorMode by enumChoice("WM Color Mode", WaterMarkColorMode.FADE)
     private val waterMarkCustomColor by color("WM Custom Color", Color4b(0, 160, 255))
     private val waterMarkRainbowSpeed by float("WM Rainbow Speed", 2f, 0.1f..20f)
 
     // —— 水印 Glow 发光 (照搬模块 Glow 写法) ——
     private val waterMarkGlowEnabled by boolean("WM Glow", true)
-    private val waterMarkGlowRange by float("WM Glow Range", 15f, 0f..30f)
-    private val waterMarkGlowStrength by float("WM Glow Strength", 0.04f, 0.01f..1f)
+    private val waterMarkGlowRange by float("WM Glow Range", 24f, 0f..30f)
+    private val waterMarkGlowStrength by float("WM Glow Strength", 0.1f, 0.01f..1f)
     private val waterMarkGlowDensity by int("WM Glow Density", 6, 1..12)
 
     /* ============================= 内部状态 ============================= */
