@@ -74,7 +74,7 @@ object ModuleSolsticeClickgui : ClientModule(
     private val style by enumChoice("Style", ClickGuiStyle.MODERN)
     private val animation by enumChoice("Animation", ClickGuiAnimation.BOUNCE)
     private val blurStrength by float("Blur Strength", 7f, 0f..20f)      // 原生近似: 背景透明度
-    private val easeSpeed by float("Ease Speed", 18f, 5f..20f)
+    private val easeSpeed by float("Ease Speed", 14f, 5f..30f)
     private val midclickRounding by float("Midclick Rounding", 1f, 0.01f..1f)
 
     // —— 外观 ——
@@ -246,14 +246,20 @@ object ModuleSolsticeClickgui : ClientModule(
                 if (ModuleSolsticeClickgui.listeningBind == null &&
                     ModuleSolsticeClickgui.activeColorValue == null
                 ) {
+                    // 只关 ClickGUI，不进入游戏暂停菜单
                     ModuleSolsticeClickgui.enabled = false
+                    try {
+                        mc.gui.setScreen(null)
+                    } catch (_: Throwable) {}
                 } else {
                     ModuleSolsticeClickgui.listeningBind = null
                     ModuleSolsticeClickgui.activeColorValue = null
                 }
+                return true
             }
-            return true // 吞掉所有按键
+            return true // 吞掉所有按键，避免传到游戏
         }
+
 
         override fun mouseClicked(event: net.minecraft.client.input.MouseButtonEvent, doubleClick: Boolean): Boolean = true
         override fun mouseReleased(event: net.minecraft.client.input.MouseButtonEvent): Boolean = true
@@ -475,30 +481,34 @@ object ModuleSolsticeClickgui : ClientModule(
             return@handler
         }
 
+        // 任意松开左键：立即结束所有面板拖拽（必须先于 header 分支，避免 return 漏清）
+        if (event.action == 0 && event.button == 0) {
+            for (panel in panels) panel.dragging = false
+        }
+
         // 面板标题拖拽 / 折叠
         for (panel in panels) {
             if (mx in panel.x..(panel.x + panelWidth) && my in panel.y..(panel.y + headerHeight)) {
                 if (event.action == 1) {
-                    if (event.button == 2) { // 中键: 原版 midclick (此处用于折叠)
+                    if (event.button == 2) {
                         panel.dragging = false
                     } else if (event.button == 0) {
+                        // 只拖一个面板
+                        for (p in panels) p.dragging = false
                         panel.dragging = true
                         panel.dragOffsetX = mx - panel.x
                         panel.dragOffsetY = my - panel.y
                     }
+                    return@handler
                 }
-                return@handler
+                // action==0 已在上方清理，此处也 return 避免点穿到内容
+                if (event.action == 0) return@handler
             }
         }
 
         // 模块与设置点击
-        // 左键: 开关模块 / 改设置；右键: 展开/收起设置（贴近常见 ClickGUI 交互）
         if (event.action == 1 && (event.button == 0 || event.button == 1)) {
             handleContentClick(mx, my, event.button)
-        }
-        if (event.action == 0) {
-            // 松开：结束拖拽
-            for (panel in panels) panel.dragging = false
         }
     }
 
@@ -610,16 +620,18 @@ object ModuleSolsticeClickgui : ClientModule(
         val frameTime = if (lastFrameNs != 0L) ((now - lastFrameNs) / 1e9f).coerceIn(0f, 0.05f) else 0.016f
         lastFrameNs = now
 
-        // 原版动画: 启用递增 / 禁用递减（关闭后仍渲染出场动画，对应 C++ animation < 0.0001 才 return）
+        // 平滑开合：步进封顶，减轻低帧/卡顿时的跳跃
         if (enabled) {
-            ease.incrementPercentage(frameTime * easeSpeed / 10f)
+            val step = (frameTime * easeSpeed * 0.14f).coerceIn(0.006f, 0.075f)
+            ease.incrementPercentage(step)
         } else {
-            ease.decrementPercentage(frameTime * 2f * easeSpeed / 10f)
+            val step = (frameTime * easeSpeed * 0.22f).coerceIn(0.01f, 0.12f)
+            ease.decrementPercentage(step)
         }
         var inScale = getEaseAnim(ease, if (animation == ClickGuiAnimation.BOUNCE) 1 else 0)
-        if (ease.isPercentageMax()) inScale = 0.996f
-        if (animation == ClickGuiAnimation.ZOOM) inScale = inScale.coerceIn(0f, 0.996f)
-        val animAlpha = ease.easeOutExpo()
+        if (ease.isPercentageMax() || ease.percentage > 0.995f) inScale = 1f
+        if (animation == ClickGuiAnimation.ZOOM) inScale = inScale.coerceIn(0f, 1f)
+        val animAlpha = ease.easeOutExpo().coerceIn(0f, 1f)
         if (animAlpha < 0.0001f) return@handler
 
         mouseX = guiMouseX()
@@ -627,6 +639,11 @@ object ModuleSolsticeClickgui : ClientModule(
 
         // 拖拽更新
         for (panel in panels) {
+            // 左键未按住时强制结束拖拽（防止事件丢失导致跟着鼠标跑）
+            val leftDown = org.lwjgl.glfw.GLFW.glfwGetMouseButton(
+                mc.window.handle, org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_LEFT
+            ) == org.lwjgl.glfw.GLFW.GLFW_PRESS
+            if (!leftDown) panel.dragging = false
             if (panel.dragging) {
                 panel.x = mouseX - panel.dragOffsetX
                 panel.y = mouseY - panel.dragOffsetY
@@ -649,7 +666,7 @@ object ModuleSolsticeClickgui : ClientModule(
 
         // —— ① 模糊 / 遮罩近似 (ModernDropdown: black*0.38 + addBlur) ——
         // 多层半透明黑 + 轻微扩散，模拟 blurStrength
-        val dimA = (255 * animAlpha * 0.38f).roundToInt().coerceIn(0, 120)
+        val dimA = (220 * animAlpha * animAlpha * 0.42f).roundToInt().coerceIn(0, 110) // 二次曲线，过渡更自然
         context.drawQuad(0f, 0f, screenW, screenH, Color4b(0, 0, 0, dimA))
         val blurLayers = (blurStrength / 4f).roundToInt().coerceIn(1, 6)
         for (i in 1..blurLayers) {
@@ -720,29 +737,27 @@ object ModuleSolsticeClickgui : ClientModule(
         x1: Float, y1: Float, x2: Float, y2: Float, r: Float,
         c1: Color4b, c2: Color4b, alpha: Float,
     ) {
-        val a = (255 * alpha).roundToInt().coerceIn(0, 255)
+        // 半透明主题色条，分段重叠避免黑边/缝隙
+        val a = (110 * alpha).roundToInt().coerceIn(0, 160)
         val w = x2 - x1
         if (w <= 2f) {
-            drawRoundedRect(x1, y1, x2, y2, r, c1.alpha(a))
+            drawQuad(x1, y1, x2, y2, c1.alpha(a))
             return
         }
-        val segments = 8
+        val segments = 16
         val segW = w / segments
         for (i in 0 until segments) {
             val t = i / (segments - 1).toFloat().coerceAtLeast(1f)
+            val s = t * t * (3f - 2f * t)
             val col = Color4b(
-                lerp(c1.r.toFloat(), c2.r.toFloat(), t).toInt().coerceIn(0, 255),
-                lerp(c1.g.toFloat(), c2.g.toFloat(), t).toInt().coerceIn(0, 255),
-                lerp(c1.b.toFloat(), c2.b.toFloat(), t).toInt().coerceIn(0, 255),
+                lerp(c1.r.toFloat(), c2.r.toFloat(), s).toInt().coerceIn(0, 255),
+                lerp(c1.g.toFloat(), c2.g.toFloat(), s).toInt().coerceIn(0, 255),
+                lerp(c1.b.toFloat(), c2.b.toFloat(), s).toInt().coerceIn(0, 255),
                 a,
             )
-            val sx = x1 + segW * i
-            val ex = if (i == segments - 1) x2 else x1 + segW * (i + 1) + 0.5f
-            if (i == 0 || i == segments - 1) {
-                drawRoundedRect(sx, y1, ex, y2, r, col)
-            } else {
-                drawQuad(sx, y1, ex, y2, col)
-            }
+            val sx = x1 + segW * i - 0.25f
+            val ex = x1 + segW * (i + 1) + 0.25f
+            drawQuad(sx.coerceAtLeast(x1), y1, ex.coerceAtMost(x2), y2, col)
         }
     }
 
@@ -762,13 +777,18 @@ object ModuleSolsticeClickgui : ClientModule(
 
         // 面板背景 darkBlack
         val bg = Color4b(24, 24, 24, (backgroundAlpha * alpha).roundToInt().coerceIn(0, 255))
+        // 面板主体圆角
         ctx.drawRoundedRect(px, py, px + pw, py + ph, rr, bg)
 
-        // 标题
+        // 标题栏：只要上方两个圆角，下方用方边盖住
         val accent = accentAt(py)
-        val titleBg = Color4b(accent.r, accent.g, accent.b, (70 * alpha).roundToInt())
+        val titleBg = Color4b(accent.r, accent.g, accent.b, (90 * alpha).roundToInt())
         ctx.drawRoundedRect(px, py, px + pw, py + headerHeight, rr, titleBg)
-        ctx.drawQuad(px, py + headerHeight - 1.5f, px + pw, py + headerHeight + 0.5f, accent.alpha(a))
+        // 盖住标题栏底部两个圆角 → 标题与列表直角相接
+        if (rr > 0.5f) {
+            ctx.drawQuad(px, py + headerHeight - rr, px + pw, py + headerHeight, titleBg)
+        }
+        ctx.drawQuad(px, py + headerHeight - 1f, px + pw, py + headerHeight, accent.alpha((a * 0.9f).toInt()))
         ctx.text(
             font, cat.tag,
             (px + 8f).roundToInt(), (py + headerHeight / 2f - 4f).roundToInt(),
@@ -803,17 +823,17 @@ object ModuleSolsticeClickgui : ClientModule(
 
             // 模块行：仅在可见时绘制，但无论是否可见都推进 curY
             if (rowVisible(curY)) {
-                ctx.drawRoundedRect(px, max(curY, clipTop), px + pw, min(rowY2, clipBottom), rowR, Color4b(40, 40, 40, a))
+                // 底色略浅，避免与启用渐变叠出黑边
+                ctx.drawQuad(px, max(curY, clipTop), px + pw, min(rowY2, clipBottom), Color4b(36, 36, 40, (a * 0.9f).toInt()))
                 if (isExpanded) {
-                    ctx.drawQuad(px, max(curY, clipTop), px + pw, min(rowY2, clipBottom), Color4b(accent.r, accent.g, accent.b, 28))
+                    ctx.drawQuad(px, max(curY, clipTop), px + pw, min(rowY2, clipBottom), Color4b(accent.r, accent.g, accent.b, 32))
                 }
                 if (mod.enabled) {
                     val c1 = getThemedColor(curY * 2f)
                     val c2 = getThemedColor(curY * 2f + pw)
-                    // 渐变也裁在 clip 内
                     val gy1 = max(curY, clipTop)
                     val gy2 = min(rowY2, clipBottom)
-                    if (gy2 > gy1) ctx.drawEnabledModGradient(px, gy1, px + pw, gy2, rowR, c1, c2, alpha)
+                    if (gy2 > gy1) ctx.drawEnabledModGradient(px, gy1, px + pw, gy2, 0f, c1, c2, alpha)
                 }
                 if (mouseX in px..(px + pw) && mouseY in max(curY, clipTop)..min(rowY2, clipBottom)) {
                     ctx.drawQuad(px, max(curY, clipTop), px + pw, min(rowY2, clipBottom), Color4b(255, 255, 255, 18))
@@ -850,10 +870,13 @@ object ModuleSolsticeClickgui : ClientModule(
             if (curY > clipBottom + itemHeight * 2) break
         }
 
-        // 重新盖住标题栏，保证列表文字不会画在标题上方
-        val titleBg2 = Color4b(accent.r, accent.g, accent.b, (70 * alpha).roundToInt())
+        // 重新盖住标题栏（同样去掉底部圆角）
+        val titleBg2 = Color4b(accent.r, accent.g, accent.b, (90 * alpha).roundToInt())
         ctx.drawRoundedRect(px, py, px + pw, py + headerHeight, rr, titleBg2)
-        ctx.drawQuad(px, py + headerHeight - 1.5f, px + pw, py + headerHeight + 0.5f, accent.alpha(a))
+        if (rr > 0.5f) {
+            ctx.drawQuad(px, py + headerHeight - rr, px + pw, py + headerHeight, titleBg2)
+        }
+        ctx.drawQuad(px, py + headerHeight - 1f, px + pw, py + headerHeight, accent.alpha((a * 0.9f).toInt()))
         ctx.text(
             font, cat.tag,
             (px + 8f).roundToInt(), (py + headerHeight / 2f - 4f).roundToInt(),
