@@ -87,6 +87,8 @@ import net.ccbluex.liquidbounce.features.module.modules.`fun`.ModuleDankBobbing
 import net.ccbluex.liquidbounce.features.module.modules.`fun`.ModuleDerp
 import net.ccbluex.liquidbounce.features.module.modules.`fun`.ModuleHandDerp
 import net.ccbluex.liquidbounce.features.module.modules.`fun`.ModuleSkinDerp
+import net.ccbluex.liquidbounce.features.module.modules.`fun`.ModuleAutoL
+import net.ccbluex.liquidbounce.features.module.modules.`fun`.ModuleAutoScreenShot
 import net.ccbluex.liquidbounce.features.module.modules.`fun`.ModuleTwerk
 import net.ccbluex.liquidbounce.features.module.modules.`fun`.ModuleVomit
 import net.ccbluex.liquidbounce.features.module.modules.`fun`.notebot.ModuleNotebot
@@ -526,7 +528,9 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleDankBobbing,
             ModuleDerp,
             ModuleNotebot,
+            ModuleAutoScreenShot,
             ModuleSkinDerp,
+            ModuleAutoL,
             ModuleHandDerp,
             ModuleTwerk,
             ModuleVomit,
