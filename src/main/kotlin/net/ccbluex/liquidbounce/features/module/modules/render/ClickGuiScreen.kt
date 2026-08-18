@@ -123,7 +123,7 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
     // ==================== Smooth Animation State ====================
     private val panelExpandAnim = mutableMapOf<PanelData, Float>()   // 面板展开: 0=折叠, 1=完全展开
-    private val settingsExpandAnim = mutableMap<ClientModule, Float>() // 模块设置展开: 0=关闭, 1=完全展开
+    private val settingsExpandAnim = mutableMapOf<ClientModule, Float>() // 模块设置展开: 0=关闭, 1=完全展开
     private var guiOpenAnim = 0f        // GUI 整体打开动画 (0→1)
     private val ANIM_SPEED_EXPAND = 0.18f   // 展开/折叠速度
     private val ANIM_SPEED_SETTINGS = 0.20f  // 设置展开/收起速度
