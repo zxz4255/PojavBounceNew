@@ -169,6 +169,7 @@ object ModuleSolsticeClickgui : ClientModule(
     private var lastFrameNs = 0L
     private var isPressingShift = false
     private var scrollDirection = 0
+    private var leftMouseDown = false
 
     private data class PanelState(
         val category: ModuleCategory?,
@@ -395,6 +396,8 @@ object ModuleSolsticeClickgui : ClientModule(
         listeningBind = null
         activeColorValue = null
         sliderDrag.clear()
+        leftMouseDown = false
+        for (panel in panels) panel.dragging = false
     }
 
     /* ============================= 事件处理 ============================= */
@@ -481,9 +484,12 @@ object ModuleSolsticeClickgui : ClientModule(
             return@handler
         }
 
-        // 任意松开左键：立即结束所有面板拖拽（必须先于 header 分支，避免 return 漏清）
-        if (event.action == 0 && event.button == 0) {
-            for (panel in panels) panel.dragging = false
+        // 跟踪左键状态 + 松开时结束拖拽（不访问 Window.handle）
+        if (event.button == 0) {
+            leftMouseDown = event.action == 1
+            if (event.action == 0) {
+                for (panel in panels) panel.dragging = false
+            }
         }
 
         // 面板标题拖拽 / 折叠
@@ -639,11 +645,7 @@ object ModuleSolsticeClickgui : ClientModule(
 
         // 拖拽更新
         for (panel in panels) {
-            // 左键未按住时强制结束拖拽（防止事件丢失导致跟着鼠标跑）
-            val leftDown = org.lwjgl.glfw.GLFW.glfwGetMouseButton(
-                mc.window.handle, org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_LEFT
-            ) == org.lwjgl.glfw.GLFW.GLFW_PRESS
-            if (!leftDown) panel.dragging = false
+            if (!leftMouseDown) panel.dragging = false
             if (panel.dragging) {
                 panel.x = mouseX - panel.dragOffsetX
                 panel.y = mouseY - panel.dragOffsetY
