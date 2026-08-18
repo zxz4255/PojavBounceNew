@@ -85,11 +85,6 @@ object ModuleClickGui :
                 closeGui()
                 return@handler
             }
-            // 若当前屏幕为空(游戏内), 也触发打开 GUI (ESC 也可作为打开快捷键)
-            if (currentScreen == null) {
-                openGui()
-                return@handler
-            }
             return@handler
         }
         // 只精确响应右 Shift (GLFW_KEY_RIGHT_SHIFT = 344)
