@@ -144,7 +144,7 @@ object ModuleArrayList : ClientModule("ArrayList[fix+skid]", ModuleCategories.RE
     private val glowOffsetY by float("Glow Offset Y", 0f, -16f..16f)
 
     // —— 背景边缘渲染模式 + 自定义边缘大小 (Edge Size 缩放边缘带厚度) ——
-    private val perItemEdgeMode by enumChoice("Item Edge Mode", EdgeMode.EDGE)
+    private val perItemEdgeMode by enumChoice("Item Edge Mode", EdgeMode.SHADOW)
     private val listEdgeMode by enumChoice("List Edge Mode", EdgeMode.NONE)
     private val edgeSize by float("Edge Size", 8f, 0f..32f)
 
