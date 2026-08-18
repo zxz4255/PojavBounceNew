@@ -228,6 +228,7 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSilentHotba
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSkinChanger
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeArraylist
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeClickgui
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeWatermark
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleRiseClickgui
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeModernTargetInfo
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSmoothCamera
@@ -665,11 +666,12 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleAutoF5,
             ModuleChams,
             ModuleBedPlates,
-            ModuleSolsticeArrayList,
-            ModuleSolsticeArrayList2,
+            ModuleSolsticeArraylist,
             ModuleSolsticeClickgui,
             ModuleSolsticeModernTargetInfo,
             ModuleRiseClickgui,
+            ModuleSolsticeWatermark,
+            ModuleWatermark,
             ModuleNoBob,
             ModuleNoFov,
             ModuleNoHurtCam,
