@@ -42,6 +42,9 @@ import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.input.KeyEvent
 import net.minecraft.network.chat.Component
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlin.system.exitProcess
 import org.lwjgl.glfw.GLFW
 import java.util.IdentityHashMap
 import kotlin.math.abs
@@ -99,9 +102,10 @@ object ModuleRiseClickgui : ClientModule(
     private var lastNs = 0L
 
     private val enumOpen = IdentityHashMap<Value<*>, Boolean>()
-    private val searchText = mutableStateOf("")  // 搜索框文本
+        private val _searchText = MutableStateFlow("")
+        private val searchText: StateFlow<String> = _searchText
 
-    private val palette = listOf(
+        private val palette = listOf(
         Color4b(0x56, 0xB4, 0xE9), Color4b(255, 70, 70), Color4b(90, 230, 110),
         Color4b(255, 170, 40), Color4b(140, 110, 255), Color4b(255, 120, 200),
         Color4b(255, 255, 255), Color4b(40, 40, 40),
@@ -130,7 +134,7 @@ object ModuleRiseClickgui : ClientModule(
     /* 过滤已启用的模块 */
     private fun filterModules(cat: ModuleCategory): List<ClientModule> {
         val modules = modulesIn(cat)
-        val query = searchText.value.lowercase()
+        val query = _searchText.value.lowercase()
         if (query.isEmpty()) return modules
         return modules.filter {
             it.name.lowercase().contains(query) ||
@@ -276,8 +280,8 @@ object ModuleRiseClickgui : ClientModule(
         val searchAreaW = windowW - sidebarW - 14f
         if (over(searchAreaX, searchAreaY, searchAreaW, windowH - searchAreaY - searchH / 20f - 6f)) {
             if (e.button == 0) {
-                // 打开系统输入框（简化为清空搜索）
-                searchText.value = ""
+                // 清空搜索
+                _searchText.value = ""
             }
             return@handler
         }
