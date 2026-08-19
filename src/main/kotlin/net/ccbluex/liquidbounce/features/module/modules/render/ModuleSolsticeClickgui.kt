@@ -244,8 +244,11 @@ object ModuleSolsticeClickgui : ClientModule(
     private class SolsticeClickGuiScreen : Screen(Component.literal("SolsticeClickGui")) {
         override fun isPauseScreen(): Boolean = false
 
-        // true：由 Screen 正常关闭，避免 ESC 漏给游戏弹出暂停界面
-        override fun shouldCloseOnEsc(): Boolean = true
+        /**
+         * false：本帧 ESC 走 keyPressed，由我们 return true 吃掉，
+         * 下一 tick 再 setScreen(null)，避免「关屏后同帧 ESC 打开暂停」。
+         */
+        override fun shouldCloseOnEsc(): Boolean = false
 
         override fun keyPressed(event: KeyEvent): Boolean {
             if (event.key() == GLFW.GLFW_KEY_ESCAPE) {
@@ -256,24 +259,61 @@ object ModuleSolsticeClickgui : ClientModule(
                     ModuleSolsticeClickgui.activeColorValue = null
                     return true
                 }
-                // 只关模块，不 super，避免再触发一次暂停逻辑
-                ModuleSolsticeClickgui.enabled = false
-                return true
+                ModuleSolsticeClickgui.requestCloseFromEsc()
+                return true // 本帧必须吞掉 ESC
             }
             return true
         }
 
         override fun onClose() {
-            ModuleSolsticeClickgui.enabled = false
-            // 不调用 super.onClose()，防止打开 PauseScreen
+            // 仅被 requestCloseFromEsc 间接触发时关模块；不 super
+            if (ModuleSolsticeClickgui.enabled) {
+                ModuleSolsticeClickgui.enabled = false
+            }
         }
-
 
         override fun mouseClicked(event: net.minecraft.client.input.MouseButtonEvent, doubleClick: Boolean): Boolean = true
         override fun mouseReleased(event: net.minecraft.client.input.MouseButtonEvent): Boolean = true
         override fun mouseDragged(event: net.minecraft.client.input.MouseButtonEvent, dx: Double, dy: Double): Boolean = true
         override fun mouseScrolled(mouseX: Double, mouseY: Double, horizontal: Double, vertical: Double): Boolean = true
-        // 不 override render：UI 由 OverlayRenderEvent 绘制，避免签名不匹配
+    }
+
+    /**
+     * ESC 专用：本帧不拆 Screen，下一 tick 再关，并清掉可能误弹的 PauseScreen。
+     * 关闭动作本身几乎无感，但能阻断 ESC 映射到游戏暂停。
+     */
+    private fun requestCloseFromEsc() {
+        if (!enabled) return
+        try {
+            mc.execute {
+                enabled = false
+                closeInputLayer()
+                clearPauseScreens(8)
+            }
+        } catch (_: Throwable) {
+            enabled = false
+            closeInputLayer()
+        }
+    }
+
+    private fun isPauseLike(scn: Any?): Boolean {
+        if (scn == null) return false
+        val n = scn.javaClass.name
+        return n.contains("Pause", true) || n.contains("GameMenu", true)
+    }
+
+    private fun clearPauseScreens(framesLeft: Int) {
+        if (framesLeft <= 0) return
+        try {
+            mc.execute {
+                val scn = try { mc.gui.screen() } catch (_: Throwable) { null }
+                if (isPauseLike(scn)) {
+                    try { mc.gui.setScreen(null) } catch (_: Throwable) {}
+                }
+                // 只要还在关 GUI 后几帧，就继续清
+                if (framesLeft > 1) clearPauseScreens(framesLeft - 1)
+            }
+        } catch (_: Throwable) {}
     }
 
     private fun openInputLayer() {
@@ -447,7 +487,8 @@ object ModuleSolsticeClickgui : ClientModule(
                     listeningBind = null
                     activeColorValue = null
                 } else if (enabled) {
-                    enabled = false
+                    // 与 Screen 同路径：下一 tick 关，避免暂停
+                    requestCloseFromEsc()
                 }
             }
             return@handler
@@ -790,27 +831,21 @@ object ModuleSolsticeClickgui : ClientModule(
         val rr = radius.toFloat()
         val ph = panelMaxHeight.toFloat()
 
-        // 面板阴影
-        ctx.drawSoftShadow(px, py, px + pw, py + ph, rr, 6f + blurStrength * 0.25f, alpha)
-
         val bg = Color4b(24, 24, 24, (backgroundAlpha * alpha).roundToInt().coerceIn(0, 255))
-        // 仅一层圆角面板底
-        ctx.drawRoundedRect(px, py, px + pw, py + ph, rr, bg)
-
-        // 标题：纯色矩形条（不加第二层圆角/分隔线，杜绝黑条）
         val accent = accentAt(py)
-        val titleBg = Color4b(accent.r, accent.g, accent.b, (110 * alpha).roundToInt().coerceIn(0, 230))
-        ctx.drawQuad(px, py, px + pw, py + headerHeight, titleBg)
-        // 顶部圆角区域用标题色补两角，避免露出深色底
-        if (rr > 1f) {
-            ctx.drawRoundedRect(px, py, px + pw, py + min(headerHeight.toFloat(), rr * 2f), rr, titleBg)
-            ctx.drawQuad(px, py + rr, px + pw, py + headerHeight, titleBg)
+        // 标题用不透明主题色（与面板 alpha 同步），杜绝半透黑罩
+        val titleBg = Color4b(accent.r, accent.g, accent.b, a)
+
+        // 阴影只画列表区域下方，不盖标题
+        if (blurStrength > 0.5f && alpha > 0.15f) {
+            ctx.drawSoftShadow(
+                px, py + headerHeight * 0.6f, px + pw, py + ph,
+                rr, 4f + blurStrength * 0.2f, alpha * 0.65f,
+            )
         }
-        ctx.text(
-            font, cat.tag,
-            (px + 8f).roundToInt(), (py + headerHeight / 2f - 4f).roundToInt(),
-            Color4b.WHITE.alpha(a).argb, textShadow,
-        )
+
+        // 整板底
+        ctx.drawRoundedRect(px, py, px + pw, py + ph, rr, bg)
 
         val clipTop = py + headerHeight
         val clipBottom = py + ph
@@ -889,19 +924,16 @@ object ModuleSolsticeClickgui : ClientModule(
             if (curY > clipBottom + itemHeight * 2) break
         }
 
-        // 列表绘制完后：用标题色盖住任何滚进标题区的残影，再画标题字（无额外黑条）
+        // 最后一层：不透明标题条盖住列表溢出（唯一标题绘制，无黑罩叠层）
         ctx.drawQuad(px, py, px + pw, clipTop, titleBg)
-        if (rr > 1f) {
-            ctx.drawRoundedRect(px, py, px + pw, py + min(headerHeight.toFloat(), rr * 2f), rr, titleBg)
-            ctx.drawQuad(px, py + rr, px + pw, clipTop, titleBg)
-        }
         ctx.text(
             font, cat.tag,
             (px + 8f).roundToInt(), (py + headerHeight / 2f - 4f).roundToInt(),
             Color4b.WHITE.alpha(a).argb, textShadow,
         )
-        // 底边用面板底色盖住溢出，保留底部圆角观感
-        ctx.drawQuad(px, clipBottom, px + pw, py + ph, bg)
+        if (clipBottom < py + ph) {
+            ctx.drawQuad(px, clipBottom, px + pw, py + ph, bg)
+        }
     }
 
     /* ============================= 设置项渲染 ============================= */
