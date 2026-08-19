@@ -307,13 +307,13 @@ object ModuleSolsticeClickgui : ClientModule(
     private fun saveState() {
         try {
             val root = JsonObject()
-            root.addProperty("version", 1)
-            root.addProperty("expandedModule", expandedModule?.name)
+            root.addProperty("version", 2)
+            root.addProperty("expandedModule", expandedModule?.name ?: "")
 
             val panelsArr = JsonArray()
             for (p in panels) {
                 val o = JsonObject()
-                o.addProperty("category", p.category?.tag ?: "")
+                o.addProperty("category", p.category?.tag ?: p.category?.name ?: "")
                 o.addProperty("x", p.x)
                 o.addProperty("y", p.y)
                 o.addProperty("scrollOffset", p.scrollOffset)
@@ -323,14 +323,9 @@ object ModuleSolsticeClickgui : ClientModule(
             root.add("panels", panelsArr)
 
             val collapsed = JsonArray()
+            val owner = expandedModule?.name ?: ""
             for (v in collapsedGroups) {
-                // 用 模块名/设置名 尽量唯一定位
-                val owner = expandedModule?.name ?: ""
-                collapsed.add("${owner}/${v.name}")
-            }
-            // 保存时把所有已知折叠组名也记下（仅 name）
-            for (v in collapsedGroups) {
-                collapsed.add(v.name)
+                collapsed.add("$owner/${v.name}")
             }
             root.add("collapsedGroups", collapsed)
 
@@ -345,35 +340,49 @@ object ModuleSolsticeClickgui : ClientModule(
     private fun loadState() {
         try {
             if (!stateFile.exists()) return
-            val root = JsonParser.parseString(stateFile.readText()).asJsonObject
+            val text = stateFile.readText()
+            if (text.isBlank()) return
+            val root = JsonParser.parseString(text).asJsonObject
 
             val expandedName = root.get("expandedModule")?.takeIf { !it.isJsonNull }?.asString
             if (!expandedName.isNullOrEmpty()) {
                 expandedModule = ModuleManager.getModules().find { it.name == expandedName }
             }
 
-            val arr = root.getAsJsonArray("panels") ?: return
-            if (arr.size() == 0) return
-
-            panels.clear()
-            val byTag = ModuleCategories.entries.associateBy { it.tag }
-            for (el in arr) {
-                val o = el.asJsonObject
-                val tag = o.get("category")?.asString ?: continue
-                val cat = byTag[tag] ?: continue
-                panels += PanelState(
-                    category = cat,
-                    x = o.get("x")?.asFloat ?: 0f,
-                    y = o.get("y")?.asFloat ?: 0f,
-                    scrollOffset = o.get("scrollOffset")?.asFloat ?: 0f,
-                    targetScroll = o.get("targetScroll")?.asFloat ?: 0f,
-                )
+            val arr = root.getAsJsonArray("panels")
+            if (arr != null && arr.size() > 0) {
+                panels.clear()
+                val byTag = ModuleCategories.entries.associateBy { it.tag }
+                val byName = ModuleCategories.entries.associateBy { it.name }
+                for (el in arr) {
+                    val o = el.asJsonObject
+                    val tag = o.get("category")?.asString ?: continue
+                    val cat = byTag[tag] ?: byName[tag] ?: continue
+                    panels += PanelState(
+                        category = cat,
+                        x = o.get("x")?.asFloat ?: 0f,
+                        y = o.get("y")?.asFloat ?: 0f,
+                        scrollOffset = o.get("scrollOffset")?.asFloat ?: 0f,
+                        targetScroll = o.get("targetScroll")?.asFloat ?: 0f,
+                    )
+                }
+                // 若 json 缺了某些分类，补上默认位置
+                val have = panels.mapNotNull { it.category }.toSet()
+                var extraX = panels.maxOfOrNull { it.x } ?: 40f
+                for (cat in ModuleCategories.entries) {
+                    if (cat !in have) {
+                        extraX += panelWidth
+                        panels += PanelState(cat, extraX, 80f)
+                    }
+                }
             }
 
             collapsedGroups.clear()
             val collapsed = root.getAsJsonArray("collapsedGroups")
             if (collapsed != null && expandedModule != null) {
-                val names = collapsed.mapNotNull { it.asString?.substringAfterLast('/') }
+                val names = collapsed.mapNotNull { el ->
+                    el.asString?.substringAfterLast('/')?.takeIf { it.isNotEmpty() }
+                }.toSet()
                 for (v in collectValues(expandedModule!!)) {
                     if (v.name in names) collapsedGroups.add(v)
                 }
@@ -493,7 +502,9 @@ object ModuleSolsticeClickgui : ClientModule(
         if (event.button == 0) {
             leftMouseDown = event.action == 1
             if (event.action == 0) {
+                val wasDragging = panels.any { it.dragging }
                 for (panel in panels) panel.dragging = false
+                if (wasDragging) saveState()
             }
         }
 
@@ -772,32 +783,25 @@ object ModuleSolsticeClickgui : ClientModule(
         val rr = radius.toFloat()
         val ph = panelMaxHeight.toFloat()
 
-        // 面板阴影 (blur 近似)
+        // 面板阴影
         ctx.drawSoftShadow(px, py, px + pw, py + ph, rr, 6f + blurStrength * 0.25f, alpha)
 
-        // 面板背景 darkBlack —— 标题栏区域用方角，其余保持圆角
         val bg = Color4b(24, 24, 24, (backgroundAlpha * alpha).roundToInt().coerceIn(0, 255))
-        // 先画完整圆角背景（底部圆角）
+        // 整板圆角底
         ctx.drawRoundedRect(px, py, px + pw, py + ph, rr, bg)
-        // 用方角矩形盖住标题栏区域的圆角，使标题栏下方为直角
-        if (rr > 0.5f) {
-            ctx.drawQuad(px, py, px + pw, py + headerHeight + rr, bg)
-        }
 
-        // 标题栏：上半部分圆角，下半部分方角（与列表直角相接）
+        // 标题栏：只要上方圆角，底部直角贴列表（无多余黑条）
         val accent = accentAt(py)
-        val titleBg = Color4b(accent.r, accent.g, accent.b, (90 * alpha).roundToInt())
-        // 标题栏上方圆角：用圆角矩形画一个高度为 rr 的条，只保留上边缘圆角效果
-        // 实际上 drawRoundedRect 四个角都有圆角，我们用 Quad 拼接实现"只有上方两个圆角"
-        // 方法：画一个从 py 到 py+rr 的圆角矩形，再用 Quad 补全下方
-        if (rr > 0.5f) {
-            // 上边缘圆角部分：画一个高度为 rr*2 的圆角矩形，然后只取上半部分
-            ctx.drawRoundedRect(px, py, px + pw, py + rr * 2f, rr, titleBg)
-        }
-        // 标题栏主体：方角矩形，从 py+rr 到 py+headerHeight
-        ctx.drawQuad(px, py + rr, px + pw, py + headerHeight, titleBg)
-        // 标题栏与列表分隔线
-        ctx.drawQuad(px, py + headerHeight - 1f, px + pw, py + headerHeight, accent.alpha((a * 0.9f).toInt()))
+        val titleBg = Color4b(accent.r, accent.g, accent.b, (100 * alpha).roundToInt().coerceIn(0, 255))
+        // 一次画满标题高度的圆角条
+        ctx.drawRoundedRect(px, py, px + pw, py + headerHeight + rr, rr, titleBg)
+        // 用标题色盖住标题底部圆角 → 下沿变直角，且不露面板黑边
+        ctx.drawQuad(px, py + headerHeight - max(1f, rr), px + pw, py + headerHeight, titleBg)
+        // 细分隔线（同色系，避免黑线）
+        ctx.drawQuad(
+            px, py + headerHeight - 1f, px + pw, py + headerHeight,
+            Color4b(accent.r, accent.g, accent.b, (min(255, a + 40))),
+        )
         ctx.text(
             font, cat.tag,
             (px + 8f).roundToInt(), (py + headerHeight / 2f - 4f).roundToInt(),
@@ -849,7 +853,8 @@ object ModuleSolsticeClickgui : ClientModule(
                 }
                 // 文字中心在 clip 内才画，防止标题栏上下溢出
                 val textCy = curY + itemHeight / 2f - 4f
-                if (textCy >= clipTop && textCy + 9f <= clipBottom) {
+                // 文字整行在裁剪区内才绘制，防止滚出标题/底边
+                if (textCy >= clipTop + 1f && textCy + 9f <= clipBottom - 1f) {
                     val modColor = if (mod.enabled) Color4b.WHITE.alpha(a) else Color4b(180, 180, 180, a)
                     ctx.text(font, mod.name, (px + 8f).roundToInt(), textCy.roundToInt(), modColor.argb, textShadow)
                     if (showStatusDot) {
@@ -879,8 +884,17 @@ object ModuleSolsticeClickgui : ClientModule(
             if (curY > clipBottom + itemHeight * 2) break
         }
 
-        // 底边遮罩，挡住下方溢出（与背景色一致，无缝衔接）
-        ctx.drawQuad(px, clipBottom - 1f, px + pw, clipBottom + 1f, bg)
+        // 顶/底遮罩：挡住滚动时溢出标题与底边的文字
+        ctx.drawQuad(px, py, px + pw, clipTop, titleBg)
+        // 重新画标题文字（遮罩盖住后补回）
+        ctx.text(
+            font, cat.tag,
+            (px + 8f).roundToInt(), (py + headerHeight / 2f - 4f).roundToInt(),
+            Color4b.WHITE.alpha(a).argb, textShadow,
+        )
+        ctx.drawQuad(px, py + headerHeight - 1f, px + pw, py + headerHeight, accent.alpha((a * 0.85f).toInt()))
+        // 底边
+        ctx.drawQuad(px, clipBottom - 2f, px + pw, py + ph, bg)
     }
 
     /* ============================= 设置项渲染 ============================= */
