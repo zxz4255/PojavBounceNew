@@ -83,7 +83,6 @@ object ModuleRiseClickgui : ClientModule(
     // 搜索
     private var searchText = ""
     private var searchFocused = false
-    private var suppressPauseUntil = 0L
 
     // 色板 + 透明度
     private val palette = listOf(
@@ -112,145 +111,32 @@ object ModuleRiseClickgui : ClientModule(
     private fun over(x: Float, y: Float, w: Float, h: Float) =
         mouseX >= x && mouseY >= y && mouseX < x + w && mouseY < y + h
 
-    /** 全部分类（保证侧边栏有分组） */
-    private fun allCategories(): List<ModuleCategory> {
-        val fromModules = ModuleManager.getModules()
-            .filter { !it.hidden }
-            .map { it.category }
-            .distinct()
-        val entries = try {
-            ModuleCategories.entries.toList()
-        } catch (_: Throwable) {
-            emptyList()
-        }
-        // 优先官方枚举顺序，再补模块里出现过的
-        val ordered = mutableListOf<ModuleCategory>()
-        for (c in entries) if (c !in ordered) ordered += c
-        for (c in fromModules) if (c !in ordered) ordered += c
-        return ordered
-    }
 
-    private fun catLabel(cat: ModuleCategory): String = try {
-        cat.tag
-    } catch (_: Throwable) {
-        cat.toString()
-    }
 
-    private fun modulesIn(cat: ModuleCategory): List<ClientModule> {
-        val q = searchText.trim().lowercase()
-        return ModuleManager.getModules()
-            .filter { !it.hidden && it.category == cat }
-            .filter { q.isEmpty() || it.name.lowercase().contains(q) || it.aliases.any { a -> a.lowercase().contains(q) } }
-            .sortedBy { it.name }
-    }
+    /* ============================= 输入层 ============================= */
 
-    private fun modulesSearchAll(): List<ClientModule> {
-        val q = searchText.trim().lowercase()
-        if (q.isEmpty()) return emptyList()
-        return ModuleManager.getModules()
-            .filter { !it.hidden }
-            .filter { it.name.lowercase().contains(q) || it.aliases.any { a -> a.lowercase().contains(q) } }
-            .sortedBy { it.name }
-    }
-
-    private fun collectValues(mod: ClientModule): List<Value<*>> = try {
-        mod.collectValuesRecursively().toList()
-    } catch (_: Exception) {
-        emptyList()
-    }
-
-    private fun getActual(v: Value<*>): Any? {
-        var o: Any? = try { v.get() } catch (_: Exception) { null }
-        var d = 0
-        while (o is Value<*> && d < 5) {
-            o = try { o.get() } catch (_: Exception) { null }
-            d++
-        }
-        return o
-    }
-
-    private fun trySet(v: Value<*>, value: Any) {
-        try {
-            v.javaClass.methods.firstOrNull { it.name == "set" && it.parameterCount == 1 }
-                ?.invoke(v, value)
-        } catch (_: Exception) {}
-    }
-
-    /** 解析数值范围：优先 RangedValue，否则反射 min/max */
-    private fun rangeOf(v: Value<*>): Pair<Float, Float>? {
-        if (v is RangedValue<*>) {
-            val minV = (v.range.start as? Number)?.toFloat()
-            val maxV = (v.range.endInclusive as? Number)?.toFloat()
-            if (minV != null && maxV != null && maxV > minV) return minV to maxV
-        }
-        return try {
-            val minM = v.javaClass.methods.firstOrNull { it.name.equals("getMinimum", true) || it.name == "getMin" }
-            val maxM = v.javaClass.methods.firstOrNull { it.name.equals("getMaximum", true) || it.name == "getMax" }
-            val minV = (minM?.takeIf { it.parameterCount == 0 }?.invoke(v) as? Number)?.toFloat()
-            val maxV = (maxM?.takeIf { it.parameterCount == 0 }?.invoke(v) as? Number)?.toFloat()
-            if (minV != null && maxV != null && maxV > minV) minV to maxV else null
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private fun applySliderValue(v: Value<*>, x1: Float, x2: Float) {
-        val range = rangeOf(v) ?: return
-        val (minV, maxV) = range
-        val nv = ((mouseX - x1) / (x2 - x1).coerceAtLeast(1f) * (maxV - minV) + minV).coerceIn(minV, maxV)
-        when (val actual = getActual(v)) {
-            is Float -> trySet(v, nv)
-            is Double -> trySet(v, nv.toDouble())
-            is Int -> trySet(v, nv.roundToInt())
-            is Long -> trySet(v, nv.toLong())
-            is Number -> trySet(v, nv)
-            else -> trySet(v, nv)
-        }
-    }
-
-    private fun readColor4b(actual: Any?): Color4b {
-        if (actual == null) return colAccent
-        return try {
-            when (actual) {
-                is Color4b -> actual
-                is Int -> Color4b(actual)
-                else -> {
-                    val argb = actual.javaClass.methods.firstOrNull {
-                        (it.name == "argb" || it.name == "getArgb") && it.parameterCount == 0
-                    }?.invoke(actual) as? Int
-                    if (argb != null) Color4b(argb) else colAccent
-                }
-            }
-        } catch (_: Exception) {
-            colAccent
-        }
-    }
-
-    private fun setColorValue(v: Value<*>, c: Color4b) {
-        try {
-            trySet(v, c)
-        } catch (_: Exception) {
-            trySet(v, c.argb)
-        }
-    }
-
-    /* —— Screen —— */
     private class RiseGuiScreen : Screen(Component.literal("RiseClickGui")) {
         override fun isPauseScreen() = false
-        override fun shouldCloseOnEsc() = false
+        // 与可用 ClickGuiScreen 一致：ESC 只关本界面，不打开游戏暂停
+        override fun shouldCloseOnEsc() = true
+
         override fun onClose() {
-            // 空：关闭只走 closeFromEsc
+            if (ModuleRiseClickgui.enabled) {
+                ModuleRiseClickgui.enabled = false
+            } else {
+                try { mc.gui.setScreen(null) } catch (_: Throwable) {}
+            }
         }
+
         override fun keyPressed(event: KeyEvent): Boolean {
             if (event.key() == GLFW.GLFW_KEY_ESCAPE) {
                 if (ModuleRiseClickgui.searchFocused) {
                     ModuleRiseClickgui.searchFocused = false
                 } else {
-                    ModuleRiseClickgui.closeFromEsc()
+                    onClose()
                 }
                 return true
             }
-            // 搜索：仅处理功能键；可打印字符 / 输入法由 charTyped 接收
             if (ModuleRiseClickgui.searchFocused) {
                 when (event.key()) {
                     GLFW.GLFW_KEY_BACKSPACE -> {
@@ -264,16 +150,11 @@ object ModuleRiseClickgui : ClientModule(
                         ModuleRiseClickgui.searchFocused = false
                         return true
                     }
-                    GLFW.GLFW_KEY_ESCAPE -> {
-                        ModuleRiseClickgui.searchFocused = false
-                        return true
-                    }
                 }
             }
             return true
         }
 
-        /** 输入法 / Unicode 字符入口（中文、全角等） */
         override fun charTyped(event: CharacterEvent): Boolean {
             if (!ModuleRiseClickgui.searchFocused) return true
             if (ModuleRiseClickgui.searchText.length >= 48) return true
@@ -305,49 +186,14 @@ object ModuleRiseClickgui : ClientModule(
         override fun mouseClicked(event: net.minecraft.client.input.MouseButtonEvent, doubleClick: Boolean): Boolean = true
         override fun mouseReleased(event: net.minecraft.client.input.MouseButtonEvent): Boolean = true
         override fun mouseDragged(event: net.minecraft.client.input.MouseButtonEvent, dx: Double, dy: Double): Boolean = true
-        override fun mouseScrolled(mouseX: Double, mouseY: Double, horizontal: Double, vertical: Double): Boolean = true
     }
 
     private fun openLayer() {
         if (mc.gui.screen() is RiseGuiScreen) return
-        try { mc.gui.setScreen(RiseGuiScreen()) } catch (_: Throwable) {
-            try { mc.execute { mc.gui.setScreen(RiseGuiScreen()) } } catch (_: Throwable) {}
-        }
-    }
-
-    /** ESC：立即关 GUI，短时清暂停（不延迟关屏） */
-    /**
-     * ESC 只关 ClickGUI，不影响游戏。
-     * 关屏后模块 handler 会停，所以用 mc.execute 连续清掉误弹的 PauseScreen。
-     */
-    private fun closeFromEsc() {
-        suppressPauseUntil = System.currentTimeMillis() + 700L
-        closeLayer()
-        enabled = false
-        scheduleDismissPause(24)
-    }
-
-    private fun dismissPauseIfNeeded() {
-        val scn = try { mc.gui.screen() } catch (_: Throwable) { null } ?: return
-        val sn = scn.javaClass.name
-        if (sn.contains("Pause", true) || sn.contains("GameMenu", true)) {
-            try { mc.gui.setScreen(null) } catch (_: Throwable) {}
-        }
-    }
-
-    private fun scheduleDismissPause(framesLeft: Int) {
-        if (framesLeft <= 0) return
         try {
-            mc.execute {
-                if (System.currentTimeMillis() < suppressPauseUntil) {
-                    dismissPauseIfNeeded()
-                    scheduleDismissPause(framesLeft - 1)
-                } else {
-                    dismissPauseIfNeeded()
-                }
-            }
+            mc.gui.setScreen(RiseGuiScreen())
         } catch (_: Throwable) {
-            dismissPauseIfNeeded()
+            try { mc.execute { mc.gui.setScreen(RiseGuiScreen()) } } catch (_: Throwable) {}
         }
     }
 
@@ -379,7 +225,6 @@ object ModuleRiseClickgui : ClientModule(
         alphaDragging = false
         scrollBarDrag = false
         searchFocused = false
-        dismissPauseIfNeeded()
     }
 
     @Suppress("unused")
@@ -397,7 +242,7 @@ object ModuleRiseClickgui : ClientModule(
         if (!enabled && scale < 0.01f) return@handler
         if (e.keyCode == GLFW.GLFW_KEY_ESCAPE && e.action == 1) {
             if (searchFocused) searchFocused = false
-            else if (enabled) closeFromEsc()
+            else if (enabled) enabled = false
         }
     }
 
@@ -598,7 +443,6 @@ object ModuleRiseClickgui : ClientModule(
         opacity = lerp(opacity, if (open) 1f else 0f, (dt * speed).coerceIn(0f, 1f))
         if (sVis < 0.01f && !open) return@handler
 
-        dismissPauseIfNeeded()
 
         mouseX = guiMX()
         mouseY = guiMY()
