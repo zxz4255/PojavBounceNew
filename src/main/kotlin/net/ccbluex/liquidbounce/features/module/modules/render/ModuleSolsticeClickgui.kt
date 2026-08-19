@@ -284,11 +284,42 @@ object ModuleSolsticeClickgui : ClientModule(
         }
     }
 
-    /** ESC 关闭：关模块 + 关 Screen，并短时屏蔽随后弹出的暂停菜单 */
+    /** ESC：立即关 GUI，并短时清掉随后可能出现的暂停界面（不延迟关屏） */
+    /**
+     * ESC 只关 ClickGUI，不影响游戏。
+     * 关屏后模块 handler 会停，所以用 mc.execute 连续清掉误弹的 PauseScreen。
+     */
     private fun closeFromEsc() {
-        suppressPauseUntil = System.currentTimeMillis() + 400L
-        enabled = false
+        suppressPauseUntil = System.currentTimeMillis() + 700L
+        // 先拆输入层，立刻回到游戏画面
         closeInputLayer()
+        enabled = false
+        // 不依赖 enabled 的 handler：主线程连续几帧清暂停
+        scheduleDismissPause(24)
+    }
+
+    private fun dismissPauseIfNeeded() {
+        val scn = try { mc.gui.screen() } catch (_: Throwable) { null } ?: return
+        val sn = scn.javaClass.name
+        if (sn.contains("Pause", true) || sn.contains("GameMenu", true)) {
+            try { mc.gui.setScreen(null) } catch (_: Throwable) {}
+        }
+    }
+
+    private fun scheduleDismissPause(framesLeft: Int) {
+        if (framesLeft <= 0) return
+        try {
+            mc.execute {
+                if (System.currentTimeMillis() < suppressPauseUntil) {
+                    dismissPauseIfNeeded()
+                    scheduleDismissPause(framesLeft - 1)
+                } else {
+                    dismissPauseIfNeeded()
+                }
+            }
+        } catch (_: Throwable) {
+            dismissPauseIfNeeded()
+        }
     }
 
     private fun closeInputLayer() {
@@ -415,12 +446,12 @@ object ModuleSolsticeClickgui : ClientModule(
     override fun onDisabled() {
         saveState()
         closeInputLayer()
-        // 注意：不立刻清空 panels，以便若需调试；下次 enabled 会 load
         listeningBind = null
         activeColorValue = null
         sliderDrag.clear()
         leftMouseDown = false
         for (panel in panels) panel.dragging = false
+        dismissPauseIfNeeded()
     }
 
     /* ============================= 事件处理 ============================= */
@@ -429,7 +460,7 @@ object ModuleSolsticeClickgui : ClientModule(
     @Suppress("unused")
     private val mouseRotHandler = handler<MouseRotationEvent> { event ->
         if (enabled || ease.percentage > 0.01f) {
-            event.cancel()
+            event.cancelEvent()
         }
     }
 
@@ -437,7 +468,7 @@ object ModuleSolsticeClickgui : ClientModule(
     @Suppress("unused")
     private val hotbarScrollHandler = handler<MouseScrollInHotbarEvent> { event ->
         if (enabled || ease.percentage > 0.01f) {
-            event.cancel()
+            event.cancelEvent()
         }
     }
 
@@ -454,7 +485,6 @@ object ModuleSolsticeClickgui : ClientModule(
                     closeFromEsc()
                 }
             }
-            event.cancel()
             return@handler
         }
         // 绑键监听
@@ -668,14 +698,7 @@ object ModuleSolsticeClickgui : ClientModule(
         val animAlpha = ease.easeOutExpo().coerceIn(0f, 1f)
         if (animAlpha < 0.0001f) return@handler
 
-        // ESC 关闭后短时清掉误弹的暂停界面
-        if (System.currentTimeMillis() < suppressPauseUntil) {
-            val scn = try { mc.gui.screen() } catch (_: Throwable) { null }
-            val sn = scn?.javaClass?.simpleName ?: ""
-            if (scn != null && (sn.contains("Pause", true) || sn.contains("GameMenu", true))) {
-                try { mc.gui.setScreen(null) } catch (_: Throwable) {}
-            }
-        }
+        dismissPauseIfNeeded()
 
         mouseX = guiMouseX()
         mouseY = guiMouseY()
