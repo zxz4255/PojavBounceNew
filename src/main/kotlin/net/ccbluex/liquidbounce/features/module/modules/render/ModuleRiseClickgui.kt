@@ -353,12 +353,12 @@ object ModuleRiseClickgui : ClientModule(
 
     @Suppress("unused")
     private val rotHandler = handler<MouseRotationEvent> { e ->
-        if (enabled || scale > 0.01f) e.cancelEvent()
+        if (enabled || scale > 0.01f) e.cancel()
     }
 
     @Suppress("unused")
     private val hotbarHandler = handler<MouseScrollInHotbarEvent> { e ->
-        if (enabled || scale > 0.01f) e.cancelEvent()
+        if (enabled || scale > 0.01f) e.cancel()
     }
 
     @Suppress("unused")
@@ -367,7 +367,7 @@ object ModuleRiseClickgui : ClientModule(
         if (e.keyCode == GLFW.GLFW_KEY_ESCAPE && e.action == 1) {
             if (searchFocused) searchFocused = false
             else if (enabled) closeFromEsc()
-            e.cancelEvent()
+            e.cancel()
         }
     }
 
