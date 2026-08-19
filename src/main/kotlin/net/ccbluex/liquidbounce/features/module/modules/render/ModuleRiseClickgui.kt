@@ -235,14 +235,17 @@ object ModuleRiseClickgui : ClientModule(
     /* —— Screen —— */
     private class RiseGuiScreen : Screen(Component.literal("RiseClickGui")) {
         override fun isPauseScreen() = false
-        override fun shouldCloseOnEsc() = false
+        override fun shouldCloseOnEsc() = true
+        override fun onClose() {
+            ModuleRiseClickgui.enabled = false
+            // 不 super，避免 ESC 打开暂停菜单
+        }
         override fun keyPressed(event: KeyEvent): Boolean {
             if (event.key() == GLFW.GLFW_KEY_ESCAPE) {
                 if (ModuleRiseClickgui.searchFocused) {
                     ModuleRiseClickgui.searchFocused = false
                 } else {
                     ModuleRiseClickgui.enabled = false
-                    try { mc.gui.setScreen(null) } catch (_: Throwable) {}
                 }
                 return true
             }
@@ -328,8 +331,9 @@ object ModuleRiseClickgui : ClientModule(
     private val keyHandler = handler<KeyboardKeyEvent> { e ->
         if (!enabled && scale < 0.01f) return@handler
         if (e.keyCode == GLFW.GLFW_KEY_ESCAPE && e.action == 1) {
-            // Let the RiseGuiScreen handle ESC (close GUI) and prevent further processing
-            return@handler
+            if (searchFocused) searchFocused = false
+            else if (enabled) enabled = false
+            try { e.cancelEvent() } catch (_: Throwable) {}
         }
     }
 
