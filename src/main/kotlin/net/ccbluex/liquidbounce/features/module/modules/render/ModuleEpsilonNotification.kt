@@ -13,6 +13,9 @@ package net.ccbluex.liquidbounce.features.module.modules.render
 
 import net.ccbluex.liquidbounce.config.types.list.Tagged
 import net.ccbluex.liquidbounce.event.events.OverlayRenderEvent
+import net.ccbluex.liquidbounce.event.events.ServerConnectEvent
+import net.ccbluex.liquidbounce.event.events.NotificationEvent
+import net.ccbluex.liquidbounce.event.events.ModuleToggleEvent
 import net.ccbluex.liquidbounce.event.handler
 import net.ccbluex.liquidbounce.features.module.ClientModule
 import net.ccbluex.liquidbounce.features.module.ModuleCategories
@@ -145,6 +148,42 @@ object ModuleEpsilonNotification : ClientModule(
     }
 
     private fun isLeftDocked() = anchorH == AnchorH.LEFT
+
+
+    @Suppress("unused")
+    private val toggleHandler = handler<ModuleToggleEvent> { ev ->
+        if (!enabled) return@handler
+        if (ev.hidden) return@handler
+        if (ev.moduleName.equals(name, true) || ev.moduleName.contains("Notification", true)) return@handler
+        postToggle(ev.moduleName, ev.enabled)
+    }
+
+    @Suppress("unused")
+    private val notifEventHandler = handler<NotificationEvent> { ev ->
+        if (!enabled) return@handler
+        val mode = when (ev.severity) {
+            NotificationEvent.Severity.ERROR -> Mode.ERROR
+            NotificationEvent.Severity.SUCCESS, NotificationEvent.Severity.ENABLED -> Mode.SUCCESS
+            NotificationEvent.Severity.DISABLED -> Mode.ERROR
+            else -> Mode.INFO
+        }
+        val title = ev.title.ifBlank { "Notice" }
+        val msg = ev.message
+        post(title, msg, mode)
+    }
+
+    @Suppress("unused")
+    private val connectHandler = handler<ServerConnectEvent> { ev ->
+        if (!enabled) return@handler
+        val addr = try { ev.address.toString() } catch (_: Throwable) {
+            try { ev.serverInfo.name } catch (_: Throwable) { "server" }
+        }
+        post("Connecting", addr.take(40), Mode.INFO)
+    }
+
+    override suspend fun enabledEffect() {
+        post("Epsilon Notification", "Enabled", Mode.SUCCESS)
+    }
 
     @Suppress("unused")
     private val renderHandler = handler<OverlayRenderEvent> { event ->
