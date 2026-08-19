@@ -179,17 +179,82 @@ object ModuleSolsticeModernTargetInfo : ClientModule(
     private fun textW(font: Font, text: String, scale: Float): Float = font.width(text) * scale
 
     /**
-     * 与 ModuleSolsticeTargetHud 相同：玩家 skin.body().texturePath()，
-     * 非玩家用骨架贴图。不依赖 PlayerFaceRenderer / DefaultPlayerSkin.texture()。
+     * 解析头部贴图：玩家皮肤（多 API 回退）+ 常见生物 + 渲染器反射。
      */
-    private fun headTexture(entity: LivingEntity): Identifier? = when (entity) {
-        is AbstractClientPlayer -> entity.skin.body().texturePath()
-        else -> Identifier.withDefaultNamespace("textures/entity/skeleton/skeleton.png")
+    private fun headTexture(entity: LivingEntity): Identifier? {
+        if (entity is AbstractClientPlayer) {
+            // 1.21+ skin.body().texturePath()
+            runCatching { entity.skin.body().texturePath() }.getOrNull()?.let { return it }
+            // 其它映射/字段
+            runCatching {
+                val skin = entity.skin
+                for (m in skin.javaClass.methods) {
+                    if (m.parameterCount != 0) continue
+                    val n = m.name.lowercase()
+                    if (n.contains("texture") || n == "body") {
+                        val r = m.invoke(skin) ?: continue
+                        when (r) {
+                            is Identifier -> return r
+                            else -> {
+                                val tp = r.javaClass.methods.firstOrNull {
+                                    it.parameterCount == 0 && it.name.lowercase().contains("texture")
+                                }?.invoke(r)
+                                if (tp is Identifier) return tp
+                            }
+                        }
+                    }
+                }
+                null
+            }.getOrNull()?.let { return it }
+            // 默认 Steve
+            return Identifier.withDefaultNamespace("textures/entity/player/wide/steve.png")
+        }
+
+        // 通过实体渲染器取贴图（覆盖大部分生物）
+        runCatching {
+            val dispatcher = mc.entityRenderDispatcher
+            val renderer = dispatcher.getRenderer(entity) ?: return@runCatching null
+            for (m in renderer.javaClass.methods) {
+                if (m.parameterCount == 1 && m.name.lowercase().contains("texture")) {
+                    val r = m.invoke(renderer, entity)
+                    if (r is Identifier) return r
+                }
+                if (m.parameterCount == 0 && m.name.lowercase().contains("texture")) {
+                    val r = m.invoke(renderer)
+                    if (r is Identifier) return r
+                }
+            }
+            null
+        }.getOrNull()?.let { return it }
+
+        // 常见类型硬编码回退
+        val path = when (entity.type.toString().lowercase()) {
+            in listOf() -> null
+            else -> null
+        }
+        val key = entity.type.descriptionId.lowercase()
+        return when {
+            "skeleton" in key -> Identifier.withDefaultNamespace("textures/entity/skeleton/skeleton.png")
+            "zombie" in key && "pig" !in key -> Identifier.withDefaultNamespace("textures/entity/zombie/zombie.png")
+            "creeper" in key -> Identifier.withDefaultNamespace("textures/entity/creeper/creeper.png")
+            "enderman" in key -> Identifier.withDefaultNamespace("textures/entity/enderman/enderman.png")
+            "spider" in key && "cave" !in key -> Identifier.withDefaultNamespace("textures/entity/spider/spider.png")
+            "cave_spider" in key || "cavespider" in key -> Identifier.withDefaultNamespace("textures/entity/spider/cave_spider.png")
+            "cow" in key -> Identifier.withDefaultNamespace("textures/entity/cow/cow.png")
+            "pig" in key && "piglin" !in key && "zombie" !in key -> Identifier.withDefaultNamespace("textures/entity/pig/pig.png")
+            "sheep" in key -> Identifier.withDefaultNamespace("textures/entity/sheep/sheep.png")
+            "chicken" in key -> Identifier.withDefaultNamespace("textures/entity/chicken.png")
+            "blaze" in key -> Identifier.withDefaultNamespace("textures/entity/blaze.png")
+            "witch" in key -> Identifier.withDefaultNamespace("textures/entity/witch.png")
+            "iron_golem" in key || "irongolem" in key -> Identifier.withDefaultNamespace("textures/entity/iron_golem/iron_golem.png")
+            "villager" in key -> Identifier.withDefaultNamespace("textures/entity/villager/villager.png")
+            "piglin" in key -> Identifier.withDefaultNamespace("textures/entity/piglin/piglin.png")
+            else -> Identifier.withDefaultNamespace("textures/entity/steve.png")
+        }
     }
 
     /**
-     * 与 TargetHud 相同的 blit 签名与 UV。
-     * 头正面：u=8/64, v=8/64 → 16/64；帽子层：40/64 → 48/64。
+     * 与 ModuleSolsticeTargetHud 一致的 blit UV（本 fork 签名）。
      */
     private fun GuiGraphicsExtractor.drawEntityHead(
         entity: LivingEntity,
@@ -202,20 +267,34 @@ object ModuleSolsticeModernTargetInfo : ClientModule(
         val y0 = y.roundToInt()
         val x1 = (x + size).roundToInt()
         val y1 = (y + size).roundToInt()
+        if (x1 <= x0 || y1 <= y0) return
 
-        // 头部正面
-        blit(
-            texture,
-            x0, y0, x1, y1,
-            8f / 64f, 8f / 64f, 16f / 64f, 16f / 64f,
-        )
-        // 帽子层（失败则忽略，部分实体无帽）
+        // TargetHud 同款 UV
         runCatching {
             blit(
                 texture,
                 x0, y0, x1, y1,
-                40f / 64f, 8f / 64f, 48f / 64f, 16f / 64f,
+                8f / 64f, 16f / 64f, 8f / 64f, 16f / 64f,
             )
+        }.onFailure {
+            // 备选：u0,v0,u1,v1 形式
+            runCatching {
+                blit(
+                    texture,
+                    x0, y0, x1, y1,
+                    8f / 64f, 8f / 64f, 16f / 64f, 16f / 64f,
+                )
+            }
+        }
+        // 玩家帽子层
+        if (entity is AbstractClientPlayer) {
+            runCatching {
+                blit(
+                    texture,
+                    x0, y0, x1, y1,
+                    40f / 64f, 8f / 64f, 8f / 64f, 16f / 64f,
+                )
+            }
         }
     }
 
