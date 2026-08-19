@@ -367,6 +367,7 @@ object ModuleRiseClickgui : ClientModule(
         if (e.keyCode == GLFW.GLFW_KEY_ESCAPE && e.action == 1) {
             if (searchFocused) searchFocused = false
             else if (enabled) closeFromEsc()
+            e.cancelEvent()
         }
     }
 
