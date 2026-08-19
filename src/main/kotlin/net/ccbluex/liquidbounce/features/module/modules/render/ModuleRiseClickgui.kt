@@ -328,13 +328,8 @@ object ModuleRiseClickgui : ClientModule(
     private val keyHandler = handler<KeyboardKeyEvent> { e ->
         if (!enabled && scale < 0.01f) return@handler
         if (e.keyCode == GLFW.GLFW_KEY_ESCAPE && e.action == 1) {
-            if (searchFocused) {
-                searchFocused = false
-            } else {
-                enabled = false
-            }
-            // Cancel the ESC event so it does not propagate to the game and trigger the pause menu
-            e.cancelEvent()
+            // Let the RiseGuiScreen handle ESC (close GUI) and prevent further processing
+            return@handler
         }
     }
 
