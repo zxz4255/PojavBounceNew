@@ -207,11 +207,16 @@ object ModuleSolsticeClickgui : ClientModule(
     /* ============================= 值工具 ============================= */
 
     private fun getActualValue(v: Value<*>): Any? {
-        var obj: Any? = try { v.get() } catch (_: Exception) { null }
-        var depth = 0
-        while (obj is Value<*> && depth < 5) && depth < 5) {
-            obj = try { obj.get() } catch (_: Exception) { null }
-            depth++
+    var obj: Any? = try { v.get() } catch (_: Exception) { null }
+    var depth = 0
+    while (obj is Value<*> && depth < 5) {
+        val current = obj          // ← 提取到局部变量，智能转换生效
+        obj = try {
+            (current as Value<*>).get()
+        } catch (_: Exception) {
+            null
+        }
+        depth++
         }
         return obj
     }
