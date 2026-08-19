@@ -45,7 +45,7 @@ object ModuleSolsticeNotification : ClientModule(
     private val style by enumChoice("Style", Style.SOLARIS)
     private val showOnToggle by boolean("Show On Toggle", true)
     private val showOnJoin by boolean("Show On Join", true)
-    private val colorGradient by boolean("Color Gradient", false)
+    private val colorGradient by boolean("Color Gradient", true)
     private val limitNotifications by boolean("Limit Notifications", false)
     private val maxNotifications by int("Max Notifications", 6, 1..25)
     private val fontSize by float("Font Size", 11f, 8f..20f)
@@ -264,40 +264,46 @@ object ModuleSolsticeNotification : ClientModule(
                 Type.ERROR -> theme = Color4b(255, 0, 0, 255)
                 Type.INFO -> Unit
             }
-            // 整条一体圆角背景（无左右黑竖条、无双层进度造成的分裂）
-            val panelBg = Color4b(20, 20, 24, (200 * n.currentDuration).toInt().coerceIn(0, 230))
-            drawShadow(ctx, x, boxTop, x + boxW, boxBottom, Color4b(0, 0, 0, 80))
-            ctx.drawRoundedRect(x, boxTop, x + boxW, boxBottom, cornerRadius, panelBg)
+            // 整体水平主题渐变背景 + 阴影（无黑竖条）
+            val aMul = n.currentDuration
+            val cLeft = theme.alpha((210 * aMul).toInt().coerceIn(0, 255))
+            val cRight = getThemedColor(boxTop * 2f + boxW * 1.2f)
+                .alpha((160 * aMul).toInt().coerceIn(0, 255))
+            drawShadow(ctx, x, boxTop, x + boxW, boxBottom, Color4b(0, 0, 0, (70 * aMul).toInt()))
+            if (colorGradient) {
+                // 连续分段渐变铺满整条，首尾不单独圆角避免分裂
+                val segs = 16
+                val segW = boxW / segs
+                for (i in 0 until segs) {
+                    val t0 = i / (segs - 1).toFloat().coerceAtLeast(1f)
+                    val s = t0 * t0 * (3f - 2f * t0)
+                    val col = Color4b(
+                        lerp(cLeft.r.toFloat(), cRight.r.toFloat(), s).toInt().coerceIn(0, 255),
+                        lerp(cLeft.g.toFloat(), cRight.g.toFloat(), s).toInt().coerceIn(0, 255),
+                        lerp(cLeft.b.toFloat(), cRight.b.toFloat(), s).toInt().coerceIn(0, 255),
+                        lerp(cLeft.a.toFloat(), cRight.a.toFloat(), s).toInt().coerceIn(0, 255),
+                    )
+                    val sx = x + segW * i
+                    val ex = x + segW * (i + 1) + 0.25f
+                    ctx.drawQuad(sx, boxTop, ex.coerceAtMost(x + boxW), boxBottom, col)
+                }
+                // 圆角遮罩感：四角用深色淡化（可选，轻量）
+            } else {
+                ctx.drawRoundedRect(x, boxTop, x + boxW, boxBottom, cornerRadius, cLeft)
+            }
 
-            // 底部细进度条：从右向左缩短（剩余时间），单色连续，不圆角分段
+            // 底部细进度（剩余时间），主题色连续条
             val remain = (1f - percentDone).coerceIn(0f, 1f)
             val barH = (3f * (fontSize / 11f)).coerceIn(2f, 5f)
             val barY1 = boxBottom - barH - 1f
             val barY2 = boxBottom - 1f
-            val barPad = cornerRadius.coerceAtMost(6f)
+            val barPad = 4f
             val barLeft = x + barPad
             val barRight = x + boxW - barPad
             val barW = (barRight - barLeft) * remain
             if (barW > 0.5f) {
-                val barCol = theme.alpha((220 * n.currentDuration).toInt().coerceIn(0, 255))
-                if (colorGradient) {
-                    val c2 = getThemedColor(boxTop * 2f + boxW).alpha(barCol.a)
-                    // 连续分段，无首尾单独圆角，避免左右多出一块
-                    val segs = 12
-                    val segW = barW / segs
-                    for (i in 0 until segs) {
-                        val t0 = i / segs.toFloat()
-                        val col = Color4b(
-                            lerp(barCol.r.toFloat(), c2.r.toFloat(), t0).toInt().coerceIn(0, 255),
-                            lerp(barCol.g.toFloat(), c2.g.toFloat(), t0).toInt().coerceIn(0, 255),
-                            lerp(barCol.b.toFloat(), c2.b.toFloat(), t0).toInt().coerceIn(0, 255),
-                            barCol.a,
-                        )
-                        ctx.drawQuad(barLeft + segW * i, barY1, barLeft + segW * (i + 1), barY2, col)
-                    }
-                } else {
-                    ctx.drawQuad(barLeft, barY1, barLeft + barW, barY2, barCol)
-                }
+                val barCol = Color4b(255, 255, 255, (200 * aMul).toInt().coerceIn(0, 255))
+                ctx.drawQuad(barLeft, barY1, barLeft + barW, barY2, barCol)
             }
 
             drawScaledText(ctx, n.message, x + 10f, boxTop + 10f * (fontSize / 11f), Color4b.WHITE)
