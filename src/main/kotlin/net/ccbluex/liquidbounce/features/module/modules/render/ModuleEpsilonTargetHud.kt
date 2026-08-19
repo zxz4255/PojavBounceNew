@@ -121,7 +121,7 @@ object ModuleEpsilonTargetHud : ClientModule(
         }
         if (isRenderable(fromKa)) return fromKa
         // 聊天界面预览自身（对应原版 HudEditor）
-        if (showInChat && mc.screen is ChatScreen) {
+        if (showInChat && (try { mc.gui.screen() } catch (_: Throwable) { null }) is ChatScreen) {
             return mc.player
         }
         return null
