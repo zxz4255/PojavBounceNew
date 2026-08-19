@@ -429,7 +429,7 @@ object ModuleSolsticeClickgui : ClientModule(
     @Suppress("unused")
     private val mouseRotHandler = handler<MouseRotationEvent> { event ->
         if (enabled || ease.percentage > 0.01f) {
-            event.cancelEvent()
+            event.cancel()
         }
     }
 
@@ -437,7 +437,7 @@ object ModuleSolsticeClickgui : ClientModule(
     @Suppress("unused")
     private val hotbarScrollHandler = handler<MouseScrollInHotbarEvent> { event ->
         if (enabled || ease.percentage > 0.01f) {
-            event.cancelEvent()
+            event.cancel()
         }
     }
 
@@ -454,7 +454,7 @@ object ModuleSolsticeClickgui : ClientModule(
                     closeFromEsc()
                 }
             }
-            event.cancelEvent()
+            event.cancel()
             return@handler
         }
         // 绑键监听
