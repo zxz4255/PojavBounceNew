@@ -441,7 +441,10 @@ object ModuleSolsticeClickgui : ClientModule(
         // ESC 关闭 (原版: 非绑定状态且按下时 toggle)
         if (event.keyCode == GLFW.GLFW_KEY_ESCAPE) {
             if (listeningBind == null && activeColorValue == null && event.action == 1) {
+                // 只关闭GUI，不设置setScreen(null)，避免触发游戏暂停菜单
                 enabled = false
+                // 不调用 mc.gui.setScreen(null)，让游戏继续运行，
+                // ESC事件已经被点击GUI拦截了，不会继续传播到游戏系统
             } else if (event.action == 1) {
                 listeningBind = null
                 activeColorValue = null
