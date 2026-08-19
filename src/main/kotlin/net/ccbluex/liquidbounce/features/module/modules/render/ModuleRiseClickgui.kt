@@ -83,6 +83,7 @@ object ModuleRiseClickgui : ClientModule(
     // 搜索
     private var searchText = ""
     private var searchFocused = false
+    private var suppressPauseUntil = 0L
 
     // 色板 + 透明度
     private val palette = listOf(
@@ -236,17 +237,16 @@ object ModuleRiseClickgui : ClientModule(
     /* —— Screen —— */
     private class RiseGuiScreen : Screen(Component.literal("RiseClickGui")) {
         override fun isPauseScreen() = false
-        override fun shouldCloseOnEsc() = true
+        override fun shouldCloseOnEsc() = false
         override fun onClose() {
-            ModuleRiseClickgui.enabled = false
-            // 不 super，避免 ESC 打开暂停菜单
+            // 空：关闭只走 closeFromEsc
         }
         override fun keyPressed(event: KeyEvent): Boolean {
             if (event.key() == GLFW.GLFW_KEY_ESCAPE) {
                 if (ModuleRiseClickgui.searchFocused) {
                     ModuleRiseClickgui.searchFocused = false
                 } else {
-                    ModuleRiseClickgui.enabled = false
+                    ModuleRiseClickgui.closeFromEsc()
                 }
                 return true
             }
@@ -315,6 +315,12 @@ object ModuleRiseClickgui : ClientModule(
         }
     }
 
+    private fun closeFromEsc() {
+        suppressPauseUntil = System.currentTimeMillis() + 400L
+        enabled = false
+        closeLayer()
+    }
+
     private fun closeLayer() {
         if (mc.gui.screen() is RiseGuiScreen) {
             try { mc.gui.setScreen(null) } catch (_: Throwable) {
@@ -360,7 +366,7 @@ object ModuleRiseClickgui : ClientModule(
         if (!enabled && scale < 0.01f) return@handler
         if (e.keyCode == GLFW.GLFW_KEY_ESCAPE && e.action == 1) {
             if (searchFocused) searchFocused = false
-            else if (enabled) enabled = false
+            else if (enabled) closeFromEsc()
         }
     }
 
@@ -560,6 +566,14 @@ object ModuleRiseClickgui : ClientModule(
         val sVis = if (scaleAnim) easeOutExpo(scale) else if (open) 1f else 0f
         opacity = lerp(opacity, if (open) 1f else 0f, (dt * speed).coerceIn(0f, 1f))
         if (sVis < 0.01f && !open) return@handler
+
+        if (System.currentTimeMillis() < suppressPauseUntil) {
+            val scn = try { mc.gui.screen() } catch (_: Throwable) { null }
+            val sn = scn?.javaClass?.simpleName ?: ""
+            if (scn != null && (sn.contains("Pause", true) || sn.contains("GameMenu", true))) {
+                try { mc.gui.setScreen(null) } catch (_: Throwable) {}
+            }
+        }
 
         mouseX = guiMX()
         mouseY = guiMY()
