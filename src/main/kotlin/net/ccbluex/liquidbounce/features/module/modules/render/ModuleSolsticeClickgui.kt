@@ -17,6 +17,8 @@
 
 package net.ccbluex.liquidbounce.features.module.modules.render
 
+import net.minecraft.client.input.MouseButtonEvent
+
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonArray
@@ -128,123 +130,15 @@ object ModuleSolsticeClickgui : ClientModule(
         }
     }
 
-    /**
-     * 对应 ClickGui::getEaseAnim
-     * mode 0 = Zoom → easeOutExpo
-     * mode 1 = Bounce → enable: easeOutElastic / disable: easeOutBack
-     */
-    private fun getEaseAnim(ease: EasingUtil, mode: Int): Float = when (mode) {
-        1 -> if (enabled) ease.easeOutElastic() else ease.easeOutBack()
-        else -> ease.easeOutExpo()
-    }
 
-    /** MathUtils::lerp */
-    private fun lerp(a: Float, b: Float, t: Float): Float = a + t * (b - a)
 
-    /** ColorUtils::LerpColors / getThemedColor */
-    private fun getThemedColor(index: Float, ms: Long = 0L): Color4b {
-        val colors = listOf(themeA, themeB, themeC)
-        val time = 10000.0f / themeSeconds.coerceAtLeast(0.01f)
-        val now = if (ms == 0L) System.currentTimeMillis() else ms
-        val angle = ((now + index.toLong()) % time.toLong()).toFloat()
-        val segmentTime = time / colors.size
-        val seg = (angle / segmentTime).toInt() % colors.size
-        val t = (angle / segmentTime - (angle / segmentTime).toInt()).coerceIn(0f, 1f)
-        val s = colors[seg]
-        val e = colors[(seg + 1) % colors.size]
-        return Color4b(
-            lerp(s.r.toFloat(), e.r.toFloat(), t).toInt().coerceIn(0, 255),
-            lerp(s.g.toFloat(), e.g.toFloat(), t).toInt().coerceIn(0, 255),
-            lerp(s.b.toFloat(), e.b.toFloat(), t).toInt().coerceIn(0, 255),
-            lerp(s.a.toFloat(), e.a.toFloat(), t).toInt().coerceIn(0, 255),
-        )
-    }
+    /* ============================= 输入层 Screen ============================= */
 
-    private fun accentAt(y: Float): Color4b =
-        if (useThemeAccent) getThemedColor(y * 2f) else accentColor
-
-    /* ============================= 内部状态 ============================= */
-
-    private val ease = EasingUtil()
-    private var lastFrameNs = 0L
-    private var isPressingShift = false
-    private var scrollDirection = 0
-    private var leftMouseDown = false
-    private var suppressPauseUntil = 0L
-
-    private data class PanelState(
-        val category: ModuleCategory?,
-        var x: Float, var y: Float,
-        var scrollOffset: Float = 0f,
-        var targetScroll: Float = 0f,
-        var dragging: Boolean = false,
-        var dragOffsetX: Float = 0f,
-        var dragOffsetY: Float = 0f,
-    )
-    private val panels = mutableListOf<PanelState>()
-    private var expandedModule: ClientModule? = null
-    private var listeningBind: Value<*>? = null
-    private val collapsedGroups = mutableSetOf<Value<*>>()
-    private val sliderDrag = IdentityHashMap<Value<*>, Float>()   // 滑块拖动值
-    private var activeColorValue: Value<*>? = null
-    private val paletteColors = listOf(
-        Color4b(0xE9, 0xA8, 0xBC), Color4b(0x6E, 0xC8, 0xF1), Color4b(255, 255, 255),
-        Color4b(255, 70, 70), Color4b(255, 170, 40), Color4b(255, 230, 60),
-        Color4b(90, 230, 110), Color4b(60, 200, 230), Color4b(140, 110, 255),
-        Color4b(255, 120, 200), Color4b(40, 40, 40), Color4b(200, 200, 200),
-    )
-
-    private var mouseX = 0f
-    private var mouseY = 0f
-
-    /* ============================= 坐标工具 ============================= */
-
-    private fun guiMouseX(): Float =
-        (mc.mouseHandler.xpos() * mc.window.guiScaledWidth / mc.window.width).toFloat()
-
-    private fun guiMouseY(): Float =
-        (mc.mouseHandler.ypos() * mc.window.guiScaledHeight / mc.window.height).toFloat()
-
-    /* ============================= 值工具 ============================= */
-
-    private fun getActualValue(v: Value<*>): Any? {
-    var obj: Any? = try { v.get() } catch (_: Exception) { null }
-    var depth = 0
-    while (obj is Value<*> && depth < 5) {
-        val current = obj          // ← 提取到局部变量，智能转换生效
-        obj = try {
-            (current as Value<*>).get()
-        } catch (_: Exception) {
-            null
-        }
-        depth++
-        }
-        return obj
-    }
-
-    private fun trySetValue(v: Value<*>, value: Any) {
-        try {
-            v.javaClass.methods.firstOrNull { it.name == "set" && it.parameterCount == 1 }?.invoke(v, value)
-        } catch (_: Exception) {}
-    }
-
-    private fun isGroupValue(v: Value<*>): Boolean = try {
-        v.javaClass.simpleName.contains("Group", true) || v.javaClass.simpleName.contains("Container", true)
-    } catch (_: Exception) { false }
-
-    private fun collectValues(module: ClientModule): List<Value<*>> = try {
-        module.collectValuesRecursively().toList()
-    } catch (_: Exception) { emptyList() }
-
-    /* ============================= 输入隔离 (Screen 图层) ============================= */
-
-    /**
-     * 透明 Screen：打开时接管鼠标/键盘，游戏不再出现十字准星、不再攻击/转向。
-     * 实际 UI 仍由 OverlayRenderEvent 绘制。
-     */
     private class SolsticeClickGuiScreen : Screen(Component.literal("SolsticeClickGui")) {
         override fun isPauseScreen(): Boolean = false
-        override fun shouldCloseOnEsc(): Boolean = false
+
+        // 与可用 ClickGuiScreen 一致：ESC 走 onClose，不会再映射成游戏暂停
+        override fun shouldCloseOnEsc(): Boolean = true
 
         override fun keyPressed(event: KeyEvent): Boolean {
             if (event.key() == GLFW.GLFW_KEY_ESCAPE) {
@@ -255,22 +149,24 @@ object ModuleSolsticeClickgui : ClientModule(
                     ModuleSolsticeClickgui.activeColorValue = null
                     return true
                 }
-                ModuleSolsticeClickgui.closeFromEsc()
+                onClose()
                 return true
             }
             return true
         }
 
         override fun onClose() {
-            // 空实现：关闭只走 closeFromEsc / onDisabled，避免 super 打开暂停界面
+            // 只关模块/GUI，不调用 super，避免进入暂停界面
+            if (ModuleSolsticeClickgui.enabled) {
+                ModuleSolsticeClickgui.enabled = false
+            } else {
+                try { mc.gui.setScreen(null) } catch (_: Throwable) {}
+            }
         }
 
-
-        override fun mouseClicked(event: net.minecraft.client.input.MouseButtonEvent, doubleClick: Boolean): Boolean = true
-        override fun mouseReleased(event: net.minecraft.client.input.MouseButtonEvent): Boolean = true
-        override fun mouseDragged(event: net.minecraft.client.input.MouseButtonEvent, dx: Double, dy: Double): Boolean = true
-        override fun mouseScrolled(mouseX: Double, mouseY: Double, horizontal: Double, vertical: Double): Boolean = true
-        // 不 override render：UI 由 OverlayRenderEvent 绘制，避免签名不匹配
+        override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean = true
+        override fun mouseReleased(event: MouseButtonEvent): Boolean = true
+        override fun mouseDragged(event: MouseButtonEvent, dx: Double, dy: Double): Boolean = true
     }
 
     private fun openInputLayer() {
@@ -281,44 +177,6 @@ object ModuleSolsticeClickgui : ClientModule(
             try {
                 mc.execute { mc.gui.setScreen(SolsticeClickGuiScreen()) }
             } catch (_: Throwable) {}
-        }
-    }
-
-    /** ESC：立即关 GUI，并短时清掉随后可能出现的暂停界面（不延迟关屏） */
-    /**
-     * ESC 只关 ClickGUI，不影响游戏。
-     * 关屏后模块 handler 会停，所以用 mc.execute 连续清掉误弹的 PauseScreen。
-     */
-    private fun closeFromEsc() {
-        suppressPauseUntil = System.currentTimeMillis() + 700L
-        // 先拆输入层，立刻回到游戏画面
-        closeInputLayer()
-        enabled = false
-        // 不依赖 enabled 的 handler：主线程连续几帧清暂停
-        scheduleDismissPause(24)
-    }
-
-    private fun dismissPauseIfNeeded() {
-        val scn = try { mc.gui.screen() } catch (_: Throwable) { null } ?: return
-        val sn = scn.javaClass.name
-        if (sn.contains("Pause", true) || sn.contains("GameMenu", true)) {
-            try { mc.gui.setScreen(null) } catch (_: Throwable) {}
-        }
-    }
-
-    private fun scheduleDismissPause(framesLeft: Int) {
-        if (framesLeft <= 0) return
-        try {
-            mc.execute {
-                if (System.currentTimeMillis() < suppressPauseUntil) {
-                    dismissPauseIfNeeded()
-                    scheduleDismissPause(framesLeft - 1)
-                } else {
-                    dismissPauseIfNeeded()
-                }
-            }
-        } catch (_: Throwable) {
-            dismissPauseIfNeeded()
         }
     }
 
@@ -451,7 +309,6 @@ object ModuleSolsticeClickgui : ClientModule(
         sliderDrag.clear()
         leftMouseDown = false
         for (panel in panels) panel.dragging = false
-        dismissPauseIfNeeded()
     }
 
     /* ============================= 事件处理 ============================= */
@@ -482,7 +339,7 @@ object ModuleSolsticeClickgui : ClientModule(
                     listeningBind = null
                     activeColorValue = null
                 } else if (enabled) {
-                    closeFromEsc()
+                    enabled = false
                 }
             }
             return@handler
@@ -698,7 +555,6 @@ object ModuleSolsticeClickgui : ClientModule(
         val animAlpha = ease.easeOutExpo().coerceIn(0f, 1f)
         if (animAlpha < 0.0001f) return@handler
 
-        dismissPauseIfNeeded()
 
         mouseX = guiMouseX()
         mouseY = guiMouseY()
