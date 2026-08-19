@@ -25,6 +25,7 @@ import net.minecraft.client.gui.Font
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.input.KeyEvent
+import net.minecraft.client.input.CharacterEvent
 import net.minecraft.network.chat.Component
 import org.lwjgl.glfw.GLFW
 import java.util.IdentityHashMap
@@ -249,12 +250,13 @@ object ModuleRiseClickgui : ClientModule(
                 }
                 return true
             }
-            // 搜索输入
+            // 搜索：仅处理功能键；可打印字符 / 输入法由 charTyped 接收
             if (ModuleRiseClickgui.searchFocused) {
                 when (event.key()) {
                     GLFW.GLFW_KEY_BACKSPACE -> {
                         if (ModuleRiseClickgui.searchText.isNotEmpty()) {
                             ModuleRiseClickgui.searchText = ModuleRiseClickgui.searchText.dropLast(1)
+                            ModuleRiseClickgui.targetScroll = 0f
                         }
                         return true
                     }
@@ -262,18 +264,44 @@ object ModuleRiseClickgui : ClientModule(
                         ModuleRiseClickgui.searchFocused = false
                         return true
                     }
-                    else -> {
-                        val name = GLFW.glfwGetKeyName(event.key(), event.scancode())
-                        if (name != null && name.length == 1 && ModuleRiseClickgui.searchText.length < 32) {
-                            ModuleRiseClickgui.searchText += name
-                            ModuleRiseClickgui.targetScroll = 0f
-                            return true
-                        }
+                    GLFW.GLFW_KEY_ESCAPE -> {
+                        ModuleRiseClickgui.searchFocused = false
+                        return true
                     }
                 }
             }
             return true
         }
+
+        /** 输入法 / Unicode 字符入口（中文、全角等） */
+        override fun charTyped(event: CharacterEvent): Boolean {
+            if (!ModuleRiseClickgui.searchFocused) return true
+            if (ModuleRiseClickgui.searchText.length >= 48) return true
+            try {
+                var cp = 0
+                try {
+                    val m = event.javaClass.getMethod("codepoint")
+                    cp = m.invoke(event) as? Int ?: 0
+                } catch (_: Exception) {
+                    try {
+                        val m = event.javaClass.getMethod("getCodePoint")
+                        cp = m.invoke(event) as? Int ?: 0
+                    } catch (_: Exception) {
+                        try {
+                            val f = event.javaClass.getDeclaredField("codepoint")
+                            f.isAccessible = true
+                            cp = f.getInt(event)
+                        } catch (_: Exception) {}
+                    }
+                }
+                if (cp > 31 && cp != 127) {
+                    ModuleRiseClickgui.searchText += cp.toChar()
+                    ModuleRiseClickgui.targetScroll = 0f
+                }
+            } catch (_: Exception) {}
+            return true
+        }
+
         override fun mouseClicked(event: net.minecraft.client.input.MouseButtonEvent, doubleClick: Boolean): Boolean = true
         override fun mouseReleased(event: net.minecraft.client.input.MouseButtonEvent): Boolean = true
         override fun mouseDragged(event: net.minecraft.client.input.MouseButtonEvent, dx: Double, dy: Double): Boolean = true
