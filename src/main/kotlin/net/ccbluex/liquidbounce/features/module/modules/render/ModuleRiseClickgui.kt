@@ -333,7 +333,6 @@ object ModuleRiseClickgui : ClientModule(
         if (e.keyCode == GLFW.GLFW_KEY_ESCAPE && e.action == 1) {
             if (searchFocused) searchFocused = false
             else if (enabled) enabled = false
-            try { e.cancelEvent() } catch (_: Throwable) {}
         }
     }
 
