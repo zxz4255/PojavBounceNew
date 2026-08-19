@@ -315,10 +315,40 @@ object ModuleRiseClickgui : ClientModule(
         }
     }
 
+    /** ESC：立即关 GUI，短时清暂停（不延迟关屏） */
+    /**
+     * ESC 只关 ClickGUI，不影响游戏。
+     * 关屏后模块 handler 会停，所以用 mc.execute 连续清掉误弹的 PauseScreen。
+     */
     private fun closeFromEsc() {
-        suppressPauseUntil = System.currentTimeMillis() + 400L
-        enabled = false
+        suppressPauseUntil = System.currentTimeMillis() + 700L
         closeLayer()
+        enabled = false
+        scheduleDismissPause(24)
+    }
+
+    private fun dismissPauseIfNeeded() {
+        val scn = try { mc.gui.screen() } catch (_: Throwable) { null } ?: return
+        val sn = scn.javaClass.name
+        if (sn.contains("Pause", true) || sn.contains("GameMenu", true)) {
+            try { mc.gui.setScreen(null) } catch (_: Throwable) {}
+        }
+    }
+
+    private fun scheduleDismissPause(framesLeft: Int) {
+        if (framesLeft <= 0) return
+        try {
+            mc.execute {
+                if (System.currentTimeMillis() < suppressPauseUntil) {
+                    dismissPauseIfNeeded()
+                    scheduleDismissPause(framesLeft - 1)
+                } else {
+                    dismissPauseIfNeeded()
+                }
+            }
+        } catch (_: Throwable) {
+            dismissPauseIfNeeded()
+        }
     }
 
     private fun closeLayer() {
@@ -349,16 +379,17 @@ object ModuleRiseClickgui : ClientModule(
         alphaDragging = false
         scrollBarDrag = false
         searchFocused = false
+        dismissPauseIfNeeded()
     }
 
     @Suppress("unused")
     private val rotHandler = handler<MouseRotationEvent> { e ->
-        if (enabled || scale > 0.01f) e.cancel()
+        if (enabled || scale > 0.01f) e.cancelEvent()
     }
 
     @Suppress("unused")
     private val hotbarHandler = handler<MouseScrollInHotbarEvent> { e ->
-        if (enabled || scale > 0.01f) e.cancel()
+        if (enabled || scale > 0.01f) e.cancelEvent()
     }
 
     @Suppress("unused")
@@ -367,7 +398,6 @@ object ModuleRiseClickgui : ClientModule(
         if (e.keyCode == GLFW.GLFW_KEY_ESCAPE && e.action == 1) {
             if (searchFocused) searchFocused = false
             else if (enabled) closeFromEsc()
-            e.cancel()
         }
     }
 
@@ -568,13 +598,7 @@ object ModuleRiseClickgui : ClientModule(
         opacity = lerp(opacity, if (open) 1f else 0f, (dt * speed).coerceIn(0f, 1f))
         if (sVis < 0.01f && !open) return@handler
 
-        if (System.currentTimeMillis() < suppressPauseUntil) {
-            val scn = try { mc.gui.screen() } catch (_: Throwable) { null }
-            val sn = scn?.javaClass?.simpleName ?: ""
-            if (scn != null && (sn.contains("Pause", true) || sn.contains("GameMenu", true))) {
-                try { mc.gui.setScreen(null) } catch (_: Throwable) {}
-            }
-        }
+        dismissPauseIfNeeded()
 
         mouseX = guiMX()
         mouseY = guiMY()
