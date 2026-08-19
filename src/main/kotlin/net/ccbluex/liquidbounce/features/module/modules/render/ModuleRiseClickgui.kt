@@ -326,12 +326,15 @@ object ModuleRiseClickgui : ClientModule(
 
     @Suppress("unused")
     private val keyHandler = handler<KeyboardKeyEvent> { e ->
-            if (e.keyCode == GLFW.GLFW_KEY_ESCAPE && e.action == 1) {
-                // 只关闭GUI，不设置setScreen(null)，避免触发游戏暂停菜单
-                ModuleRiseClickgui.enabled = false
-                // 不调用 mc.gui.setScreen(null)，让游戏继续运行，
-                // ESC事件已经被点击GUI拦截了，不会继续传播到游戏系统
+        if (!enabled && scale < 0.01f) return@handler
+        if (e.keyCode == GLFW.GLFW_KEY_ESCAPE && e.action == 1) {
+            if (searchFocused) {
+                searchFocused = false
+            } else {
+                enabled = false
             }
+            // Cancel the ESC event so it does not propagate to the game and trigger the pause menu
+            e.cancelEvent()
         }
     }
 
