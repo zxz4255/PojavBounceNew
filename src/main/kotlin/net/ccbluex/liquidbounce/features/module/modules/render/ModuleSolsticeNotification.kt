@@ -18,6 +18,9 @@ package net.ccbluex.liquidbounce.features.module.modules.render
 
 import net.ccbluex.liquidbounce.config.types.list.Tagged
 import net.ccbluex.liquidbounce.event.events.OverlayRenderEvent
+import net.ccbluex.liquidbounce.event.events.ServerConnectEvent
+import net.ccbluex.liquidbounce.event.events.NotificationEvent
+import net.ccbluex.liquidbounce.event.events.ModuleToggleEvent
 import net.ccbluex.liquidbounce.event.handler
 import net.ccbluex.liquidbounce.features.module.ClientModule
 import net.ccbluex.liquidbounce.features.module.ModuleCategories
@@ -90,6 +93,49 @@ object ModuleSolsticeNotification : ClientModule(
     fun notifyJoin(address: String) {
         if (!showOnJoin) return
         add("Connecting to $address...", Type.INFO, 6f)
+    }
+
+    /** 监听模块开关 → 真正弹出通知（否则模块「无用」） */
+    @Suppress("unused")
+    private val toggleHandler = handler<ModuleToggleEvent> { e ->
+        if (!enabled || !showOnToggle) return@handler
+        if (e.hidden) return@handler
+        // 避免自己开关刷屏
+        if (e.moduleName.equals(name, true) || e.moduleName.contains("Notification", true)) return@handler
+        notifyToggle(e.moduleName, e.enabled)
+    }
+
+    /** 监听客户端统一通知事件 */
+    @Suppress("unused")
+    private val notifEventHandler = handler<NotificationEvent> { e ->
+        if (!enabled) return@handler
+        val type = when (e.severity) {
+            NotificationEvent.Severity.ERROR -> Type.ERROR
+            NotificationEvent.Severity.ENABLED, NotificationEvent.Severity.SUCCESS -> Type.INFO
+            NotificationEvent.Severity.DISABLED -> Type.WARNING
+            else -> Type.INFO
+        }
+        val msg = if (e.title.isNotBlank() && e.message.isNotBlank()) {
+            "${e.title}: ${e.message}"
+        } else e.title.ifBlank { e.message }
+        if (msg.isNotBlank()) add(msg, type, defaultDuration)
+    }
+
+    /** 进服提示 */
+    @Suppress("unused")
+    private val connectHandler = handler<ServerConnectEvent> { e ->
+        if (!enabled || !showOnJoin) return@handler
+        val nice = try {
+            e.address.toString()
+        } catch (_: Throwable) {
+            try { e.serverInfo.name } catch (_: Throwable) { "server" }
+        }
+        notifyJoin(nice.take(48))
+    }
+
+    /** 测试：开启模块时推一条，确认渲染链路正常 */
+    override suspend fun enabledEffect() {
+        add("Solstice Notification enabled", Type.INFO, 2.5f)
     }
 
     private fun lerp(a: Float, b: Float, t: Float) = a + t * (b - a)
