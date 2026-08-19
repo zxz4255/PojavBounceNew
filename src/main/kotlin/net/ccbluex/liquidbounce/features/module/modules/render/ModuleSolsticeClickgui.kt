@@ -209,7 +209,7 @@ object ModuleSolsticeClickgui : ClientModule(
     private fun getActualValue(v: Value<*>): Any? {
         var obj: Any? = try { v.get() } catch (_: Exception) { null }
         var depth = 0
-        while (obj is Value<*> && depth < 5) {
+        while (obj is Value<*> && depth < 5) && depth < 5) {
             obj = try { obj.get() } catch (_: Exception) { null }
             depth++
         }
@@ -667,36 +667,25 @@ object ModuleSolsticeClickgui : ClientModule(
         val screenH = context.guiHeight().toFloat()
 
         // —— ① 模糊 / 遮罩近似 (ModernDropdown: black*0.38 + addBlur) ——
-        // 多层半透明黑 + 轻微扩散，模拟 blurStrength
-        val dimA = (220 * animAlpha * animAlpha * 0.42f).roundToInt().coerceIn(0, 110) // 二次曲线，过渡更自然
+        // 单层半透明遮罩，更干净
+        val dimA = (180 * animAlpha * 0.38f).roundToInt().coerceIn(0, 90)
         context.drawQuad(0f, 0f, screenW, screenH, Color4b(0, 0, 0, dimA))
-        val blurLayers = (blurStrength / 4f).roundToInt().coerceIn(1, 6)
-        for (i in 1..blurLayers) {
-            val t = i / blurLayers.toFloat()
-            val expand = blurStrength * t * 0.35f
-            val ba = (animAlpha * blurStrength * 1.2f * (1f - t * 0.55f)).roundToInt().coerceIn(0, 40)
-            if (ba < 2) continue
-            context.drawQuad(
-                -expand, -expand, screenW + expand, screenH + expand,
-                Color4b(0, 0, 0, ba),
-            )
-        }
 
         // —— ② 底部主题色渐变 (ModernDropdown: 下 1/3, alpha 随高度上淡) ——
         // firstheight = lerp(screenH, screenH - screenH/3, inScale)
         val firstH = lerp(screenH, screenH - screenH / 3f, inScale)
-        val baseTheme = getThemedColor(0f)
-        val steps = 16
+        val steps = 24
         for (s in 0 until steps) {
             val t0 = s / steps.toFloat()
             val t1 = (s + 1) / steps.toFloat()
             val y0 = lerp(firstH, screenH, t0)
             val y1 = lerp(firstH, screenH, t1)
-            // 越往上越淡: (1 - t0) * 0.4 * inScale * animation
-            val al = (0.45f * inScale * animAlpha * (1f - t0) * 255f).roundToInt().coerceIn(0, 140)
-            if (al < 2) continue
-            // 略微横向换色，更接近主题流动
-            val col = getThemedColor(y0 * 0.5f).alpha(al)
+            // 越往上越淡: smoothstep 曲线让过渡更自然
+            val fade = (1f - t0) * (1f - t0) // 二次衰减，上淡下浓
+            val al = (0.35f * inScale * animAlpha * fade * 255f).roundToInt().coerceIn(0, 100)
+            if (al < 1) continue
+            // 横向颜色随位置轻微变化，增加流动感
+            val col = getThemedColor(y0 * 0.3f + screenW * 0.1f).alpha(al)
             context.drawQuad(0f, y0, screenW, y1, col)
         }
 
@@ -734,32 +723,36 @@ object ModuleSolsticeClickgui : ClientModule(
         }
     }
 
-    /** 启用模块：左右主题双色圆角渐变 (fillRoundedGradientRectangle 近似) */
+    /** 启用模块：左右主题双色渐变 (fillRoundedGradientRectangle 近似) */
     private fun GuiGraphicsExtractor.drawEnabledModGradient(
         x1: Float, y1: Float, x2: Float, y2: Float, r: Float,
         c1: Color4b, c2: Color4b, alpha: Float,
     ) {
-        // 半透明主题色条，分段重叠避免黑边/缝隙
+        // 使用平滑渐变，减少分段数以避免条带和黑边
         val a = (110 * alpha).roundToInt().coerceIn(0, 160)
         val w = x2 - x1
         if (w <= 2f) {
             drawQuad(x1, y1, x2, y2, c1.alpha(a))
             return
         }
-        val segments = 16
+        // 减少段数，每段刚好相接不重叠，消除黑边
+        val segments = 8
         val segW = w / segments
         for (i in 0 until segments) {
-            val t = i / (segments - 1).toFloat().coerceAtLeast(1f)
-            val s = t * t * (3f - 2f * t)
+            val t0 = i / segments.toFloat()
+            val t1 = (i + 1) / segments.toFloat()
+            val s0 = t0 * t0 * (3f - 2f * t0)
+            val s1 = t1 * t1 * (3f - 2f * t1)
+            // 每段使用起始和结束颜色的平均，使过渡更自然
             val col = Color4b(
-                lerp(c1.r.toFloat(), c2.r.toFloat(), s).toInt().coerceIn(0, 255),
-                lerp(c1.g.toFloat(), c2.g.toFloat(), s).toInt().coerceIn(0, 255),
-                lerp(c1.b.toFloat(), c2.b.toFloat(), s).toInt().coerceIn(0, 255),
+                lerp(c1.r.toFloat(), c2.r.toFloat(), (s0 + s1) * 0.5f).toInt().coerceIn(0, 255),
+                lerp(c1.g.toFloat(), c2.g.toFloat(), (s0 + s1) * 0.5f).toInt().coerceIn(0, 255),
+                lerp(c1.b.toFloat(), c2.b.toFloat(), (s0 + s1) * 0.5f).toInt().coerceIn(0, 255),
                 a,
             )
-            val sx = x1 + segW * i - 0.25f
-            val ex = x1 + segW * (i + 1) + 0.25f
-            drawQuad(sx.coerceAtLeast(x1), y1, ex.coerceAtMost(x2), y2, col)
+            val sx = x1 + segW * i
+            val ex = x1 + segW * (i + 1)
+            drawQuad(sx, y1, ex, y2, col)
         }
     }
 
@@ -777,19 +770,28 @@ object ModuleSolsticeClickgui : ClientModule(
         // 面板阴影 (blur 近似)
         ctx.drawSoftShadow(px, py, px + pw, py + ph, rr, 6f + blurStrength * 0.25f, alpha)
 
-        // 面板背景 darkBlack
+        // 面板背景 darkBlack —— 标题栏区域用方角，其余保持圆角
         val bg = Color4b(24, 24, 24, (backgroundAlpha * alpha).roundToInt().coerceIn(0, 255))
-        // 面板主体圆角
+        // 先画完整圆角背景（底部圆角）
         ctx.drawRoundedRect(px, py, px + pw, py + ph, rr, bg)
+        // 用方角矩形盖住标题栏区域的圆角，使标题栏下方为直角
+        if (rr > 0.5f) {
+            ctx.drawQuad(px, py, px + pw, py + headerHeight + rr, bg)
+        }
 
-        // 标题栏：只要上方两个圆角，下方用方边盖住
+        // 标题栏：上半部分圆角，下半部分方角（与列表直角相接）
         val accent = accentAt(py)
         val titleBg = Color4b(accent.r, accent.g, accent.b, (90 * alpha).roundToInt())
-        ctx.drawRoundedRect(px, py, px + pw, py + headerHeight, rr, titleBg)
-        // 盖住标题栏底部两个圆角 → 标题与列表直角相接
+        // 标题栏上方圆角：用圆角矩形画一个高度为 rr 的条，只保留上边缘圆角效果
+        // 实际上 drawRoundedRect 四个角都有圆角，我们用 Quad 拼接实现"只有上方两个圆角"
+        // 方法：画一个从 py 到 py+rr 的圆角矩形，再用 Quad 补全下方
         if (rr > 0.5f) {
-            ctx.drawQuad(px, py + headerHeight - rr, px + pw, py + headerHeight, titleBg)
+            // 上边缘圆角部分：画一个高度为 rr*2 的圆角矩形，然后只取上半部分
+            ctx.drawRoundedRect(px, py, px + pw, py + rr * 2f, rr, titleBg)
         }
+        // 标题栏主体：方角矩形，从 py+rr 到 py+headerHeight
+        ctx.drawQuad(px, py + rr, px + pw, py + headerHeight, titleBg)
+        // 标题栏与列表分隔线
         ctx.drawQuad(px, py + headerHeight - 1f, px + pw, py + headerHeight, accent.alpha((a * 0.9f).toInt()))
         ctx.text(
             font, cat.tag,
@@ -872,20 +874,8 @@ object ModuleSolsticeClickgui : ClientModule(
             if (curY > clipBottom + itemHeight * 2) break
         }
 
-        // 重新盖住标题栏（同样去掉底部圆角）
-        val titleBg2 = Color4b(accent.r, accent.g, accent.b, (90 * alpha).roundToInt())
-        ctx.drawRoundedRect(px, py, px + pw, py + headerHeight, rr, titleBg2)
-        if (rr > 0.5f) {
-            ctx.drawQuad(px, py + headerHeight - rr, px + pw, py + headerHeight, titleBg2)
-        }
-        ctx.drawQuad(px, py + headerHeight - 1f, px + pw, py + headerHeight, accent.alpha((a * 0.9f).toInt()))
-        ctx.text(
-            font, cat.tag,
-            (px + 8f).roundToInt(), (py + headerHeight / 2f - 4f).roundToInt(),
-            Color4b.WHITE.alpha(a).argb, textShadow,
-        )
-        // 底边遮罩，挡住下方溢出
-        ctx.drawQuad(px, clipBottom - 2f, px + pw, clipBottom + 1f, bg)
+        // 底边遮罩，挡住下方溢出（与背景色一致，无缝衔接）
+        ctx.drawQuad(px, clipBottom - 1f, px + pw, clipBottom + 1f, bg)
     }
 
     /* ============================= 设置项渲染 ============================= */
