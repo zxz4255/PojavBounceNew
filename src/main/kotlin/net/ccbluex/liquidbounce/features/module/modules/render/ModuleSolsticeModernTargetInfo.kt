@@ -181,11 +181,13 @@ object ModuleSolsticeModernTargetInfo : ClientModule(
     /**
      * 解析头部贴图：玩家皮肤（多 API 回退）+ 常见生物 + 渲染器反射。
      */
+    /**
+     * 玩家：标准 64×64 皮肤脸部 UV。
+     * 生物：不用皮肤 UV（会乱码），用实体渲染器贴图 + 对应 UV，失败则色块+首字。
+     */
     private fun headTexture(entity: LivingEntity): Identifier? {
         if (entity is AbstractClientPlayer) {
-            // 1.21+ skin.body().texturePath()
             runCatching { entity.skin.body().texturePath() }.getOrNull()?.let { return it }
-            // 其它映射/字段
             runCatching {
                 val skin = entity.skin
                 for (m in skin.javaClass.methods) {
@@ -193,105 +195,82 @@ object ModuleSolsticeModernTargetInfo : ClientModule(
                     val n = m.name.lowercase()
                     if (n.contains("texture") || n == "body") {
                         val r = m.invoke(skin) ?: continue
-                        when (r) {
-                            is Identifier -> return r
-                            else -> {
-                                val tp = r.javaClass.methods.firstOrNull {
-                                    it.parameterCount == 0 && it.name.lowercase().contains("texture")
-                                }?.invoke(r)
-                                if (tp is Identifier) return tp
-                            }
-                        }
+                        if (r is Identifier) return r
+                        val tp = r.javaClass.methods.firstOrNull {
+                            it.parameterCount == 0 && it.name.lowercase().contains("texture")
+                        }?.invoke(r)
+                        if (tp is Identifier) return tp
                     }
                 }
                 null
             }.getOrNull()?.let { return it }
-            // 默认 Steve
             return Identifier.withDefaultNamespace("textures/entity/player/wide/steve.png")
         }
-
-        // 通过实体渲染器取贴图（覆盖大部分生物）
         runCatching {
-            val dispatcher = mc.entityRenderDispatcher
-            val renderer = dispatcher.getRenderer(entity) ?: return@runCatching null
+            val renderer = mc.entityRenderDispatcher.getRenderer(entity) ?: return@runCatching null
             for (m in renderer.javaClass.methods) {
-                if (m.parameterCount == 1 && m.name.lowercase().contains("texture")) {
+                val n = m.name.lowercase()
+                if (!n.contains("texture")) continue
+                if (m.parameterCount == 1) {
                     val r = m.invoke(renderer, entity)
                     if (r is Identifier) return r
                 }
-                if (m.parameterCount == 0 && m.name.lowercase().contains("texture")) {
+                if (m.parameterCount == 0) {
                     val r = m.invoke(renderer)
                     if (r is Identifier) return r
                 }
             }
             null
         }.getOrNull()?.let { return it }
-
-        // 常见类型硬编码回退
-        val key = entity.type.descriptionId.lowercase()
-        return when {
-            "skeleton" in key -> Identifier.withDefaultNamespace("textures/entity/skeleton/skeleton.png")
-            "zombie" in key && "pig" !in key -> Identifier.withDefaultNamespace("textures/entity/zombie/zombie.png")
-            "creeper" in key -> Identifier.withDefaultNamespace("textures/entity/creeper/creeper.png")
-            "enderman" in key -> Identifier.withDefaultNamespace("textures/entity/enderman/enderman.png")
-            "spider" in key && "cave" !in key -> Identifier.withDefaultNamespace("textures/entity/spider/spider.png")
-            "cave_spider" in key || "cavespider" in key -> Identifier.withDefaultNamespace("textures/entity/spider/cave_spider.png")
-            "cow" in key -> Identifier.withDefaultNamespace("textures/entity/cow/cow.png")
-            "pig" in key && "piglin" !in key && "zombie" !in key -> Identifier.withDefaultNamespace("textures/entity/pig/pig.png")
-            "sheep" in key -> Identifier.withDefaultNamespace("textures/entity/sheep/sheep.png")
-            "chicken" in key -> Identifier.withDefaultNamespace("textures/entity/chicken.png")
-            "blaze" in key -> Identifier.withDefaultNamespace("textures/entity/blaze.png")
-            "witch" in key -> Identifier.withDefaultNamespace("textures/entity/witch.png")
-            "iron_golem" in key || "irongolem" in key -> Identifier.withDefaultNamespace("textures/entity/iron_golem/iron_golem.png")
-            "villager" in key -> Identifier.withDefaultNamespace("textures/entity/villager/villager.png")
-            "piglin" in key -> Identifier.withDefaultNamespace("textures/entity/piglin/piglin.png")
-            else -> Identifier.withDefaultNamespace("textures/entity/steve.png")
-        }
+        return null
     }
 
-    /**
-     * 与 ModuleSolsticeTargetHud 一致的 blit UV（本 fork 签名）。
-     */
+    /** 本 fork blit(texture, x0,y0,x1,y1, u,v,uw,vh) 均为 0..1 纹理坐标 */
     private fun GuiGraphicsExtractor.drawEntityHead(
         entity: LivingEntity,
         x: Float,
         y: Float,
         size: Float,
     ) {
-        val texture = headTexture(entity) ?: return
         val x0 = x.roundToInt()
         val y0 = y.roundToInt()
         val x1 = (x + size).roundToInt()
         val y1 = (y + size).roundToInt()
         if (x1 <= x0 || y1 <= y0) return
 
-        // TargetHud 同款 UV
-        runCatching {
-            blit(
-                texture,
-                x0, y0, x1, y1,
-                8f / 64f, 16f / 64f, 8f / 64f, 16f / 64f,
-            )
-        }.onFailure {
-            // 备选：u0,v0,u1,v1 形式
-            runCatching {
-                blit(
-                    texture,
-                    x0, y0, x1, y1,
-                    8f / 64f, 8f / 64f, 16f / 64f, 16f / 64f,
-                )
-            }
-        }
-        // 玩家帽子层
         if (entity is AbstractClientPlayer) {
+            val texture = headTexture(entity) ?: return
+            // 标准皮肤脸：u=8/64,v=8/64, 宽高 8/64
             runCatching {
-                blit(
-                    texture,
-                    x0, y0, x1, y1,
-                    40f / 64f, 8f / 64f, 8f / 64f, 16f / 64f,
-                )
+                blit(texture, x0, y0, x1, y1, 8f / 64f, 8f / 64f, 8f / 64f, 8f / 64f)
             }
+            // 帽子层
+            runCatching {
+                blit(texture, x0, y0, x1, y1, 40f / 64f, 8f / 64f, 8f / 64f, 8f / 64f)
+            }
+            return
         }
+
+        // 生物：多数贴图不是 64 皮肤布局，强行用皮肤 UV 会花屏/乱码
+        // 尝试整张贴图中心区域小块；失败则色块 + 首字母
+        val texture = headTexture(entity)
+        if (texture != null) {
+            val ok = runCatching {
+                // 通用：取贴图左上偏中一块（很多实体头在左上）
+                blit(texture, x0, y0, x1, y1, 0f, 0f, 8f / 64f, 8f / 64f)
+            }.isSuccess
+            if (ok) return
+        }
+        // 回退：主题色圆角块 + 名字首字
+        val key = entity.type.descriptionId.hashCode()
+        val r = 80 + (key and 0x7F)
+        val g = 80 + ((key shr 7) and 0x7F)
+        val b = 80 + ((key shr 14) and 0x7F)
+        drawRoundedRect(x, y, x + size, y + size, size * 0.2f, Color4b(r.coerceIn(40, 220), g.coerceIn(40, 220), b.coerceIn(40, 220), 255))
+        val ch = (entity.displayName?.string ?: entity.name.string).firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+        val font = mc.font
+        val tw = font.width(ch)
+        text(font, ch, (x + (size - tw) / 2f).roundToInt(), (y + (size - 9f) / 2f).roundToInt(), 0xFFFFFFFF.toInt(), false)
     }
 
     private fun GuiGraphicsExtractor.drawDropShadow(x: Float, y: Float, size: Float, rad: Float) {
