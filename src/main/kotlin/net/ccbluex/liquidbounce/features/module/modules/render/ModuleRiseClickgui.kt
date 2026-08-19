@@ -236,21 +236,23 @@ object ModuleRiseClickgui : ClientModule(
     /* —— Screen —— */
     private class RiseGuiScreen : Screen(Component.literal("RiseClickGui")) {
         override fun isPauseScreen() = false
-        override fun shouldCloseOnEsc() = true
+        override fun shouldCloseOnEsc() = false
+
         override fun onClose() {
-            ModuleRiseClickgui.enabled = false
-            // 不 super，避免 ESC 打开暂停菜单
+            if (ModuleRiseClickgui.enabled) {
+                ModuleRiseClickgui.enabled = false
+            }
         }
+
         override fun keyPressed(event: KeyEvent): Boolean {
             if (event.key() == GLFW.GLFW_KEY_ESCAPE) {
                 if (ModuleRiseClickgui.searchFocused) {
                     ModuleRiseClickgui.searchFocused = false
                 } else {
-                    ModuleRiseClickgui.enabled = false
+                    ModuleRiseClickgui.requestCloseFromEsc()
                 }
                 return true
             }
-            // 搜索：功能键；可打印字符/输入法走 charTyped
             if (ModuleRiseClickgui.searchFocused) {
                 when (event.key()) {
                     GLFW.GLFW_KEY_BACKSPACE -> {
@@ -293,6 +295,39 @@ object ModuleRiseClickgui : ClientModule(
         override fun mouseReleased(event: net.minecraft.client.input.MouseButtonEvent): Boolean = true
         override fun mouseDragged(event: net.minecraft.client.input.MouseButtonEvent, dx: Double, dy: Double): Boolean = true
         override fun mouseScrolled(mouseX: Double, mouseY: Double, horizontal: Double, vertical: Double): Boolean = true
+    }
+
+    private fun requestCloseFromEsc() {
+        if (!enabled) return
+        try {
+            mc.execute {
+                enabled = false
+                closeLayer()
+                clearPauseScreens(8)
+            }
+        } catch (_: Throwable) {
+            enabled = false
+            closeLayer()
+        }
+    }
+
+    private fun isPauseLike(scn: Any?): Boolean {
+        if (scn == null) return false
+        val n = scn.javaClass.name
+        return n.contains("Pause", true) || n.contains("GameMenu", true)
+    }
+
+    private fun clearPauseScreens(framesLeft: Int) {
+        if (framesLeft <= 0) return
+        try {
+            mc.execute {
+                val scn = try { mc.gui.screen() } catch (_: Throwable) { null }
+                if (isPauseLike(scn)) {
+                    try { mc.gui.setScreen(null) } catch (_: Throwable) {}
+                }
+                if (framesLeft > 1) clearPauseScreens(framesLeft - 1)
+            }
+        } catch (_: Throwable) {}
     }
 
     private fun openLayer() {
@@ -347,7 +382,7 @@ object ModuleRiseClickgui : ClientModule(
         if (!enabled && scale < 0.01f) return@handler
         if (e.keyCode == GLFW.GLFW_KEY_ESCAPE && e.action == 1) {
             if (searchFocused) searchFocused = false
-            else if (enabled) enabled = false
+            else if (enabled) requestCloseFromEsc()
         }
     }
 
