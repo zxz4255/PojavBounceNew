@@ -17,8 +17,6 @@
 
 package net.ccbluex.liquidbounce.features.module.modules.render
 
-import net.minecraft.client.input.MouseButtonEvent
-
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonArray
@@ -130,14 +128,122 @@ object ModuleSolsticeClickgui : ClientModule(
         }
     }
 
+    /**
+     * 对应 ClickGui::getEaseAnim
+     * mode 0 = Zoom → easeOutExpo
+     * mode 1 = Bounce → enable: easeOutElastic / disable: easeOutBack
+     */
+    private fun getEaseAnim(ease: EasingUtil, mode: Int): Float = when (mode) {
+        1 -> if (enabled) ease.easeOutElastic() else ease.easeOutBack()
+        else -> ease.easeOutExpo()
+    }
 
+    /** MathUtils::lerp */
+    private fun lerp(a: Float, b: Float, t: Float): Float = a + t * (b - a)
 
-    /* ============================= 输入层 Screen ============================= */
+    /** ColorUtils::LerpColors / getThemedColor */
+    private fun getThemedColor(index: Float, ms: Long = 0L): Color4b {
+        val colors = listOf(themeA, themeB, themeC)
+        val time = 10000.0f / themeSeconds.coerceAtLeast(0.01f)
+        val now = if (ms == 0L) System.currentTimeMillis() else ms
+        val angle = ((now + index.toLong()) % time.toLong()).toFloat()
+        val segmentTime = time / colors.size
+        val seg = (angle / segmentTime).toInt() % colors.size
+        val t = (angle / segmentTime - (angle / segmentTime).toInt()).coerceIn(0f, 1f)
+        val s = colors[seg]
+        val e = colors[(seg + 1) % colors.size]
+        return Color4b(
+            lerp(s.r.toFloat(), e.r.toFloat(), t).toInt().coerceIn(0, 255),
+            lerp(s.g.toFloat(), e.g.toFloat(), t).toInt().coerceIn(0, 255),
+            lerp(s.b.toFloat(), e.b.toFloat(), t).toInt().coerceIn(0, 255),
+            lerp(s.a.toFloat(), e.a.toFloat(), t).toInt().coerceIn(0, 255),
+        )
+    }
 
+    private fun accentAt(y: Float): Color4b =
+        if (useThemeAccent) getThemedColor(y * 2f) else accentColor
+
+    /* ============================= 内部状态 ============================= */
+
+    private val ease = EasingUtil()
+    private var lastFrameNs = 0L
+    private var isPressingShift = false
+    private var scrollDirection = 0
+    private var leftMouseDown = false
+
+    private data class PanelState(
+        val category: ModuleCategory?,
+        var x: Float, var y: Float,
+        var scrollOffset: Float = 0f,
+        var targetScroll: Float = 0f,
+        var dragging: Boolean = false,
+        var dragOffsetX: Float = 0f,
+        var dragOffsetY: Float = 0f,
+    )
+    private val panels = mutableListOf<PanelState>()
+    private var expandedModule: ClientModule? = null
+    private var listeningBind: Value<*>? = null
+    private val collapsedGroups = mutableSetOf<Value<*>>()
+    private val sliderDrag = IdentityHashMap<Value<*>, Float>()   // 滑块拖动值
+    private var activeColorValue: Value<*>? = null
+    private val paletteColors = listOf(
+        Color4b(0xE9, 0xA8, 0xBC), Color4b(0x6E, 0xC8, 0xF1), Color4b(255, 255, 255),
+        Color4b(255, 70, 70), Color4b(255, 170, 40), Color4b(255, 230, 60),
+        Color4b(90, 230, 110), Color4b(60, 200, 230), Color4b(140, 110, 255),
+        Color4b(255, 120, 200), Color4b(40, 40, 40), Color4b(200, 200, 200),
+    )
+
+    private var mouseX = 0f
+    private var mouseY = 0f
+
+    /* ============================= 坐标工具 ============================= */
+
+    private fun guiMouseX(): Float =
+        (mc.mouseHandler.xpos() * mc.window.guiScaledWidth / mc.window.width).toFloat()
+
+    private fun guiMouseY(): Float =
+        (mc.mouseHandler.ypos() * mc.window.guiScaledHeight / mc.window.height).toFloat()
+
+    /* ============================= 值工具 ============================= */
+
+    private fun getActualValue(v: Value<*>): Any? {
+    var obj: Any? = try { v.get() } catch (_: Exception) { null }
+    var depth = 0
+    while (obj is Value<*> && depth < 5) {
+        val current = obj          // ← 提取到局部变量，智能转换生效
+        obj = try {
+            (current as Value<*>).get()
+        } catch (_: Exception) {
+            null
+        }
+        depth++
+        }
+        return obj
+    }
+
+    private fun trySetValue(v: Value<*>, value: Any) {
+        try {
+            v.javaClass.methods.firstOrNull { it.name == "set" && it.parameterCount == 1 }?.invoke(v, value)
+        } catch (_: Exception) {}
+    }
+
+    private fun isGroupValue(v: Value<*>): Boolean = try {
+        v.javaClass.simpleName.contains("Group", true) || v.javaClass.simpleName.contains("Container", true)
+    } catch (_: Exception) { false }
+
+    private fun collectValues(module: ClientModule): List<Value<*>> = try {
+        module.collectValuesRecursively().toList()
+    } catch (_: Exception) { emptyList() }
+
+    /* ============================= 输入隔离 (Screen 图层) ============================= */
+
+    /**
+     * 透明 Screen：打开时接管鼠标/键盘，游戏不再出现十字准星、不再攻击/转向。
+     * 实际 UI 仍由 OverlayRenderEvent 绘制。
+     */
     private class SolsticeClickGuiScreen : Screen(Component.literal("SolsticeClickGui")) {
         override fun isPauseScreen(): Boolean = false
-
-        // 与可用 ClickGuiScreen 一致：ESC 走 onClose，不会再映射成游戏暂停
+        // 与可用 ClickGuiScreen 相同：ESC 只关本界面，不打开游戏暂停
         override fun shouldCloseOnEsc(): Boolean = true
 
         override fun keyPressed(event: KeyEvent): Boolean {
@@ -156,7 +262,6 @@ object ModuleSolsticeClickgui : ClientModule(
         }
 
         override fun onClose() {
-            // 只关模块/GUI，不调用 super，避免进入暂停界面
             if (ModuleSolsticeClickgui.enabled) {
                 ModuleSolsticeClickgui.enabled = false
             } else {
@@ -164,9 +269,10 @@ object ModuleSolsticeClickgui : ClientModule(
             }
         }
 
-        override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean = true
-        override fun mouseReleased(event: MouseButtonEvent): Boolean = true
-        override fun mouseDragged(event: MouseButtonEvent, dx: Double, dy: Double): Boolean = true
+        override fun mouseClicked(event: net.minecraft.client.input.MouseButtonEvent, doubleClick: Boolean): Boolean = true
+        override fun mouseReleased(event: net.minecraft.client.input.MouseButtonEvent): Boolean = true
+        override fun mouseDragged(event: net.minecraft.client.input.MouseButtonEvent, dx: Double, dy: Double): Boolean = true
+        override fun mouseScrolled(mouseX: Double, mouseY: Double, horizontal: Double, vertical: Double): Boolean = true
     }
 
     private fun openInputLayer() {
@@ -202,8 +308,8 @@ object ModuleSolsticeClickgui : ClientModule(
     private fun saveState() {
         try {
             val root = JsonObject()
-            root.addProperty("version", 2)
-            root.addProperty("expandedModule", expandedModule?.name ?: "")
+            root.addProperty("version", 1)
+            root.addProperty("expandedModule", expandedModule?.name)
 
             val panelsArr = JsonArray()
             for (p in panels) {
@@ -218,9 +324,14 @@ object ModuleSolsticeClickgui : ClientModule(
             root.add("panels", panelsArr)
 
             val collapsed = JsonArray()
-            val owner = expandedModule?.name ?: ""
             for (v in collapsedGroups) {
-                collapsed.add("$owner/${v.name}")
+                // 用 模块名/设置名 尽量唯一定位
+                val owner = expandedModule?.name ?: ""
+                collapsed.add("${owner}/${v.name}")
+            }
+            // 保存时把所有已知折叠组名也记下（仅 name）
+            for (v in collapsedGroups) {
+                collapsed.add(v.name)
             }
             root.add("collapsedGroups", collapsed)
 
@@ -235,52 +346,35 @@ object ModuleSolsticeClickgui : ClientModule(
     private fun loadState() {
         try {
             if (!stateFile.exists()) return
-            val text = stateFile.readText()
-            if (text.isBlank()) return
-            val root = JsonParser.parseString(text).asJsonObject
+            val root = JsonParser.parseString(stateFile.readText()).asJsonObject
 
             val expandedName = root.get("expandedModule")?.takeIf { !it.isJsonNull }?.asString
             if (!expandedName.isNullOrEmpty()) {
                 expandedModule = ModuleManager.getModules().find { it.name == expandedName }
             }
 
-            val arr = root.getAsJsonArray("panels")
-            if (arr != null && arr.size() > 0) {
-                panels.clear()
-                val byTag = ModuleCategories.entries.associateBy { it.tag }
-                for (el in arr) {
-                    val o = el.asJsonObject
-                    val tag = o.get("category")?.asString ?: continue
-                    val cat = byTag[tag]
-                        ?: ModuleCategories.entries.find { c ->
-                            c.tag.equals(tag, true) || c.toString().equals(tag, true)
-                        }
-                        ?: continue
-                    panels += PanelState(
-                        category = cat,
-                        x = o.get("x")?.asFloat ?: 0f,
-                        y = o.get("y")?.asFloat ?: 0f,
-                        scrollOffset = o.get("scrollOffset")?.asFloat ?: 0f,
-                        targetScroll = o.get("targetScroll")?.asFloat ?: 0f,
-                    )
-                }
-                // 若 json 缺了某些分类，补上默认位置
-                val have = panels.mapNotNull { it.category }.toSet()
-                var extraX = panels.maxOfOrNull { it.x } ?: 40f
-                for (cat in ModuleCategories.entries) {
-                    if (cat !in have) {
-                        extraX += panelWidth
-                        panels += PanelState(cat, extraX, 80f)
-                    }
-                }
+            val arr = root.getAsJsonArray("panels") ?: return
+            if (arr.size() == 0) return
+
+            panels.clear()
+            val byTag = ModuleCategories.entries.associateBy { it.tag }
+            for (el in arr) {
+                val o = el.asJsonObject
+                val tag = o.get("category")?.asString ?: continue
+                val cat = byTag[tag] ?: continue
+                panels += PanelState(
+                    category = cat,
+                    x = o.get("x")?.asFloat ?: 0f,
+                    y = o.get("y")?.asFloat ?: 0f,
+                    scrollOffset = o.get("scrollOffset")?.asFloat ?: 0f,
+                    targetScroll = o.get("targetScroll")?.asFloat ?: 0f,
+                )
             }
 
             collapsedGroups.clear()
             val collapsed = root.getAsJsonArray("collapsedGroups")
             if (collapsed != null && expandedModule != null) {
-                val names = collapsed.mapNotNull { el ->
-                    el.asString?.substringAfterLast('/')?.takeIf { it.isNotEmpty() }
-                }.toSet()
+                val names = collapsed.mapNotNull { it.asString?.substringAfterLast('/') }
                 for (v in collectValues(expandedModule!!)) {
                     if (v.name in names) collapsedGroups.add(v)
                 }
@@ -304,6 +398,7 @@ object ModuleSolsticeClickgui : ClientModule(
     override fun onDisabled() {
         saveState()
         closeInputLayer()
+        // 注意：不立刻清空 panels，以便若需调试；下次 enabled 会 load
         listeningBind = null
         activeColorValue = null
         sliderDrag.clear()
@@ -334,13 +429,11 @@ object ModuleSolsticeClickgui : ClientModule(
         if (!enabled && ease.percentage < 0.01f) return@handler
         // ESC 关闭 (原版: 非绑定状态且按下时 toggle)
         if (event.keyCode == GLFW.GLFW_KEY_ESCAPE) {
-            if (event.action == 1) {
-                if (listeningBind != null || activeColorValue != null) {
-                    listeningBind = null
-                    activeColorValue = null
-                } else if (enabled) {
-                    enabled = false
-                }
+            if (listeningBind == null && activeColorValue == null && event.action == 1) {
+                enabled = false
+            } else if (event.action == 1) {
+                listeningBind = null
+                activeColorValue = null
             }
             return@handler
         }
@@ -401,9 +494,7 @@ object ModuleSolsticeClickgui : ClientModule(
         if (event.button == 0) {
             leftMouseDown = event.action == 1
             if (event.action == 0) {
-                val wasDragging = panels.any { it.dragging }
                 for (panel in panels) panel.dragging = false
-                if (wasDragging) saveState()
             }
         }
 
@@ -555,7 +646,6 @@ object ModuleSolsticeClickgui : ClientModule(
         val animAlpha = ease.easeOutExpo().coerceIn(0f, 1f)
         if (animAlpha < 0.0001f) return@handler
 
-
         mouseX = guiMouseX()
         mouseY = guiMouseY()
 
@@ -683,19 +773,39 @@ object ModuleSolsticeClickgui : ClientModule(
         val rr = radius.toFloat()
         val ph = panelMaxHeight.toFloat()
 
-        val bg = Color4b(24, 24, 24, (backgroundAlpha * alpha).roundToInt().coerceIn(0, 255))
-        val accent = accentAt(py)
-        // 标题色用不透明（与面板 alpha 同步），避免透出深色底形成「黑罩」
-        val titleBg = Color4b(accent.r, accent.g, accent.b, a)
+        // 面板阴影 (blur 近似)
+        ctx.drawSoftShadow(px, py, px + pw, py + ph, rr, 6f + blurStrength * 0.25f, alpha)
 
-        // 阴影只画在面板外侧，不叠在标题上
-        if (blurStrength > 0.5f && alpha > 0.2f) {
-            ctx.drawSoftShadow(px, py + headerHeight * 0.5f, px + pw, py + ph, rr, 4f + blurStrength * 0.2f, alpha * 0.7f)
+        // 面板背景 darkBlack —— 标题栏区域用方角，其余保持圆角
+        val bg = Color4b(24, 24, 24, (backgroundAlpha * alpha).roundToInt().coerceIn(0, 255))
+        // 先画完整圆角背景（底部圆角）
+        ctx.drawRoundedRect(px, py, px + pw, py + ph, rr, bg)
+        // 用方角矩形盖住标题栏区域的圆角，使标题栏下方为直角
+        if (rr > 0.5f) {
+            ctx.drawQuad(px, py, px + pw, py + headerHeight + rr, bg)
         }
 
-        // 整板底色一层
-        ctx.drawRoundedRect(px, py, px + pw, py + ph, rr, bg)
+        // 标题栏：上半部分圆角，下半部分方角（与列表直角相接）
+        val accent = accentAt(py)
+        val titleBg = Color4b(accent.r, accent.g, accent.b, (90 * alpha).roundToInt())
+        // 标题栏上方圆角：用圆角矩形画一个高度为 rr 的条，只保留上边缘圆角效果
+        // 实际上 drawRoundedRect 四个角都有圆角，我们用 Quad 拼接实现"只有上方两个圆角"
+        // 方法：画一个从 py 到 py+rr 的圆角矩形，再用 Quad 补全下方
+        if (rr > 0.5f) {
+            // 上边缘圆角部分：画一个高度为 rr*2 的圆角矩形，然后只取上半部分
+            ctx.drawRoundedRect(px, py, px + pw, py + rr * 2f, rr, titleBg)
+        }
+        // 标题栏主体：方角矩形，从 py+rr 到 py+headerHeight
+        ctx.drawQuad(px, py + rr, px + pw, py + headerHeight, titleBg)
+        // 标题栏与列表分隔线
+        ctx.drawQuad(px, py + headerHeight - 1f, px + pw, py + headerHeight, accent.alpha((a * 0.9f).toInt()))
+        ctx.text(
+            font, cat.tag,
+            (px + 8f).roundToInt(), (py + headerHeight / 2f - 4f).roundToInt(),
+            Color4b.WHITE.alpha(a).argb, textShadow,
+        )
 
+        // 模块列表 —— 严格裁剪到标题栏下方 ~ 面板底，避免文字溢出
         val clipTop = py + headerHeight
         val clipBottom = py + ph
         val listY = clipTop - panel.scrollOffset
@@ -740,8 +850,7 @@ object ModuleSolsticeClickgui : ClientModule(
                 }
                 // 文字中心在 clip 内才画，防止标题栏上下溢出
                 val textCy = curY + itemHeight / 2f - 4f
-                // 文字整行在裁剪区内才绘制，防止滚出标题/底边
-                if (textCy >= clipTop + 1f && textCy + 9f <= clipBottom - 1f) {
+                if (textCy >= clipTop && textCy + 9f <= clipBottom) {
                     val modColor = if (mod.enabled) Color4b.WHITE.alpha(a) else Color4b(180, 180, 180, a)
                     ctx.text(font, mod.name, (px + 8f).roundToInt(), textCy.roundToInt(), modColor.argb, textShadow)
                     if (showStatusDot) {
@@ -760,9 +869,7 @@ object ModuleSolsticeClickgui : ClientModule(
             if (isExpanded) {
                 for (v in collectValues(mod)) {
                     if (rowVisible(curY)) {
-                        // 子项文字必须整行在 clip 内，否则只画背景不画字，避免上下溢出
-                        val fullText = curY >= clipTop + 1f && curY + itemHeight <= clipBottom - 1f
-                        renderSetting(ctx, font, v, px, curY, pw, a, accent, fullText)
+                        renderSetting(ctx, font, v, px, curY, pw, a, accent)
                     }
                     curY += itemHeight
                     // 已远低于面板底可提前结束本分类
@@ -773,17 +880,8 @@ object ModuleSolsticeClickgui : ClientModule(
             if (curY > clipBottom + itemHeight * 2) break
         }
 
-        // 最后画标题：不透明纯色条盖住列表溢出，无阴影、无第二层黑
-        ctx.drawQuad(px, py, px + pw, clipTop, titleBg)
-        ctx.text(
-            font, cat.tag,
-            (px + 8f).roundToInt(), (py + headerHeight / 2f - 4f).roundToInt(),
-            Color4b.WHITE.alpha(a).argb, textShadow,
-        )
-        // 底溢出用面板色盖住
-        if (clipBottom < py + ph) {
-            ctx.drawQuad(px, clipBottom, px + pw, py + ph, bg)
-        }
+        // 底边遮罩，挡住下方溢出（与背景色一致，无缝衔接）
+        ctx.drawQuad(px, clipBottom - 1f, px + pw, clipBottom + 1f, bg)
     }
 
     /* ============================= 设置项渲染 ============================= */
@@ -791,7 +889,6 @@ object ModuleSolsticeClickgui : ClientModule(
     private fun renderSetting(
         ctx: GuiGraphicsExtractor, font: Font, v: Value<*>,
         px: Float, y: Float, pw: Float, a: Int, accent: Color4b,
-        drawText: Boolean = true,
     ) {
         val actual = getActualValue(v) ?: return
         val isGroup = isGroupValue(v)
@@ -805,18 +902,11 @@ object ModuleSolsticeClickgui : ClientModule(
         if (isGroup) {
             val collapsed = collapsedGroups.contains(v)
             ctx.drawQuad(px, y, px + pw, y + itemHeight, Color4b(accent.r, accent.g, accent.b, 18))
-            if (drawText) {
-                ctx.text(
-                    font, "${if (collapsed) "▶" else "▼"} ${v.name}",
-                    (px + 8f).roundToInt(), (y + 5f).roundToInt(),
-                    Color4b(200, 200, 200, a).argb, textShadow,
-                )
-            }
-            return
-        }
-
-        if (!drawText) {
-            // 半出裁剪区：只画背景条，不画文字/控件字，防溢出
+            ctx.text(
+                font, "${if (collapsed) "▶" else "▼"} ${v.name}",
+                (px + 8f).roundToInt(), (y + 5f).roundToInt(),
+                Color4b(200, 200, 200, a).argb, textShadow,
+            )
             return
         }
 
