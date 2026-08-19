@@ -170,6 +170,7 @@ object ModuleSolsticeClickgui : ClientModule(
     private var isPressingShift = false
     private var scrollDirection = 0
     private var leftMouseDown = false
+    private var suppressPauseUntil = 0L
 
     private data class PanelState(
         val category: ModuleCategory?,
@@ -243,9 +244,7 @@ object ModuleSolsticeClickgui : ClientModule(
      */
     private class SolsticeClickGuiScreen : Screen(Component.literal("SolsticeClickGui")) {
         override fun isPauseScreen(): Boolean = false
-
-        // true：由 Screen 正常关闭，避免 ESC 漏给游戏弹出暂停界面
-        override fun shouldCloseOnEsc(): Boolean = true
+        override fun shouldCloseOnEsc(): Boolean = false
 
         override fun keyPressed(event: KeyEvent): Boolean {
             if (event.key() == GLFW.GLFW_KEY_ESCAPE) {
@@ -256,16 +255,14 @@ object ModuleSolsticeClickgui : ClientModule(
                     ModuleSolsticeClickgui.activeColorValue = null
                     return true
                 }
-                // 只关模块，不 super，避免再触发一次暂停逻辑
-                ModuleSolsticeClickgui.enabled = false
+                ModuleSolsticeClickgui.closeFromEsc()
                 return true
             }
             return true
         }
 
         override fun onClose() {
-            ModuleSolsticeClickgui.enabled = false
-            // 不调用 super.onClose()，防止打开 PauseScreen
+            // 空实现：关闭只走 closeFromEsc / onDisabled，避免 super 打开暂停界面
         }
 
 
@@ -285,6 +282,13 @@ object ModuleSolsticeClickgui : ClientModule(
                 mc.execute { mc.gui.setScreen(SolsticeClickGuiScreen()) }
             } catch (_: Throwable) {}
         }
+    }
+
+    /** ESC 关闭：关模块 + 关 Screen，并短时屏蔽随后弹出的暂停菜单 */
+    private fun closeFromEsc() {
+        suppressPauseUntil = System.currentTimeMillis() + 400L
+        enabled = false
+        closeInputLayer()
     }
 
     private fun closeInputLayer() {
@@ -447,7 +451,7 @@ object ModuleSolsticeClickgui : ClientModule(
                     listeningBind = null
                     activeColorValue = null
                 } else if (enabled) {
-                    enabled = false
+                    closeFromEsc()
                 }
             }
             return@handler
@@ -663,6 +667,15 @@ object ModuleSolsticeClickgui : ClientModule(
         val animAlpha = ease.easeOutExpo().coerceIn(0f, 1f)
         if (animAlpha < 0.0001f) return@handler
 
+        // ESC 关闭后短时清掉误弹的暂停界面
+        if (System.currentTimeMillis() < suppressPauseUntil) {
+            val scn = try { mc.gui.screen() } catch (_: Throwable) { null }
+            val sn = scn?.javaClass?.simpleName ?: ""
+            if (scn != null && (sn.contains("Pause", true) || sn.contains("GameMenu", true))) {
+                try { mc.gui.setScreen(null) } catch (_: Throwable) {}
+            }
+        }
+
         mouseX = guiMouseX()
         mouseY = guiMouseY()
 
@@ -790,27 +803,18 @@ object ModuleSolsticeClickgui : ClientModule(
         val rr = radius.toFloat()
         val ph = panelMaxHeight.toFloat()
 
-        // 面板阴影
-        ctx.drawSoftShadow(px, py, px + pw, py + ph, rr, 6f + blurStrength * 0.25f, alpha)
-
         val bg = Color4b(24, 24, 24, (backgroundAlpha * alpha).roundToInt().coerceIn(0, 255))
-        // 仅一层圆角面板底
-        ctx.drawRoundedRect(px, py, px + pw, py + ph, rr, bg)
-
-        // 标题：纯色矩形条（不加第二层圆角/分隔线，杜绝黑条）
         val accent = accentAt(py)
-        val titleBg = Color4b(accent.r, accent.g, accent.b, (110 * alpha).roundToInt().coerceIn(0, 230))
-        ctx.drawQuad(px, py, px + pw, py + headerHeight, titleBg)
-        // 顶部圆角区域用标题色补两角，避免露出深色底
-        if (rr > 1f) {
-            ctx.drawRoundedRect(px, py, px + pw, py + min(headerHeight.toFloat(), rr * 2f), rr, titleBg)
-            ctx.drawQuad(px, py + rr, px + pw, py + headerHeight, titleBg)
+        // 标题色用不透明（与面板 alpha 同步），避免透出深色底形成「黑罩」
+        val titleBg = Color4b(accent.r, accent.g, accent.b, a)
+
+        // 阴影只画在面板外侧，不叠在标题上
+        if (blurStrength > 0.5f && alpha > 0.2f) {
+            ctx.drawSoftShadow(px, py + headerHeight * 0.5f, px + pw, py + ph, rr, 4f + blurStrength * 0.2f, alpha * 0.7f)
         }
-        ctx.text(
-            font, cat.tag,
-            (px + 8f).roundToInt(), (py + headerHeight / 2f - 4f).roundToInt(),
-            Color4b.WHITE.alpha(a).argb, textShadow,
-        )
+
+        // 整板底色一层
+        ctx.drawRoundedRect(px, py, px + pw, py + ph, rr, bg)
 
         val clipTop = py + headerHeight
         val clipBottom = py + ph
@@ -889,19 +893,17 @@ object ModuleSolsticeClickgui : ClientModule(
             if (curY > clipBottom + itemHeight * 2) break
         }
 
-        // 列表绘制完后：用标题色盖住任何滚进标题区的残影，再画标题字（无额外黑条）
+        // 最后画标题：不透明纯色条盖住列表溢出，无阴影、无第二层黑
         ctx.drawQuad(px, py, px + pw, clipTop, titleBg)
-        if (rr > 1f) {
-            ctx.drawRoundedRect(px, py, px + pw, py + min(headerHeight.toFloat(), rr * 2f), rr, titleBg)
-            ctx.drawQuad(px, py + rr, px + pw, clipTop, titleBg)
-        }
         ctx.text(
             font, cat.tag,
             (px + 8f).roundToInt(), (py + headerHeight / 2f - 4f).roundToInt(),
             Color4b.WHITE.alpha(a).argb, textShadow,
         )
-        // 底边用面板底色盖住溢出，保留底部圆角观感
-        ctx.drawQuad(px, clipBottom, px + pw, py + ph, bg)
+        // 底溢出用面板色盖住
+        if (clipBottom < py + ph) {
+            ctx.drawQuad(px, clipBottom, px + pw, py + ph, bg)
+        }
     }
 
     /* ============================= 设置项渲染 ============================= */
