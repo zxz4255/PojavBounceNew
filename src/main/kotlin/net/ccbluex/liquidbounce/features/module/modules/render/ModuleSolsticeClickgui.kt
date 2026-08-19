@@ -454,6 +454,7 @@ object ModuleSolsticeClickgui : ClientModule(
                     closeFromEsc()
                 }
             }
+            event.cancelEvent()
             return@handler
         }
         // 绑键监听
