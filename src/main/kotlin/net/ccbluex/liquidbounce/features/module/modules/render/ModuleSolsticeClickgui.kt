@@ -790,21 +790,17 @@ object ModuleSolsticeClickgui : ClientModule(
         ctx.drawSoftShadow(px, py, px + pw, py + ph, rr, 6f + blurStrength * 0.25f, alpha)
 
         val bg = Color4b(24, 24, 24, (backgroundAlpha * alpha).roundToInt().coerceIn(0, 255))
-        // 整板圆角底
+        // 整板统一圆角底，不再叠多层「盖角」避免黑条/直角分裂
         ctx.drawRoundedRect(px, py, px + pw, py + ph, rr, bg)
 
-        // 标题栏：只要上方圆角，底部直角贴列表（无多余黑条）
+        // 标题栏：单色圆角条，高度 = headerHeight，与面板共用同一圆角
         val accent = accentAt(py)
-        val titleBg = Color4b(accent.r, accent.g, accent.b, (100 * alpha).roundToInt().coerceIn(0, 255))
-        // 一次画满标题高度的圆角条
-        ctx.drawRoundedRect(px, py, px + pw, py + headerHeight + rr, rr, titleBg)
-        // 用标题色盖住标题底部圆角 → 下沿变直角，且不露面板黑边
-        ctx.drawQuad(px, py + headerHeight - max(1f, rr), px + pw, py + headerHeight, titleBg)
-        // 细分隔线（同色系，避免黑线）
-        ctx.drawQuad(
-            px, py + headerHeight - 1f, px + pw, py + headerHeight,
-            Color4b(accent.r, accent.g, accent.b, (min(255, a + 40))),
-        )
+        val titleBg = Color4b(accent.r, accent.g, accent.b, (95 * alpha).roundToInt().coerceIn(0, 220))
+        ctx.drawRoundedRect(px, py, px + pw, py + headerHeight, rr, titleBg)
+        // 仅用标题同色抹平标题下沿内侧圆角，与列表衔接（不用深色线、不向下多画）
+        if (rr > 1f) {
+            ctx.drawQuad(px + 0.5f, py + headerHeight - rr, px + pw - 0.5f, py + headerHeight, titleBg)
+        }
         ctx.text(
             font, cat.tag,
             (px + 8f).roundToInt(), (py + headerHeight / 2f - 4f).roundToInt(),
@@ -887,17 +883,18 @@ object ModuleSolsticeClickgui : ClientModule(
             if (curY > clipBottom + itemHeight * 2) break
         }
 
-        // 顶/底遮罩：挡住滚动时溢出标题与底边的文字
-        ctx.drawQuad(px, py, px + pw, clipTop, titleBg)
-        // 重新画标题文字（遮罩盖住后补回）
+        // 顶遮罩：只挡「列表滚进标题区」的像素，用标题同色，不整块重绘标题（避免黑条/叠色）
+        if (rr > 0f) {
+            ctx.drawQuad(px + 1f, py + headerHeight - 1f, px + pw - 1f, py + headerHeight, titleBg)
+        }
+        // 底遮罩：挡住下方溢出
+        ctx.drawQuad(px + 1f, clipBottom - 1f, px + pw - 1f, py + ph - max(1f, rr * 0.5f), bg)
+        // 标题文字最后画一次，保证在最上层
         ctx.text(
             font, cat.tag,
             (px + 8f).roundToInt(), (py + headerHeight / 2f - 4f).roundToInt(),
             Color4b.WHITE.alpha(a).argb, textShadow,
         )
-        ctx.drawQuad(px, py + headerHeight - 1f, px + pw, py + headerHeight, accent.alpha((a * 0.85f).toInt()))
-        // 底边
-        ctx.drawQuad(px, clipBottom - 2f, px + pw, py + ph, bg)
     }
 
     /* ============================= 设置项渲染 ============================= */
