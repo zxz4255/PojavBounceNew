@@ -131,7 +131,7 @@ object ModuleRiseClickgui : ClientModule(
     private fun catLabel(cat: ModuleCategory): String = try {
         cat.tag
     } catch (_: Throwable) {
-        try { cat.name } catch (_: Throwable) { cat.toString() }
+        cat.toString()
     }
 
     private fun modulesIn(cat: ModuleCategory): List<ClientModule> {
