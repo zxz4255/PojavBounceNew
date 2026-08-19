@@ -44,6 +44,7 @@ import net.minecraft.client.input.KeyEvent
 import net.minecraft.network.chat.Component
 import org.lwjgl.glfw.GLFW
 import java.util.IdentityHashMap
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -65,17 +66,18 @@ object ModuleRiseClickgui : ClientModule(
     private val colOverlay by color("Overlay", Color4b(0, 0, 0, 50))
     private val colAccent by color("Accent", Color4b(0x56, 0xB4, 0xE9, 255))
 
-    private val windowW by float("Window Width", 400f, 280f..560f)
-    private val windowH by float("Window Height", 300f, 200f..480f)
-    private val sidebarW by float("Sidebar Width", 90f, 60f..140f)
+    private val windowW by float("Window Width", 500f, 320f..700f)
+    private val windowH by float("Window Height", 400f, 220f..600f)
+    private val sidebarW by float("Sidebar Width", 110f, 70f..140f)
     private val round by float("Round", 10f, 0f..20f)
-    private val moduleRowH by float("Module Row H", 22f, 16f..32f)
-    private val settingRowH by float("Setting Row H", 18f, 14f..28f)
+    private val moduleRowH by float("Module Row H", 24f, 16f..32f)
+    private val settingRowH by float("Setting Row H", 20f, 14f..28f)
     private val animMs by float("Anim Ms", 300f, 80f..800f)
+    private val searchH by float("Search Height", 20f, 14f..28f)
     private val shadow by boolean("Drop Shadow", true)
     private val scaleAnim by boolean("Scale Animation", true)
 
-    /* —— 状态 —— */
+    /* 状态 —— */
     private var winX = -1f
     private var winY = -1f
     private var dragging = false
@@ -88,12 +90,16 @@ object ModuleRiseClickgui : ClientModule(
     private var mouseX = 0f
     private var mouseY = 0f
     private var sliderDrag: RangedValue<*>? = null
+    private var scrollbarDragging = false
+    private var scrollbarDragStartY = 0f
+    private var scrollbarDragStartScroll = 0f
 
     private var scale = 0f
     private var opacity = 0f
     private var lastNs = 0L
 
     private val enumOpen = IdentityHashMap<Value<*>, Boolean>()
+    private val searchText = mutableStateOf("")  // 搜索框文本
 
     private val palette = listOf(
         Color4b(0x56, 0xB4, 0xE9), Color4b(255, 70, 70), Color4b(90, 230, 110),
@@ -103,6 +109,8 @@ object ModuleRiseClickgui : ClientModule(
     private var colorEdit: Value<*>? = null
     private var paletteX = 0f
     private var paletteY = 0f
+    private var colorAlpha = 255f  // 颜色不透明度
+    private var colorAlphaDragging = false  // 颜色不透明度拖拽
 
     /* —— 缓动 EASE_OUT_EXPO —— */
     private fun easeOutExpo(t: Float): Float =
@@ -118,6 +126,31 @@ object ModuleRiseClickgui : ClientModule(
 
     private fun over(x: Float, y: Float, w: Float, h: Float) =
         mouseX >= x && mouseY >= y && mouseX < x + w && mouseY < y + h
+
+    /* 过滤已启用的模块 */
+    private fun filterModules(cat: ModuleCategory): List<ClientModule> {
+        val modules = modulesIn(cat)
+        val query = searchText.value.lowercase()
+        if (query.isEmpty()) return modules
+        return modules.filter {
+            it.name.lowercase().contains(query) ||
+                    collectValues(it).any { v ->
+                        val actual = getActual(v) ?: return@any false
+                        actual.toString().lowercase().contains(query)
+                    }
+        }
+    }
+
+    /* 滚动条区域检测 */
+    private fun isOverScrollbar(x: Float, y: Float, h: Float): Boolean =
+        over(x, y, 4f, h)
+
+    private fun isOverScrollbarThumb(x: Float, y: Float, h: Float, totalH: Float, visibleH: Float): Boolean {
+        if (visibleH >= totalH) return false
+        val thumbH = (visibleH / totalH) * h
+        val thumbY = h - thumbH - (scroll / max(1f, totalH - visibleH)) * (h - thumbH)
+        return over(x, thumbY, 4f, thumbH)
+    }
 
     private fun modulesIn(cat: ModuleCategory) =
         ModuleManager.getModules().filter { it.category == cat && !it.hidden }
@@ -215,7 +248,8 @@ object ModuleRiseClickgui : ClientModule(
     private val scrollHandler = handler<MouseScrollEvent> { e ->
         if (!enabled) return@handler
         val contentX = winX + sidebarW
-        if (over(contentX, winY + 28f, windowW - sidebarW, windowH - 28f)) {
+        // 搜索区域不接受鼠标滚轮
+        if (over(contentX, winY + 28f, windowW - sidebarW - 4f, windowH - 28f - searchH)) {
             targetScroll = (targetScroll - e.vertical.toFloat() * 22f).coerceAtLeast(0f)
         }
     }
@@ -230,21 +264,57 @@ object ModuleRiseClickgui : ClientModule(
         if (e.action == 0) {
             dragging = false
             sliderDrag = null
+            colorAlphaDragging = false
+            scrollbarDragging = false
             return@handler
         }
         if (e.action != 1) return@handler
 
-        // 调色板
+        // 搜索框
+        val searchAreaX = winX + sidebarW + 6f
+        val searchAreaY = winY + 28f
+        val searchAreaW = windowW - sidebarW - 14f
+        if (over(searchAreaX, searchAreaY, searchAreaW, windowH - searchAreaY - searchH / 20f - 6f)) {
+            if (e.button == 0) {
+                // 打开系统输入框（简化为清空搜索）
+                searchText.value = ""
+            }
+            return@handler
+        }
+
+        // 搜索时启用滚动条交互
+        scrollbarDragging = false
+        scroll += (targetScroll - scroll) * 0.28f
+
+        // 颜色选择器
         colorEdit?.let { cv ->
             if (e.button == 0) {
                 val cell = 14f
-                if (over(paletteX, paletteY, 4 * cell, 2 * cell)) {
+                val alphaY = paletteY + 2 * cell + 10f
+                // 不透明度调整区域
+                if (over(paletteX, alphaY, 4 * cell, 8f)) {
+                    colorAlphaDragging = true
+                } else if (over(paletteX, paletteY, 4 * cell, 2 * cell)) {
                     val c = ((mouseX - paletteX) / cell).toInt().coerceIn(0, 3)
                     val r = ((mouseY - paletteY) / cell).toInt().coerceIn(0, 1)
                     trySet(cv, palette[(r * 4 + c).coerceIn(0, palette.lastIndex)])
                 }
                 colorEdit = null
             }
+            return@handler
+        }
+
+        // 颜色不透明度拖拽
+        if (e.button == 0 && colorAlphaDragging) {
+            val cell = 14f
+            val alphaY = paletteY + 2 * cell + 10f
+            if (over(paletteX, alphaY, 4 * cell, 8f)) {
+                val alphaMinY = paletteY + 2 * cell + 10f + 8f
+                val alphaMaxY = paletteY + 2 * cell + 10f + 8f + windowH - (paletteY + 2 * cell + 10f) - 6f
+                val value = ((mouseY - alphaMinY) / max(1f, alphaMaxY - alphaMinY)).coerceIn(0f, 1f)
+                colorAlpha = (value * 255f).roundToInt().coerceIn(0, 255).toFloat()
+            }
+            colorAlphaDragging = false
             return@handler
         }
 
@@ -256,10 +326,11 @@ object ModuleRiseClickgui : ClientModule(
             return@handler
         }
 
-        // 侧边栏分类
+        // 模块列表和滚动条
         val cats = ModuleCategories.entries
         var cy = winY + 36f
         for (cat in cats) {
+            // 分类点击
             if (over(winX + 4f, cy, sidebarW - 8f, 20f)) {
                 if (e.button == 0) {
                     selectedCat = cat
@@ -275,10 +346,39 @@ object ModuleRiseClickgui : ClientModule(
         // 模块列表
         val cat = selectedCat ?: return@handler
         val listX = winX + sidebarW + 6f
-        val listY0 = winY + 32f - scroll
-        val clipTop = winY + 28f
-        val clipBot = winY + windowH - 6f
+        val listY0 = winY + 28f + searchH - scroll
+        val clipTop = winY + 28f + searchH
+        val clipBot = winY + windowH - 30f - 8f
         var y = listY0
+
+        // 滚动条 - 在模块列表右侧
+        val scrollbarX = winX + windowW - 6f
+        if (over(scrollbarX, clipTop, 4f, clipBot - clipTop)) {
+            if (e.button == 0 && !dragging) {
+                val contentHeight = windowH - searchH - 10f
+                val visibleHeight = clipBot - clipTop
+                if (isOverScrollbarThumb(scrollbarX, clipTop, visibleHeight, contentHeight, visibleHeight)) {
+                    // 在滚动条轨道点击设定位置
+                    scroll = (mouseY - clipTop) / visibleHeight * contentHeight
+                } else {
+                    // 进入滚动条拖拽
+                    scrollbarDragging = true
+                    scrollbarDragStartY = mouseY
+                    scrollbarDragStartScroll = scroll
+                }
+                return@handler
+            }
+        }
+
+        // 滚动条拖拽处理
+        if (scrollbarDragging && e.button == 0) {
+            val contentHeight = windowH - searchH - 10f
+            val visibleHeight = clipBot - clipTop
+            val deltaY = mouseY - scrollbarDragStartY
+            scroll = scrollbarDragStartScroll + (deltaY / visibleHeight) * contentHeight
+            scroll = scroll.coerceIn(0f, contentHeight)
+            return@handler
+        }
         for (mod in modulesIn(cat)) {
             if (y + moduleRowH > clipTop && y < clipBot) {
                 if (over(listX, y, windowW - sidebarW - 14f, moduleRowH)) {
