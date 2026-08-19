@@ -449,7 +449,6 @@ object ModuleSolsticeClickgui : ClientModule(
                 } else if (enabled) {
                     enabled = false
                 }
-                try { event.cancelEvent() } catch (_: Throwable) {}
             }
             return@handler
         }
