@@ -228,10 +228,6 @@ object ModuleSolsticeModernTargetInfo : ClientModule(
         }.getOrNull()?.let { return it }
 
         // 常见类型硬编码回退
-        val path = when (entity.type.toString().lowercase()) {
-            in listOf() -> null
-            else -> null
-        }
         val key = entity.type.descriptionId.lowercase()
         return when {
             "skeleton" in key -> Identifier.withDefaultNamespace("textures/entity/skeleton/skeleton.png")
