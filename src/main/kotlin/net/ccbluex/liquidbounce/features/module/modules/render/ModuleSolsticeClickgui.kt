@@ -313,7 +313,7 @@ object ModuleSolsticeClickgui : ClientModule(
             val panelsArr = JsonArray()
             for (p in panels) {
                 val o = JsonObject()
-                o.addProperty("category", p.category?.tag ?: p.category?.name ?: "")
+                o.addProperty("category", p.category?.tag ?: "")
                 o.addProperty("x", p.x)
                 o.addProperty("y", p.y)
                 o.addProperty("scrollOffset", p.scrollOffset)
@@ -353,11 +353,14 @@ object ModuleSolsticeClickgui : ClientModule(
             if (arr != null && arr.size() > 0) {
                 panels.clear()
                 val byTag = ModuleCategories.entries.associateBy { it.tag }
-                val byName = ModuleCategories.entries.associateBy { it.name }
                 for (el in arr) {
                     val o = el.asJsonObject
                     val tag = o.get("category")?.asString ?: continue
-                    val cat = byTag[tag] ?: byName[tag] ?: continue
+                    val cat = byTag[tag]
+                        ?: ModuleCategories.entries.find { c ->
+                            c.tag.equals(tag, true) || c.toString().equals(tag, true)
+                        }
+                        ?: continue
                     panels += PanelState(
                         category = cat,
                         x = o.get("x")?.asFloat ?: 0f,
