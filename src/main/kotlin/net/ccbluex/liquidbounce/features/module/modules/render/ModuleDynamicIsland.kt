@@ -257,7 +257,7 @@ object ModuleDynamicIsland : ClientModule(
     private fun blockSnapshot(): BlockSnap {
         if (!showBlockCount) return BlockSnap(false, "", "", 0f, 0f)
         val p = mc.player ?: return BlockSnap(false, "", "", 0f, 0f)
-        val stack = p.mainHandItem
+        val stack = p.getMainHandItem()
         if (stack.isEmpty || stack.item !is BlockItem) return BlockSnap(false, "", "", 0f, 0f)
         val count = stack.count
         val max = stack.maxStackSize.coerceAtLeast(1)
@@ -275,23 +275,23 @@ object ModuleDynamicIsland : ClientModule(
         if (!showItemUse) return ItemUseSnap(false, "", "", 0f, 0f)
         val p = mc.player ?: return ItemUseSnap(false, "", "", 0f, 0f)
         val using = try {
-            p.isUsingItem
+            p.isUsingItem()
         } catch (_: Throwable) {
             false
         }
         if (!using) return ItemUseSnap(false, "", "", 0f, 0f)
         val stack = try {
-            p.useItem
+            p.getUseItem()
         } catch (_: Throwable) {
-            p.mainHandItem
+            p.getMainHandItem()
         }
         val remain = try {
-            p.useItemRemainingTicks
+            p.getUseItemRemainingTicks()
         } catch (_: Throwable) {
             0
         }
         val total = try {
-            stack.useDuration(p)
+            stack.getUseDuration(p)
         } catch (_: Throwable) {
             max(1, remain)
         }.coerceAtLeast(1)
@@ -484,21 +484,46 @@ object ModuleDynamicIsland : ClientModule(
     @Suppress("unused")
     private val moduleToggleHandler = handler<ModuleToggleEvent> { e ->
         if (!showNotifications || !enabled) return@handler
+        // ModuleToggleEvent 在 LB NextGen 中使用 event.module (val)
         val mod = try {
-            e.module
+            // 尝试直接访问 module 字段
+            val f = e.javaClass.getDeclaredField("module")
+            f.isAccessible = true
+            f.get(e)
         } catch (_: Throwable) {
-            return@handler
-        }
+            try {
+                // 尝试通过 getter
+                e.javaClass.methods.firstOrNull { 
+                    it.name == "getModule" || it.name == "module" && it.parameterCount == 0 
+                }?.invoke(e)
+            } catch (_: Throwable) {
+                return@handler
+            }
+        } ?: return@handler
+
         val name = try {
-            mod.name
+            val nameField = mod.javaClass.getDeclaredField("name")
+            nameField.isAccessible = true
+            nameField.get(mod)?.toString()
         } catch (_: Throwable) {
-            return@handler
-        }
+            mod.javaClass.simpleName
+        } ?: return@handler
+
         val on = try {
-            mod.enabled
+            val enabledField = mod.javaClass.getDeclaredField("enabled")
+            enabledField.isAccessible = true
+            enabledField.getBoolean(mod)
         } catch (_: Throwable) {
-            return@handler
-        }
+            try {
+                val enabledMethod = mod.javaClass.methods.firstOrNull { 
+                    it.name == "getEnabled" || it.name == "isEnabled" 
+                }
+                enabledMethod?.invoke(mod) as? Boolean
+            } catch (_: Throwable) {
+                return@handler
+            }
+        } ?: return@handler
+
         if (on) success("$name enabled") else failure("$name disabled")
     }
 
