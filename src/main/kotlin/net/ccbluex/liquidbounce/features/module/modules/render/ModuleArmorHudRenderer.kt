@@ -1,363 +1,233 @@
+/*
+ * ModuleArmorHudRenderer —— 还原 ArmorHudRenderer.java (New cards + Lite)
+ * 原生 Overlay，无 Web / 无 Skia
+ */
 package net.ccbluex.liquidbounce.features.module.modules.render
 
+import net.ccbluex.liquidbounce.config.types.list.Tagged
 import net.ccbluex.liquidbounce.event.events.OverlayRenderEvent
 import net.ccbluex.liquidbounce.event.handler
 import net.ccbluex.liquidbounce.features.module.ClientModule
 import net.ccbluex.liquidbounce.features.module.ModuleCategories
+import net.ccbluex.liquidbounce.render.drawQuad
 import net.ccbluex.liquidbounce.render.drawRoundedRect
 import net.ccbluex.liquidbounce.render.engine.type.Color4b
 import net.ccbluex.liquidbounce.utils.client.mc
+import net.minecraft.client.gui.Font
 import net.minecraft.client.gui.GuiGraphicsExtractor
-import net.minecraft.item.ArmorItem
-import net.minecraft.item.ItemStack
-import net.minecraft.util.math.MathHelper
-import kotlin.math.*
+import net.minecraft.world.entity.EquipmentSlot
+import net.minecraft.world.item.ItemStack
+import kotlin.math.max
+import kotlin.math.roundToInt
 
 object ModuleArmorHudRenderer : ClientModule(
-    "ArmorHUD",
+    "ArmorHudRenderer",
     ModuleCategories.RENDER,
-    aliases = listOf("ArmorStatus", "ArmorInfo"),
+    aliases = listOf("ArmorHUD", "PvpArmorHud"),
 ) {
 
-    /* ============================= 可调节参数 ============================= */
-
-    // 布局
-    private val posX by float("Pos X", 2f, 0f..2000f)
-    private val posY by float("Pos Y", 2f, 0f..1200f)
-    private val scale by float("Scale", 1.0f, 0.5f..2.0f)
-    private val verticalMode by boolean("Vertical", true)
-    private val showDurabilityBar by boolean("Durability Bar", true)
-    private val showPercentage by boolean("Percentage", true)
-    private val showItemName by boolean("Item Name", false)
-    private val iconSize by float("Icon Size", 18f, 10f..32f)
-    private val spacing by float("Spacing", 2f, 0f..10f)
-
-    // 背景
-    private val background by boolean("Background", true)
-    private val bgColor by color("BG Color", Color4b(0x00, 0x00, 0x00, 0x88))
-    private val bgRadius by float("BG Radius", 6f, 0f..16f)
-
-    // 颜色
-    private val textColor by color("Text Color", Color4b(0xFF, 0xFF, 0xFF, 0xFF))
-    private val durabilityHigh by color("Durability High", Color4b(0x22, 0xC5, 0x5E, 0xFF))
-    private val durabilityMid by color("Durability Mid", Color4b(0xFF, 0xC8, 0x57, 0xFF))
-    private val durabilityLow by color("Durability Low", Color4b(0xFF, 0x55, 0x55, 0xFF))
-
-    // 动画
-    private val fadeAnimSpeed by float("Fade Speed", 10f, 1f..30f)
-    private val damageFlash by boolean("Damage Flash", true)
-    private val flashDuration by int("Flash Duration", 300, 50..1000)
-
-    // 行为
-    private val hideIfFull by boolean("Hide If Full", false)
-    private val alwaysShow by boolean("Always Show", false)
-
-    /* ============================= 运行时状态 ============================= */
-
-    private var displayAlpha = 0f
-    private var lastRenderTime = 0L
-    private var flashTimes = mutableMapOf<Int, Long>()  // slot -> flash start time
-
-    /* ============================= 数据类 ============================= */
-
-    private data class ArmorDisplay(
-        val slot: Int,
-        val stack: ItemStack,
-        val durability: Int,
-        val maxDurability: Int,
-        val percentage: Float,
-        val itemName: String,
-    )
-
-    /* ============================= 工具方法 ============================= */
-
-    private fun easeTo(current: Float, target: Float, speed: Float, dt: Float): Float {
-        if (current < 0f) return target
-        val t = (1f - (1f - 0.15f).pow(dt * speed)).coerceIn(0f, 1f)
-        return current + (target - current) * t
+    private enum class Mode(override val tag: String) : Tagged {
+        NEW("New"), LITE("Lite")
     }
 
-    private fun getDurabilityColor(percentage: Float): Color4b {
-        return when {
-            percentage > 0.6f -> durabilityHigh
-            percentage > 0.25f -> durabilityMid
-            else -> durabilityLow
+    private enum class Anchor(override val tag: String) : Tagged {
+        HOTBAR_LEFT("Hotbar Left"),
+        CUSTOM("Custom")
+    }
+
+    private val mode by enumChoice("Mode", Mode.NEW)
+    private val anchor by enumChoice("Anchor", Anchor.HOTBAR_LEFT)
+    private val posX by float("Offset X", 0f, -400f..800f)
+    private val posY by float("Offset Y", 0f, -400f..600f)
+    private val scale by float("Scale", 1f, 0.6f..2f)
+
+    private val cardW by float("Card Width", 54f, 24f..100f)
+    private val cardH by float("Card Height", 18f, 14f..36f)
+    private val cardGap by float("Card Gap", 2.5f, 0f..12f)
+    private val radius by float("Radius", 5f, 0f..12f)
+
+    private val bgColor by color("Background", Color4b(18, 18, 22, 200))
+    private val borderColor by color("Border", Color4b(255, 255, 255, 40))
+    private val textColor by color("Text", Color4b(255, 255, 255, 230))
+    private val barBg by color("Durability BG", Color4b(255, 255, 255, 35))
+    private val showEmpty by boolean("Show Empty", false)
+    private val showPercent by boolean("Show Percent", true)
+    private val vertical by boolean("Vertical Stack", true)
+
+    private data class ArmorEntry(val slot: EquipmentSlot, val stack: ItemStack, val label: String)
+
+    private fun entries(): List<ArmorEntry> {
+        val p = mc.player ?: return emptyList()
+        val slots = listOf(
+            EquipmentSlot.HEAD to "H",
+            EquipmentSlot.CHEST to "C",
+            EquipmentSlot.LEGS to "L",
+            EquipmentSlot.FEET to "F",
+        )
+        return slots.mapNotNull { (slot, lab) ->
+            val stack = try {
+                p.getItemBySlot(slot)
+            } catch (_: Throwable) {
+                ItemStack.EMPTY
+            }
+            if (!showEmpty && (stack.isEmpty)) return@mapNotNull null
+            ArmorEntry(slot, stack, lab)
         }
     }
 
-    private fun getFlashFactor(slot: Int): Float {
-        val startTime = flashTimes[slot] ?: return 0f
-        val elapsed = System.currentTimeMillis() - startTime
-        if (elapsed < 0 || elapsed >= flashDuration) {
-            flashTimes.remove(slot)
-            return 0f
+    private fun durabilityRatio(stack: ItemStack): Float {
+        if (stack.isEmpty) return 0f
+        return try {
+            if (!stack.isDamageableItem) return 1f
+            val max = stack.maxDamage.coerceAtLeast(1)
+            val dmg = stack.damageValue.coerceIn(0, max)
+            1f - dmg.toFloat() / max
+        } catch (_: Throwable) {
+            1f
         }
-        return 1f - elapsed.toFloat() / flashDuration
     }
 
-    /* ============================= 渲染 ============================= */
+    private fun durabilityColor(ratio: Float): Color4b {
+        // 绿→黄→红
+        val r = (255 * (1f - ratio)).roundToInt().coerceIn(40, 255)
+        val g = (255 * ratio).roundToInt().coerceIn(40, 255)
+        return Color4b(r, g, 60, 230)
+    }
+
+    private fun withA(c: Color4b, a: Float) =
+        Color4b(c.r, c.g, c.b, (c.a * a.coerceIn(0f, 1f)).roundToInt().coerceIn(0, 255))
+
+    private fun GuiGraphicsExtractor.drawItemSafe(stack: ItemStack, x: Float, y: Float) {
+        if (stack.isEmpty) return
+        runCatching {
+            val methods = javaClass.methods
+            methods.firstOrNull { it.name == "renderItem" && it.parameterCount in 3..5 }
+                ?.let { m ->
+                    when (m.parameterCount) {
+                        3 -> m.invoke(this, stack, x.roundToInt(), y.roundToInt())
+                        4 -> m.invoke(this, stack, x.roundToInt(), y.roundToInt(), 0)
+                        else -> m.invoke(this, mc.player, stack, x.roundToInt(), y.roundToInt(), 0)
+                    }
+                    return
+                }
+            methods.firstOrNull { it.name == "item" && it.parameterCount in 3..6 }
+                ?.let { m ->
+                    when (m.parameterCount) {
+                        3 -> m.invoke(this, stack, x.roundToInt(), y.roundToInt())
+                        4 -> m.invoke(this, stack, x.roundToInt(), y.roundToInt(), 0)
+                        else -> m.invoke(this, mc.player, stack, x.roundToInt(), y.roundToInt(), 0)
+                    }
+                }
+        }
+    }
 
     @Suppress("unused")
     private val renderHandler = handler<OverlayRenderEvent> { event ->
-        if (!enabled) return@handler
+        val list = entries()
+        if (list.isEmpty()) return@handler
 
-        val player = mc.player ?: return@handler
+        val ctx = event.context
+        val font = mc.font
+        val s = scale
+        val sw = ctx.guiWidth().toFloat()
+        val sh = ctx.guiHeight().toFloat()
 
-        // 收集护甲数据
-        val armorItems = mutableListOf<ArmorDisplay>()
-        val armorSlots = listOf(3, 2, 1, 0)  // 头盔、胸甲、护腿、靴子
+        val cw = cardW * s
+        val ch = cardH * s
+        val gap = cardGap * s
 
-        for (slot in armorSlots) {
-            val stack = player.inventory.getArmorStack(slot)
-            if (stack.isEmpty) continue
+        val totalH = if (vertical) list.size * ch + (list.size - 1) * gap else ch
+        val totalW = if (vertical) cw else list.size * cw + (list.size - 1) * gap
 
-            val maxDura = stack.maxDamage.coerceAtLeast(1)
-            val currentDura = maxDura - stack.damage
-            val percentage = currentDura.toFloat() / maxDura
-
-            // 检测耐久变化
-            if (damageFlash && stack.damage > 0) {
-                val key = slot
-                if (!flashTimes.containsKey(key)) {
-                    flashTimes[key] = System.currentTimeMillis()
-                }
-            }
-
-            armorItems.add(ArmorDisplay(
-                slot = slot,
-                stack = stack,
-                durability = currentDura,
-                maxDurability = maxDura,
-                percentage = percentage,
-                itemName = stack.name.string
-            ))
+        var baseX: Float
+        var baseY: Float
+        if (anchor == Anchor.HOTBAR_LEFT) {
+            val hotbarW = 182f
+            val hotbarX = (sw - hotbarW) * 0.5f
+            val hotbarY = sh - 22f
+            baseX = hotbarX - cw - 3f * s + posX
+            baseY = hotbarY - totalH - 3f * s + posY
+        } else {
+            baseX = posX
+            baseY = posY
         }
+        baseX = baseX.coerceIn(0f, max(0f, sw - totalW))
+        baseY = baseY.coerceIn(0f, max(0f, sh - totalH))
 
-        val now = System.currentTimeMillis()
-        val dt = if (lastRenderTime != 0L) ((now - lastRenderTime) / 1000f).coerceIn(0.001f, 0.05f) else 0.016f
-        lastRenderTime = now
-
-        // 淡出动画
-        val targetAlpha = if (armorItems.isNotEmpty() && (!hideIfFull || armorItems.any { it.percentage < 1f })) 1f else 0f
-        displayAlpha = easeTo(displayAlpha, targetAlpha, fadeAnimSpeed, dt)
-
-        if (displayAlpha < 0.01f) return@handler
-        if (!alwaysShow && armorItems.isEmpty()) return@handler
-
-        renderArmorList(event.context, armorItems)
+        if (mode == Mode.LITE) {
+            renderLite(ctx, font, list, baseX, baseY, s)
+        } else {
+            renderNew(ctx, font, list, baseX, baseY, cw, ch, gap, s)
+        }
     }
 
-    private fun renderArmorList(context: GuiGraphicsExtractor, armorItems: List<ArmorDisplay>) {
-        val scale = this.scale
-        val baseX = posX
-        val baseY = posY
-        val iconSize = this.iconSize
+    private fun renderNew(
+        ctx: GuiGraphicsExtractor, font: Font, list: List<ArmorEntry>,
+        baseX: Float, baseY: Float, cw: Float, ch: Float, gap: Float, s: Float,
+    ) {
+        list.forEachIndexed { i, e ->
+            val x = if (vertical) baseX else baseX + i * (cw + gap)
+            val y = if (vertical) baseY + i * (ch + gap) else baseY
 
-        context.matrices.push()
-        context.matrices.translate(baseX, baseY, 0f)
-        context.matrices.scale(scale, scale, 1f)
+            ctx.drawRoundedRect(x, y, x + cw, y + ch, radius * s, bgColor)
+            // border
+            ctx.drawQuad(x, y, x + cw, y + 1f, borderColor)
+            ctx.drawQuad(x, y + ch - 1f, x + cw, y + ch, borderColor)
 
-        val textRenderer = mc.textRenderer
-
-        if (verticalMode) {
-            // 垂直布局 (从上到下: 头盔、胸甲、护腿、靴子)
-            var currentY = 0f
-
-            for (armor in armorItems.sortedByDescending { it.slot }) {
-                val flashFactor = getFlashFactor(armor.slot)
-                val alpha = displayAlpha * (1f - flashFactor * 0.3f)  // 受伤时变暗
-
-                // 背景
-                if (background) {
-                    val itemHeight = if (showDurabilityBar) iconSize + 8f else iconSize + 2f
-                    val bgW = if (showPercentage || showItemName) {
-                        max(iconSize + 4f, textRenderer.getWidth("${armor.percentage.roundToInt()}%") + 8f)
-                    } else {
-                        iconSize + 4f
-                    }
-
-                    drawRoundedRect(
-                        context,
-                        0f, currentY,
-                        bgW, itemHeight,
-                        bgRadius,
-                        Color4b(
-                            bgColor.r, bgColor.g, bgColor.b,
-                            (bgColor.a * alpha).toInt()
-                        )
-                    )
-                }
-
-                // 物品图标
-                context.drawItem(armor.stack, 2, currentY.toInt() + 2)
-
-                // 闪烁效果
-                if (flashFactor > 0f) {
-                    drawRoundedRect(
-                        context,
-                        2f, currentY + 2f,
-                        iconSize - 4f, iconSize - 4f,
-                        2f,
-                        Color4b(0xFF, 0x00, 0x00, (flashFactor * 0.5f * 255).toInt())
-                    )
-                }
-
-                // 耐久度条
-                if (showDurabilityBar) {
-                    val barX = 2f
-                    val barY = currentY + iconSize + 2f
-                    val barW = iconSize - 4f
-                    val barH = 3f
-
-                    // 背景
-                    drawRoundedRect(
-                        context,
-                        barX, barY,
-                        barW, barH,
-                        barH * 0.5f,
-                        Color4b(0x33, 0x33, 0x33, (0xFF * alpha).toInt())
-                    )
-
-                    // 填充
-                    val fillW = max(barH, barW * armor.percentage)
-                    val duraColor = getDurabilityColor(armor.percentage)
-                    drawRoundedRect(
-                        context,
-                        barX, barY,
-                        fillW, barH,
-                        barH * 0.5f,
-                        Color4b(
-                            duraColor.r, duraColor.g, duraColor.b,
-                            (duraColor.a * alpha).toInt()
-                        )
-                    )
-                }
-
-                // 百分比文字
-                if (showPercentage) {
-                    val pctText = "${(armor.percentage * 100).roundToInt()}%"
-                    val textCol = Color4b(
-                        textColor.r, textColor.g, textColor.b,
-                        (textColor.a * alpha).toInt()
-                    )
-                    context.drawText(
-                        textRenderer,
-                        pctText,
-                        (iconSize + 6f).toInt(),
-                        (currentY + iconSize / 2 - 4f).toInt(),
-                        textCol.toARGB(),
-                        true
-                    )
-                }
-
-                // 物品名称
-                if (showItemName) {
-                    val nameText = if (armor.itemName.length > 12) armor.itemName.substring(0, 12) + "..." else armor.itemName
-                    val nameCol = Color4b(
-                        textColor.r, textColor.g, textColor.b,
-                        (textColor.a * alpha * 0.7f).toInt()
-                    )
-                    context.drawText(
-                        textRenderer,
-                        nameText,
-                        (iconSize + 6f).toInt(),
-                        (currentY + 2f).toInt(),
-                        nameCol.toARGB(),
-                        false
-                    )
-                }
-
-                currentY += iconSize + spacing + if (showDurabilityBar) 8f else 2f
+            val icon = 14f * s
+            if (!e.stack.isEmpty) {
+                ctx.drawItemSafe(e.stack, x + 2f * s, y + (ch - icon) / 2f - 1f)
+            } else {
+                ctx.text(font, e.label, (x + 4f * s).roundToInt(), (y + ch / 2f - 4f).roundToInt(), textColor.argb, false)
             }
-        } else {
-            // 水平布局
-            var currentX = 0f
 
-            for (armor in armorItems.sortedByDescending { it.slot }) {
-                val flashFactor = getFlashFactor(armor.slot)
-                val alpha = displayAlpha * (1f - flashFactor * 0.3f)
+            val ratio = durabilityRatio(e.stack)
+            val barX = x + 18f * s
+            val barW = cw - 22f * s
+            val barY = y + ch - 5f * s
+            val barH = 2.5f * s
+            ctx.drawQuad(barX, barY, barX + barW, barY + barH, barBg)
+            if (ratio > 0.01f && !e.stack.isEmpty) {
+                ctx.drawQuad(barX, barY, barX + barW * ratio, barY + barH, durabilityColor(ratio))
+            }
 
-                // 背景
-                if (background) {
-                    val itemWidth = if (showDurabilityBar) iconSize + 4f else iconSize + 2f
-                    val itemHeight = if (showPercentage || showItemName) iconSize + 14f else iconSize + 4f
-
-                    drawRoundedRect(
-                        context,
-                        currentX, 0f,
-                        itemWidth, itemHeight,
-                        bgRadius,
-                        Color4b(
-                            bgColor.r, bgColor.g, bgColor.b,
-                            (bgColor.a * alpha).toInt()
-                        )
-                    )
-                }
-
-                // 物品图标
-                context.drawItem(armor.stack, currentX.toInt() + 2, 2)
-
-                // 闪烁
-                if (flashFactor > 0f) {
-                    drawRoundedRect(
-                        context,
-                        currentX + 2f, 2f,
-                        iconSize - 4f, iconSize - 4f,
-                        2f,
-                        Color4b(0xFF, 0x00, 0x00, (flashFactor * 0.5f * 255).toInt())
-                    )
-                }
-
-                // 耐久度条 (垂直或在下方)
-                if (showDurabilityBar) {
-                    val barX = currentX + 2f
-                    val barY = iconSize + 4f
-                    val barW = iconSize - 4f
-                    val barH = 3f
-
-                    drawRoundedRect(
-                        context,
-                        barX, barY,
-                        barW, barH,
-                        barH * 0.5f,
-                        Color4b(0x33, 0x33, 0x33, (0xFF * alpha).toInt())
-                    )
-
-                    val fillW = max(barH, barW * armor.percentage)
-                    val duraColor = getDurabilityColor(armor.percentage)
-                    drawRoundedRect(
-                        context,
-                        barX, barY,
-                        fillW, barH,
-                        barH * 0.5f,
-                        Color4b(
-                            duraColor.r, duraColor.g, duraColor.b,
-                            (duraColor.a * alpha).toInt()
-                        )
-                    )
-                }
-
-                // 百分比
-                if (showPercentage) {
-                    val pctText = "${(armor.percentage * 100).roundToInt()}%"
-                    val textCol = Color4b(
-                        textColor.r, textColor.g, textColor.b,
-                        (textColor.a * alpha).toInt()
-                    )
-                    context.drawText(
-                        textRenderer,
-                        pctText,
-                        (currentX + iconSize / 2 - textRenderer.getWidth(pctText) / 2 + 2).toInt(),
-                        (iconSize + (if (showDurabilityBar) 10f else 4f)).toInt(),
-                        textCol.toARGB(),
-                        false
-                    )
-                }
-
-                currentX += iconSize + spacing + 4f
+            if (showPercent && !e.stack.isEmpty) {
+                val pct = (ratio * 100).roundToInt().toString() + "%"
+                ctx.text(
+                    font, pct,
+                    (barX).roundToInt(), (y + 3f * s).roundToInt(),
+                    textColor.argb, false,
+                )
             }
         }
+    }
 
-        context.matrices.pop()
+    private fun renderLite(
+        ctx: GuiGraphicsExtractor, font: Font, list: List<ArmorEntry>,
+        baseX: Float, baseY: Float, s: Float,
+    ) {
+        val icon = 16f * s
+        val gap = 2f * s
+        list.forEachIndexed { i, e ->
+            val x = baseX
+            val y = baseY + i * (icon + gap + 8f * s)
+            if (!e.stack.isEmpty) {
+                ctx.drawItemSafe(e.stack, x, y)
+            }
+            val ratio = durabilityRatio(e.stack)
+            if (showPercent && !e.stack.isEmpty) {
+                val pct = (ratio * 100).roundToInt().toString()
+                ctx.text(
+                    font, pct,
+                    (x + icon + 2.5f * s).roundToInt(), (y + 4f * s).roundToInt(),
+                    durabilityColor(ratio).argb, false,
+                )
+            }
+            // mini durability bar under icon
+            ctx.drawQuad(x, y + icon + 1f, x + icon, y + icon + 2.5f * s, barBg)
+            if (ratio > 0.01f) {
+                ctx.drawQuad(x, y + icon + 1f, x + icon * ratio, y + icon + 2.5f * s, durabilityColor(ratio))
+            }
+        }
     }
 }
