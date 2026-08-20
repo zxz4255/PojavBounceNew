@@ -89,7 +89,7 @@ object ModuleTargetHudRenderer : ClientModule(
         val ka = try { KillAuraTargetTracker.target } catch (_: Throwable) { null }
         if (ka != null && ka.isAlive) return ka
         if (target != null && target!!.isAlive) return target
-        if (showInChat && mc.screen is ChatScreen) return mc.player
+        if (showInChat && (try { mc.gui.screen() } catch (_: Throwable) { null }) is ChatScreen) return mc.player
         return null
     }
 
