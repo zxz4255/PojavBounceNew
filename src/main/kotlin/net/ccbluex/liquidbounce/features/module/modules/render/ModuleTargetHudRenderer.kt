@@ -1,721 +1,302 @@
+/*
+ * ModuleTargetHudRenderer —— 还原 TargetHudRenderer.java (Lite + New 近似)
+ * 原生 Overlay，无 Web / 无 Skia
+ */
 package net.ccbluex.liquidbounce.features.module.modules.render
 
+import net.ccbluex.liquidbounce.config.types.list.Tagged
+import net.ccbluex.liquidbounce.event.events.AttackEntityEvent
 import net.ccbluex.liquidbounce.event.events.OverlayRenderEvent
 import net.ccbluex.liquidbounce.event.handler
 import net.ccbluex.liquidbounce.features.module.ClientModule
 import net.ccbluex.liquidbounce.features.module.ModuleCategories
+import net.ccbluex.liquidbounce.features.module.modules.combat.killaura.KillAuraTargetTracker
+import net.ccbluex.liquidbounce.render.drawQuad
 import net.ccbluex.liquidbounce.render.drawRoundedRect
 import net.ccbluex.liquidbounce.render.engine.type.Color4b
 import net.ccbluex.liquidbounce.utils.client.mc
+import net.minecraft.client.gui.Font
 import net.minecraft.client.gui.GuiGraphicsExtractor
-import net.minecraft.client.network.AbstractClientPlayerEntity
-import net.minecraft.client.render.GameRenderer
-import net.minecraft.entity.Entity
-import net.minecraft.entity.LivingEntity
-import net.minecraft.entity.player.PlayerEntity
-import net.minecraft.util.math.MathHelper
-import net.minecraft.util.math.Vec3d
-import org.lwjgl.opengl.GL11
-import java.util.*
-import kotlin.math.*
+import net.minecraft.client.gui.screens.ChatScreen
+import net.minecraft.client.player.AbstractClientPlayer
+import net.minecraft.resources.Identifier
+import net.minecraft.util.Mth
+import net.minecraft.world.entity.LivingEntity
+import java.util.Locale
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.pow
+import kotlin.math.roundToInt
 
 object ModuleTargetHudRenderer : ClientModule(
-    "TargetHUD",
+    "TargetHudRenderer",
     ModuleCategories.RENDER,
-    aliases = listOf("TargetHud", "THUD"),
+    aliases = listOf("TargetHUD", "PvpTargetHud"),
 ) {
 
-    /* ============================= 可调节参数 ============================= */
+    private enum class Mode(override val tag: String) : Tagged {
+        LITE("Lite"), NEW("New")
+    }
 
-    // 布局
-    private val hudLayout by choice("Layout", arrayOf("New", "Old"), "New")
-    private val hudTheme by choice("Theme", arrayOf("Dark", "Light"), "Dark")
-    private val targetHudScale by float("Scale", 1.0f, 0.5f..2.0f)
-    private val posX by float("Pos X", 100f, 0f..2000f)
-    private val posY by float("Pos Y", 100f, 0f..1200f)
-    private val attackReachDisplay by boolean("Attack Reach", true)
-    private val blurMode by boolean("Blur Mode", false)
+    private val mode by enumChoice("Mode", Mode.NEW)
+    private val posX by float("Offset X", 0f, -600f..600f)
+    private val posY by float("Offset Y", 40f, -400f..400f)
+    private val scale by float("Scale", 1f, 0.5f..2f)
+    private val radius by float("Radius", 10f, 0f..20f)
 
-    // 动画
-    private val healthAnimSpeed by float("Health Anim Speed", 8f, 1f..20f)
-    private val fadeAnimSpeed by float("Fade Speed", 12f, 1f..30f)
-    private val damageFlashDuration by int("Flash Duration", 500, 100..2000)
-    private val healthTextAnimDuration by int("Text Anim Duration", 350, 50..1000)
+    private val bgColor by color("Background", Color4b(18, 18, 22, 200))
+    private val borderColor by color("Border", Color4b(255, 255, 255, 90))
+    private val barBg by color("Bar Background", Color4b(255, 255, 255, 40))
+    private val barFill by color("Bar Fill", Color4b(255, 236, 248, 230))
+    private val absorbFill by color("Absorption", Color4b(255, 210, 80, 200))
+    private val textColor by color("Text", Color4b(255, 255, 255, 240))
+    private val winColor by color("Winning", Color4b(0x55, 0xFF, 0x55, 255))
+    private val loseColor by color("Losing", Color4b(0xFF, 0x55, 0x55, 255))
 
-    // 颜色 (Dark主题)
-    private val darkCardColor by color("Dark Card", Color4b(0x11, 0x18, 0x27, 0xE6))
-    private val darkTextPrimary by color("Dark Text", Color4b(0xF8, 0xFA, 0xFC, 0xFF))
-    private val darkTextMuted by color("Dark Muted", Color4b(0xB8, 0xCB, 0xD5, 0xE1))
-    private val darkAvatarBg by color("Dark Avatar BG", Color4b(0x2A, 0x33, 0x45, 0x33))
+    private val showDistance by boolean("Show Distance", true)
+    private val showStatus by boolean("Show HP Status", true)
+    private val hurtFlash by boolean("Hurt Flash", true)
+    private val animDurationMs by int("Anim Duration Ms", 220, 50..800)
+    private val hideDelayMs by int("Hide Delay Ms", 2500, 500..8000)
+    private val showInChat by boolean("Preview In Chat", true)
 
-    // 颜色 (Light主题)
-    private val lightCardColor by color("Light Card", Color4b(0xF7, 0xF8, 0xFA, 0xFC))
-    private val lightTextPrimary by color("Light Text", Color4b(0x20, 0x20, 0x27, 0xFF))
-    private val lightTextMuted by color("Light Muted", Color4b(0x5C, 0x58, 0x70, 0xAA))
-    private val lightAvatarBg by color("Light Avatar BG", Color4b(0xFF, 0xFF, 0xFF, 0x66))
-
-    // 血条颜色
-    private val healthColorHigh by color("Health High", Color4b(0x22, 0xC5, 0x5E, 0xFF))
-    private val healthColorMid by color("Health Mid", Color4b(0xFF, 0xC8, 0x57, 0xFF))
-    private val healthColorLow by color("Health Low", Color4b(0xFF, 0x55, 0x55, 0xFF))
-    private val absorptionColor by color("Absorption", Color4b(0xF5, 0xB8, 0x3D, 0xFF))
-
-    /* ============================= 常量 ============================= */
-
-    private const val NEW_HUD_WIDTH = 184f
-    private const val NEW_HUD_HEIGHT = 66f
-    private const val NEW_AVATAR_SIZE = 46f
-    private const val NEW_AVATAR_RADIUS = 14f
-    private const val NEW_OVERLAY_X = 60f
-    private const val NEW_OVERLAY_Y = 10f
-    private const val NEW_OVERLAY_WIDTH = 124f
-    private const val NEW_OVERLAY_HEIGHT = 56f
-
-    private const val OLD_HUD_WIDTH = 140f
-    private const val OLD_HUD_HEIGHT = 50f
-    private const val OLD_BAR_WIDTH = 118f
-    private const val OLD_BAR_HEIGHT = 10f
-    private const val OLD_AVATAR_SIZE = 38f
-
-    private const val ATTACK_DISTANCE_DISPLAY_DURATION = 3000L
-
-    /* ============================= 运行时状态 ============================= */
+    private const val LITE_W = 160f
+    private const val LITE_H = 42f
+    private const val NEW_W = 190f
+    private const val NEW_H = 58f
+    private const val AVATAR = 28f
+    private const val PAD = 6f
 
     private var target: LivingEntity? = null
-    private var targetFade = 0f
-    private var animatedHealthRatio = 1f
-    private var animatedAbsorptionRatio = 0f
-    private var lastObservedHealth = -1f
-    private var lastDamageTime = 0L
-    private var lastHealTime = 0L
-    private var lastAttackDistance = -1f
-    private var lastAttackDistanceTime = 0L
-
-    // 文字动画
-    private var currentHealthText = ""
-    private var previousHealthText = ""
-    private var healthTextAnimStart = 0L
-    private var healthTextDirection = 0
-    private var lastHealthTextValue = -1f
-
-    private var currentDistText = ""
-    private var previousDistText = ""
-    private var distTextAnimStart = 0L
-    private var distTextDirection = 0
-    private var lastDistTextValue = -1f
-
-    private var lastRenderTime = 0L
-    private var lastRawName = ""
-    private var lastTruncatedName = ""
-
-    /* ============================= 工具方法 ============================= */
-
-    private fun easeTo(current: Float, target: Float, speed: Float, dt: Float): Float {
-        if (current < 0f) return target
-        val t = (1f - (1f - 0.15f).pow(dt * speed)).coerceIn(0f, 1f)
-        return current + (target - current) * t
-    }
+    private var lastHitTime = 0L
+    private var appearanceTime = 0L
+    private var fullyHidden = true
+    private var animHp = 1f
+    private var animAbs = 0f
+    private var lastFrameNs = 0L
 
     private fun easeOutBack(t: Float): Float {
-        val v = t.coerceIn(0f, 1f) - 1f
-        return 1f + v * v * (1.55f * v + 0.55f)
+        val c1 = 1.70158f
+        val c3 = c1 + 1f
+        val x = t.coerceIn(0f, 1f)
+        return 1f + c3 * (x - 1f).pow(3) + c1 * (x - 1f).pow(2)
     }
 
-    private fun getHealthColor(ratio: Float): Color4b {
-        return when {
-            ratio > 0.5f -> {
-                val t = (ratio - 0.5f) * 2f
-                Color4b(
-                    (255 * (1f - t)).roundToInt(),
-                    255,
-                    0,
-                    255
-                )
-            }
-            else -> {
-                val t = ratio * 2f
-                Color4b(
-                    255,
-                    (255 * t).roundToInt(),
-                    0,
-                    255
-                )
-            }
-        }
+    private fun withA(c: Color4b, a: Float) =
+        Color4b(c.r, c.g, c.b, (c.a * a.coerceIn(0f, 1f)).roundToInt().coerceIn(0, 255))
+
+    private fun resolveTarget(): LivingEntity? {
+        val ka = try { KillAuraTargetTracker.target } catch (_: Throwable) { null }
+        if (ka != null && ka.isAlive) return ka
+        if (target != null && target!!.isAlive) return target
+        if (showInChat && mc.screen is ChatScreen) return mc.player
+        return null
     }
 
-    private fun getThemeCardColor(): Color4b {
-        return if (hudTheme == "Light") lightCardColor else darkCardColor
+    private fun playerSkin(player: AbstractClientPlayer): Identifier? {
+        runCatching { player.skin.body().texturePath() }.getOrNull()?.let { return it }
+        return Identifier.withDefaultNamespace("textures/entity/player/wide/steve.png")
     }
 
-    private fun getThemePrimaryText(): Color4b {
-        return if (blurMode) {
-            if (hudTheme == "Light") lightTextPrimary else darkTextPrimary
+    private fun GuiGraphicsExtractor.drawHead(entity: LivingEntity, x: Float, y: Float, size: Float, alpha: Float) {
+        val x0 = x.roundToInt()
+        val y0 = y.roundToInt()
+        val x1 = (x + size).roundToInt()
+        val y1 = (y + size).roundToInt()
+        if (entity is AbstractClientPlayer) {
+            val tex = playerSkin(entity) ?: return
+            runCatching { blit(tex, x0, y0, x1, y1, 8f / 64f, 8f / 64f, 8f / 64f, 8f / 64f) }
+            runCatching { blit(tex, x0, y0, x1, y1, 40f / 64f, 8f / 64f, 8f / 64f, 8f / 64f) }
         } else {
-            if (hudTheme == "Light") lightTextPrimary else darkTextPrimary
+            drawRoundedRect(x, y, x + size, y + size, size * 0.2f, Color4b(70, 70, 78, (200 * alpha).roundToInt()))
+        }
+        if (hurtFlash && entity.hurtTime > 0) {
+            val a = ((entity.hurtTime / 10f) * 90 * alpha).roundToInt().coerceIn(0, 120)
+            drawQuad(x, y, x + size, y + size, Color4b(255, 40, 40, a))
         }
     }
 
-    private fun getThemeMutedText(): Color4b {
-        return if (hudTheme == "Light") lightTextMuted else darkTextMuted
+    private fun healthColor(ratio: Float, a: Float): Color4b {
+        val r = (255 * (1f - ratio * 0.35f)).roundToInt().coerceIn(80, 255)
+        val g = (80 + 160 * ratio).roundToInt().coerceIn(40, 255)
+        val b = (80 + 40 * ratio).roundToInt().coerceIn(40, 200)
+        return Color4b(r, g, b, (230 * a).roundToInt())
     }
 
-    private fun getThemeAvatarBg(): Color4b {
-        return if (hudTheme == "Light") lightAvatarBg else darkAvatarBg
-    }
-
-    private fun getFlashFactor(now: Long, startTime: Long): Float {
-        if (startTime <= 0L) return 0f
-        val elapsed = now - startTime
-        if (elapsed < 0L || elapsed >= damageFlashDuration) return 0f
-        return 1f - elapsed.toFloat() / damageFlashDuration
-    }
-
-    private fun truncateName(rawName: String): String {
-        if (rawName == lastRawName) return lastTruncatedName
-        lastRawName = rawName
-
-        val textRenderer = mc.textRenderer
-        val maxWidth = 95f * targetHudScale
-
-        if (textRenderer.getWidth(rawName) <= maxWidth) {
-            lastTruncatedName = rawName
-            return lastTruncatedName
-        }
-
-        var low = 1
-        var high = rawName.length
-        while (low < high) {
-            val mid = (low + high + 1) ushr 1
-            if (textRenderer.getWidth(rawName.substring(0, mid) + "...") <= maxWidth) {
-                low = mid
-            } else {
-                high = mid - 1
+    @Suppress("unused")
+    private val attackHandler = handler<AttackEntityEvent> { e ->
+        val ent = e.entity
+        if (ent is LivingEntity && ent.isAlive) {
+            val n = System.currentTimeMillis()
+            if (target == null || fullyHidden) {
+                appearanceTime = n
+                fullyHidden = false
             }
-        }
-        lastTruncatedName = rawName.substring(0, low) + "..."
-        return lastTruncatedName
-    }
-
-    /* ============================= 目标追踪 ============================= */
-
-    private fun updateTarget() {
-        val player = mc.player ?: return
-        val world = mc.world ?: return
-
-        // 优先获取最后攻击的目标
-        var newTarget: LivingEntity? = null
-
-        // 从交叉准星获取目标
-        val reach = 6.0
-        val eyePos = player.eyePos
-        val lookVec = player.rotationVector
-        val endPos = eyePos.add(lookVec.x * reach, lookVec.y * reach, lookVec.z * reach)
-
-        val hitResult = world.raycast(
-            net.minecraft.world.RaycastContext(
-                eyePos, endPos,
-                net.minecraft.world.RaycastContext.ShapeType.COLLIDER,
-                net.minecraft.world.RaycastContext.FluidHandling.NONE,
-                player
-            )
-        )
-
-        if (hitResult != null && hitResult.type == net.minecraft.util.hit.HitResult.Type.ENTITY) {
-            val entity = (hitResult as net.minecraft.util.hit.EntityHitResult).entity
-            if (entity is LivingEntity && entity != player) {
-                newTarget = entity
-            }
-        }
-
-        // 如果没有准星目标，找最近的目标
-        if (newTarget == null) {
-            var closestDist = Double.MAX_VALUE
-            for (entity in world.entities) {
-                if (entity is LivingEntity && entity != player && entity.isAlive) {
-                    val dist = entity.squaredDistanceTo(player)
-                    if (dist < closestDist && dist < reach * reach) {
-                        closestDist = dist
-                        newTarget = entity
-                    }
-                }
-            }
-        }
-
-        target = newTarget
-    }
-
-    private fun updateHealthTransition(currentHealth: Float, now: Long) {
-        if (lastObservedHealth < 0f) {
-            lastObservedHealth = currentHealth
-            return
-        }
-        if (currentHealth > lastObservedHealth + 0.001f) {
-            lastHealTime = now
-        } else if (currentHealth < lastObservedHealth - 0.001f) {
-            lastDamageTime = now
-        }
-        lastObservedHealth = currentHealth
-    }
-
-    private fun updateAttackDistance(now: Long) {
-        if (!attackReachDisplay || mc.player == null || target == null || lastAttackDistanceTime <= 0L) return
-        if (now - lastAttackDistanceTime >= ATTACK_DISTANCE_DISPLAY_DURATION) return
-
-        val playerPos = mc.player!!.eyePos
-        val targetPos = target!!.pos.add(0.0, target!!.height * 0.5, 0.0)
-        lastAttackDistance = playerPos.distanceTo(targetPos).toFloat()
-    }
-
-    private fun updateHealthTextAnimation(value: Float, now: Long) {
-        val text = String.format(Locale.ROOT, "%.1f HP", value)
-        if (currentHealthText.isEmpty()) {
-            currentHealthText = text
-            previousHealthText = text
-            lastHealthTextValue = value
-            return
-        }
-        if (text != currentHealthText) {
-            previousHealthText = currentHealthText
-            healthTextDirection = if (value > lastHealthTextValue) 1 else -1
-            healthTextAnimStart = now
-            currentHealthText = text
-            lastHealthTextValue = value
+            target = ent
+            lastHitTime = n
         }
     }
-
-    private fun updateDistTextAnimation(distance: Float, now: Long) {
-        val text = String.format(Locale.ROOT, "%.2fm", distance)
-        if (currentDistText.isEmpty()) {
-            currentDistText = text
-            previousDistText = text
-            lastDistTextValue = distance
-            return
-        }
-        if (text != currentDistText) {
-            previousDistText = currentDistText
-            distTextDirection = if (distance > lastDistTextValue) 1 else -1
-            distTextAnimStart = now
-            currentDistText = text
-            lastDistTextValue = distance
-        }
-    }
-
-    /* ============================= 渲染 ============================= */
 
     @Suppress("unused")
     private val renderHandler = handler<OverlayRenderEvent> { event ->
-        if (!enabled) return@handler
-
         val now = System.currentTimeMillis()
-        val dt = if (lastRenderTime != 0L) ((now - lastRenderTime) / 1000f).coerceIn(0.001f, 0.05f) else 0.016f
-        lastRenderTime = now
+        val nowNs = System.nanoTime()
+        val dt = if (lastFrameNs != 0L) ((nowNs - lastFrameNs) / 1e9f).coerceIn(0.001f, 0.05f) else 0.016f
+        lastFrameNs = nowNs
 
-        updateTarget()
-        updateAttackDistance(now)
-
-        val currentTarget = target
-
-        // 淡入淡出动画
-        val targetFadeGoal = if (currentTarget != null && currentTarget.isAlive) 1f else 0f
-        targetFade = easeTo(targetFade, targetFadeGoal, fadeAnimSpeed, dt)
-
-        if (targetFade < 0.01f) return@handler
-
-        val context = event.context
-
-        if (hudLayout == "New") {
-            renderNewHud(context, currentTarget, now, dt)
-        } else {
-            renderOldHud(context, currentTarget, now, dt)
-        }
-    }
-
-    private fun renderNewHud(context: GuiGraphicsExtractor, entity: LivingEntity?, now: Long, dt: Float) {
-        if (entity == null) return
-
-        val scale = targetHudScale
-        val baseX = posX
-        val baseY = posY
-
-        val scaledWidth = (NEW_HUD_WIDTH * scale).toInt()
-        val scaledHeight = (NEW_HUD_HEIGHT * scale).toInt()
-
-        // 动画进入
-        val animProgress = easeOutBack(targetFade)
-        val drawX = baseX
-        val drawY = baseY - (1f - animProgress) * scaledHeight * 0.3f
-
-        context.matrices.push()
-        context.matrices.translate(drawX, drawY, 0f)
-        context.matrices.scale(scale, scale, 1f)
-
-        // 背景卡片
-        val cardColor = getThemeCardColor()
-        drawRoundedRect(
-            context,
-            0f, 0f,
-            NEW_HUD_WIDTH, NEW_HUD_HEIGHT,
-            16f,
-            cardColor
-        )
-
-        // 头像背景
-        val avatarBg = getThemeAvatarBg()
-        drawRoundedRect(
-            context,
-            12f, 10f,
-            NEW_AVATAR_SIZE, NEW_AVATAR_SIZE,
-            NEW_AVATAR_RADIUS,
-            avatarBg
-        )
-
-        // 渲染头像
-        if (entity is AbstractClientPlayerEntity) {
-            renderPlayerAvatar(context, entity, 12f, 10f, NEW_AVATAR_SIZE.toInt())
-        } else {
-            // 非玩家实体显示默认图标
-            drawRoundedRect(
-                context,
-                12f, 10f,
-                NEW_AVATAR_SIZE, NEW_AVATAR_SIZE,
-                NEW_AVATAR_RADIUS,
-                Color4b(0x44, 0x55, 0x66, 0xFF)
-            )
-        }
-
-        // 伤害/治疗闪烁效果
-        val hurtFlash = getFlashFactor(now, lastDamageTime)
-        val healFlash = getFlashFactor(now, lastHealTime)
-        if (hurtFlash > 0f) {
-            drawRoundedRect(
-                context,
-                12f, 10f,
-                NEW_AVATAR_SIZE, NEW_AVATAR_SIZE,
-                NEW_AVATAR_RADIUS,
-                Color4b(0xFF, 0x00, 0x00, (hurtFlash * 0.6f * 255).toInt())
-            )
-        }
-        if (healFlash > 0f) {
-            drawRoundedRect(
-                context,
-                12f, 10f,
-                NEW_AVATAR_SIZE, NEW_AVATAR_SIZE,
-                NEW_AVATAR_RADIUS,
-                Color4b(0x55, 0xFF, 0x55, (healFlash * 0.62f * 255).toInt())
-            )
-        }
-
-        // 名称
-        val name = truncateName(entity.name.string)
-        val primaryColor = getThemePrimaryText()
-        context.drawText(
-            mc.textRenderer,
-            name,
-            60, 24,
-            primaryColor.toARGB(),
-            true
-        )
-
-        // 生命值计算
-        val maxHealth = entity.maxHealth.coerceAtLeast(1f)
-        val currentHealth = entity.health.coerceIn(0f, maxHealth)
-        val healthRatio = currentHealth / maxHealth
-
-        // 吸收值
-        val absorption = entity.absorptionAmount
-        val absorptionRatio = absorption / maxHealth
-
-        // 更新动画
-        updateHealthTransition(currentHealth, now)
-        animatedHealthRatio = easeTo(animatedHealthRatio, healthRatio, healthAnimSpeed, dt)
-        animatedAbsorptionRatio = easeTo(animatedAbsorptionRatio, absorptionRatio, healthAnimSpeed, dt)
-
-        // 更新文字动画
-        updateHealthTextAnimation(currentHealth, now)
-
-        // 渲染动画生命值文字
-        renderAnimatedHealthText(context, now)
-
-        // 血条
-        val barX = 60f
-        val barY = 45f
-        val barW = 112f
-        val barH = 7f
-
-        // 血条背景
-        val trackColor = if (hudTheme == "Light")
-            Color4b(0x11, 0x18, 0x27, 0x22)
-        else
-            Color4b(0xFF, 0xFF, 0xFF, 0x33)
-
-        drawRoundedRect(
-            context,
-            barX, barY,
-            barW, barH,
-            barH * 0.5f,
-            trackColor
-        )
-
-        // 血量填充
-        val fillW = max(barH, barW * animatedHealthRatio.coerceIn(0f, 1f))
-        val healthCol = getHealthColor(animatedHealthRatio.coerceIn(0f, 1f))
-
-        drawRoundedRect(
-            context,
-            barX, barY,
-            fillW, barH,
-            barH * 0.5f,
-            healthCol
-        )
-
-        // 吸收值
-        if (animatedAbsorptionRatio > 0.01f) {
-            val absorbW = min(barW, barW * animatedAbsorptionRatio.coerceIn(0f, 1f))
-            drawRoundedRect(
-                context,
-                barX + barW - absorbW, barY,
-                absorbW, barH,
-                barH * 0.5f,
-                absorptionColor
-            )
-        }
-
-        // 攻击距离显示
-        if (attackReachDisplay && lastAttackDistance >= 0f && now - lastAttackDistanceTime < ATTACK_DISTANCE_DISPLAY_DURATION) {
-            updateDistTextAnimation(lastAttackDistance, now)
-            renderAnimatedDistText(context, now)
-        }
-
-        context.matrices.pop()
-    }
-
-    private fun renderOldHud(context: GuiGraphicsExtractor, entity: LivingEntity?, now: Long, dt: Float) {
-        if (entity == null) return
-
-        val scale = targetHudScale
-        val baseX = posX
-        val baseY = posY
-
-        val scaledWidth = (OLD_HUD_WIDTH * scale).toInt()
-        val scaledHeight = (OLD_HUD_HEIGHT * scale).toInt()
-
-        val animProgress = easeOutBack(targetFade)
-        val drawX = baseX
-        val drawY = baseY - (1f - animProgress) * scaledHeight * 0.3f
-
-        context.matrices.push()
-        context.matrices.translate(drawX, drawY, 0f)
-        context.matrices.scale(scale, scale, 1f)
-
-        // 背景
-        val cardColor = getThemeCardColor()
-        drawRoundedRect(
-            context,
-            0f, 0f,
-            OLD_HUD_WIDTH, OLD_HUD_HEIGHT,
-            12f,
-            cardColor
-        )
-
-        // 头像
-        if (entity is AbstractClientPlayerEntity) {
-            renderPlayerAvatar(context, entity, 6f, 6f, OLD_AVATAR_SIZE.toInt())
-        }
-
-        // 名称
-        val name = entity.name.string
-        val primaryColor = getThemePrimaryText()
-        context.drawText(
-            mc.textRenderer,
-            if (name.length > 12) name.substring(0, 12) + "..." else name,
-            48, 6,
-            primaryColor.toARGB(),
-            true
-        )
-
-        // 血条
-        val maxHealth = entity.maxHealth.coerceAtLeast(1f)
-        val currentHealth = entity.health
-        val healthRatio = (currentHealth / maxHealth).coerceIn(0f, 1f)
-        animatedHealthRatio = easeTo(animatedHealthRatio, healthRatio, healthAnimSpeed, dt)
-
-        val barX = 48f
-        val barY = 22f
-        val barW = OLD_BAR_WIDTH
-        val barH = OLD_BAR_HEIGHT
-
-        // 背景
-        drawRoundedRect(
-            context,
-            barX, barY,
-            barW, barH,
-            barH * 0.5f,
-            Color4b(0x00, 0x00, 0x00, 0x44)
-        )
-
-        // 填充
-        val fillW = max(barH, barW * animatedHealthRatio)
-        val healthCol = getHealthColor(animatedHealthRatio)
-
-        drawRoundedRect(
-            context,
-            barX, barY,
-            fillW, barH,
-            barH * 0.5f,
-            healthCol
-        )
-
-        // 血量文字
-        val healthText = "${currentHealth.roundToInt()}/${maxHealth.roundToInt()}"
-        context.drawText(
-            mc.textRenderer,
-            healthText,
-            (barX + barW / 2 - mc.textRenderer.getWidth(healthText) / 2).toInt(),
-            (barY + barH / 2 - 4).toInt(),
-            0xFFFFFFFF.toInt(),
-            true
-        )
-
-        // 距离
-        val player = mc.player ?: return
-        val dist = player.distanceTo(entity)
-        val distText = String.format(Locale.ROOT, "%.1fm", dist)
-        context.drawText(
-            mc.textRenderer,
-            distText,
-            48, 36,
-            getThemeMutedText().toARGB(),
-            false
-        )
-
-        context.matrices.pop()
-    }
-
-    private fun renderPlayerAvatar(context: GuiGraphicsExtractor, player: AbstractClientPlayerEntity, x: Float, y: Float, size: Int) {
-        // 使用 Minecraft 原生方式渲染玩家皮肤头像
-        val skinTexture = player.skinTextures.texture()
-
-        context.enableScissor(x.toInt(), y.toInt(), (x + size).toInt(), (y + size).toInt())
-
-        // 绘制皮肤
-        context.drawTexture(
-            skinTexture,
-            x.toInt(), y.toInt(),
-            size, size,
-            8f, 8f,  // 面部区域
-            8, 8,
-            64, 64
-        )
-
-        // 绘制帽子层
-        context.drawTexture(
-            skinTexture,
-            x.toInt(), y.toInt(),
-            size, size,
-            40f, 8f,
-            8, 8,
-            64, 64
-        )
-
-        context.disableScissor()
-    }
-
-    private fun renderAnimatedHealthText(context: GuiGraphicsExtractor, now: Long) {
-        if (currentHealthText.isEmpty()) return
-
-        val progress = if (healthTextAnimStart == 0L) 1f else
-            ((now - healthTextAnimStart).toFloat() / healthTextAnimDuration).coerceIn(0f, 1f)
-        val eased = 1f - (1f - progress) * (1f - progress) * (1f - progress)
-
-        val baseY = 40f
-        val height = 14f
-        var x = 60f
-
-        val textRenderer = mc.textRenderer
-        val mutedColor = getThemeMutedText()
-
-        // 简化的逐字符动画
-        val displayText = currentHealthText
-        val fullWidth = textRenderer.getWidth(displayText)
-
-        // 使用裁剪实现滚动效果
-        context.enableScissor(58, 28, 58 + 72, 28 + 16)
-
-        for (i in displayText.indices) {
-            val ch = displayText[i].toString()
-            val oldCh = if (i < previousHealthText.length) previousHealthText[i].toString() else ch
-            val digit = ch[0].isDigit()
-            val changed = digit && progress < 1f && healthTextDirection != 0 && ch != oldCh
-
-            val w = textRenderer.getWidth(ch).toFloat()
-
-            if (changed) {
-                val oldY = baseY + if (healthTextDirection > 0) -height * eased else height * eased
-                val newY = baseY + if (healthTextDirection > 0) height * (1f - eased) else -height * (1f - eased)
-
-                context.drawText(textRenderer, oldCh, x.toInt(), oldY.toInt(), mutedColor.toARGB(), false)
-                context.drawText(textRenderer, ch, x.toInt(), newY.toInt(), mutedColor.toARGB(), false)
-            } else {
-                context.drawText(textRenderer, ch, x.toInt(), baseY.toInt(), mutedColor.toARGB(), false)
+        val live = resolveTarget()
+        if (live != null) {
+            if (target != live) {
+                if (target == null || fullyHidden) appearanceTime = now
+                target = live
+                fullyHidden = false
             }
-            x += w
+            lastHitTime = now
         }
 
-        context.disableScissor()
-    }
+        val t = target
+        if (t == null) return@handler
 
-    private fun renderAnimatedDistText(context: GuiGraphicsExtractor, now: Long) {
-        if (currentDistText.isEmpty()) return
-
-        val progress = if (distTextAnimStart == 0L) 1f else
-            ((now - distTextAnimStart).toFloat() / healthTextAnimDuration).coerceIn(0f, 1f)
-        val eased = 1f - (1f - progress) * (1f - progress) * (1f - progress)
-
-        val baseY = 40f
-        val height = 14f
-        val startX = 60f + mc.textRenderer.getWidth(currentHealthText) + 8f
-
-        val textRenderer = mc.textRenderer
-        val mutedColor = getThemeMutedText()
-
-        context.enableScissor(startX.toInt() - 2, 28, (startX + 80).toInt(), 28 + 16)
-
-        var x = startX
-        for (i in currentDistText.indices) {
-            val ch = currentDistText[i].toString()
-            val oldCh = if (i < previousDistText.length) previousDistText[i].toString() else ch
-            val digit = ch[0].isDigit()
-            val changed = digit && progress < 1f && distTextDirection != 0 && ch != oldCh
-
-            val w = textRenderer.getWidth(ch).toFloat()
-
-            if (changed) {
-                val oldY = baseY + if (distTextDirection > 0) -height * eased else height * eased
-                val newY = baseY + if (distTextDirection > 0) height * (1f - eased) else -height * (1f - eased)
-
-                context.drawText(textRenderer, oldCh, x.toInt(), oldY.toInt(), mutedColor.toARGB(), false)
-                context.drawText(textRenderer, ch, x.toInt(), newY.toInt(), mutedColor.toARGB(), false)
-            } else {
-                context.drawText(textRenderer, ch, x.toInt(), baseY.toInt(), mutedColor.toARGB(), false)
+        val fadeIn = (now - appearanceTime).toFloat() / animDurationMs
+        val fadeOut = 1f - (now - (lastHitTime + hideDelayMs)).toFloat() / animDurationMs
+        val alpha = min(fadeIn, fadeOut).coerceIn(0f, 1f)
+        if (alpha <= 0.01f) {
+            if (now - lastHitTime > hideDelayMs || !t.isAlive) {
+                fullyHidden = true
+                target = null
+                animHp = 1f
+                animAbs = 0f
             }
-            x += w
+            return@handler
         }
 
-        context.disableScissor()
+        val maxHp = max(1f, t.maxHealth)
+        val hp = t.health.coerceIn(0f, maxHp)
+        val abs = try { t.absorptionAmount.coerceAtLeast(0f) } catch (_: Throwable) { 0f }
+        val ratio = (hp / maxHp).coerceIn(0f, 1f)
+        val absRatio = (abs / maxHp).coerceIn(0f, 1f)
+        animHp += (ratio - animHp) * min(1f, dt * 10f)
+        animAbs += (absRatio - animAbs) * min(1f, dt * 10f)
+
+        val ctx = event.context
+        val font = mc.font
+        val sw = ctx.guiWidth().toFloat()
+        val sh = ctx.guiHeight().toFloat()
+        val s = scale
+
+        if (mode == Mode.LITE) {
+            renderLite(ctx, font, sw, sh, s, alpha, t, hp)
+        } else {
+            renderNew(ctx, font, sw, sh, s, alpha, t, hp, abs)
+        }
     }
 
-    /* ============================= 攻击事件监听 ============================= */
+    private fun renderLite(
+        ctx: GuiGraphicsExtractor, font: Font, sw: Float, sh: Float, s: Float, a: Float,
+        t: LivingEntity, hp: Float,
+    ) {
+        val w = LITE_W * s
+        val h = LITE_H * s
+        val x = (sw * 0.5f + posX - w * 0.5f).coerceIn(0f, max(0f, sw - w))
+        val y = (sh * 0.5f + posY - h * 0.5f).coerceIn(0f, max(0f, sh - h))
 
-    fun onAttack(entity: Entity) {
-        if (!enabled) return
-        if (entity is LivingEntity) {
-            target = entity
-            lastAttackDistanceTime = System.currentTimeMillis()
-            val player = mc.player ?: return
-            val playerPos = player.eyePos
-            val targetPos = entity.pos.add(0.0, entity.height * 0.5, 0.0)
-            lastAttackDistance = playerPos.distanceTo(targetPos).toFloat()
+        ctx.drawRoundedRect(x, y, x + w, y + h, 4f * s, withA(bgColor, a))
+        // border
+        val b = withA(borderColor, a)
+        ctx.drawQuad(x, y, x + w, y + 1f * s, b)
+        ctx.drawQuad(x, y + h - 1f * s, x + w, y + h, b)
+        ctx.drawQuad(x, y, x + 1f * s, y + h, b)
+        ctx.drawQuad(x + w - 1f * s, y, x + w, y + h, b)
+
+        val av = AVATAR * s
+        val ax = x + PAD * s
+        val ay = y + (h - av) / 2f
+        ctx.drawHead(t, ax, ay, av, a)
+
+        val tx = ax + av + PAD * s
+        val name = try { t.name.string } catch (_: Throwable) { "?" }
+        ctx.text(font, name, tx.roundToInt(), (y + PAD * s).roundToInt(), withA(textColor, a).argb, true)
+
+        if (showDistance) {
+            val dist = mc.player?.distanceTo(t) ?: 0f
+            val dw = font.width(name)
+            ctx.text(
+                font, String.format(Locale.ROOT, "%.1fm", dist),
+                (tx + dw + 4f * s).roundToInt(), (y + PAD * s).roundToInt(),
+                Color4b(255, 170, 0, (200 * a).roundToInt()).argb, false,
+            )
+        }
+
+        val barY = y + h - PAD * s - 6f * s
+        val barX = tx
+        val barW = w - (tx - x) - PAD * s
+        ctx.drawQuad(barX, barY, barX + barW, barY + 5f * s, withA(barBg, a))
+        val fillW = barW * animHp
+        if (fillW > 0.5f) {
+            ctx.drawQuad(barX, barY, barX + fillW, barY + 5f * s, healthColor(animHp, a))
+        }
+
+        if (showStatus) {
+            val self = mc.player?.health ?: 0f
+            val status = if (self > hp) "W" else "L"
+            val sc = if (self > hp) withA(winColor, a) else withA(loseColor, a)
+            val stw = font.width(status)
+            ctx.text(font, status, (x + w - PAD * s - stw).roundToInt(), (y + PAD * s).roundToInt(), sc.argb, true)
+        }
+    }
+
+    private fun renderNew(
+        ctx: GuiGraphicsExtractor, font: Font, sw: Float, sh: Float, s: Float, a: Float,
+        t: LivingEntity, hp: Float, abs: Float,
+    ) {
+        val baseW = NEW_W * s
+        val baseH = NEW_H * s
+        val anim = easeOutBack(a)
+        val w = baseW * anim
+        val h = baseH * anim
+        val cx = sw * 0.5f + posX
+        val cy = sh * 0.5f + posY
+        val x = (cx - w * 0.5f).coerceIn(0f, max(0f, sw - w))
+        val y = (cy - h * 0.5f).coerceIn(0f, max(0f, sh - h))
+        val r = radius * s * anim
+
+        // soft shadow
+        for (i in 1..4) {
+            val e = i * 1.6f
+            ctx.drawRoundedRect(
+                x - e, y - e * 0.4f, x + w + e, y + h + e, r + 1f,
+                Color4b(0, 0, 0, (12 * a * (1f - i / 5f)).roundToInt()),
+            )
+        }
+        ctx.drawRoundedRect(x, y, x + w, y + h, r, withA(bgColor, a))
+        // top highlight
+        ctx.drawRoundedRect(x + 2f, y + 1f, x + w - 2f, y + h * 0.42f, r * 0.7f, Color4b(255, 255, 255, (18 * a).roundToInt()))
+
+        val av = 32f * s * anim
+        val ax = x + 10f * s
+        val ay = y + (h - av) / 2f
+        ctx.drawHead(t, ax, ay, av, a)
+
+        val name = try { t.name.string } catch (_: Throwable) { "?" }
+        val tx = ax + av + 10f * s
+        ctx.text(font, name, tx.roundToInt(), (y + 12f * s).roundToInt(), withA(textColor, a).argb, true)
+
+        val hpText = String.format(Locale.ROOT, "%.1f", hp)
+        val htw = font.width(hpText)
+        ctx.text(font, hpText, (x + w - 12f * s - htw).roundToInt(), (y + 12f * s).roundToInt(), withA(textColor, a).argb, true)
+
+        val barX = tx
+        val barY = y + h - 16f * s
+        val barW = w - (barX - x) - 12f * s
+        val barH = 6f * s
+        ctx.drawRoundedRect(barX, barY, barX + barW, barY + barH, barH * 0.5f, withA(barBg, a))
+        val fillW = barW * animHp.coerceIn(0f, 1f)
+        if (fillW > 0.5f) {
+            ctx.drawRoundedRect(barX, barY, barX + fillW, barY + barH, barH * 0.5f, withA(barFill, a))
+        }
+        val absW = barW * animAbs.coerceIn(0f, 1f)
+        if (absW > 0.5f) {
+            ctx.drawRoundedRect(barX, barY, barX + absW, barY + barH, barH * 0.5f, withA(absorbFill, a * 0.85f))
         }
     }
 }
