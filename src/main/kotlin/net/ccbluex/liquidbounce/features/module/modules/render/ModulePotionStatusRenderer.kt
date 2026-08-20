@@ -1,403 +1,258 @@
+/*
+ * ModulePotionStatusRenderer —— 还原 PotionStatusRenderer.java
+ * 原生 Overlay，无 Web / 无 Skia
+ */
 package net.ccbluex.liquidbounce.features.module.modules.render
 
 import net.ccbluex.liquidbounce.event.events.OverlayRenderEvent
 import net.ccbluex.liquidbounce.event.handler
 import net.ccbluex.liquidbounce.features.module.ClientModule
 import net.ccbluex.liquidbounce.features.module.ModuleCategories
+import net.ccbluex.liquidbounce.render.drawQuad
 import net.ccbluex.liquidbounce.render.drawRoundedRect
 import net.ccbluex.liquidbounce.render.engine.type.Color4b
 import net.ccbluex.liquidbounce.utils.client.mc
+import net.minecraft.client.gui.Font
 import net.minecraft.client.gui.GuiGraphicsExtractor
-import net.minecraft.entity.effect.StatusEffect
-import net.minecraft.entity.effect.StatusEffectInstance
-import net.minecraft.entity.effect.StatusEffects
-import net.minecraft.util.math.MathHelper
-import java.util.*
-import kotlin.math.*
+import net.minecraft.world.effect.MobEffectInstance
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.pow
+import kotlin.math.roundToInt
 
 object ModulePotionStatusRenderer : ClientModule(
-    "PotionStatus",
+    "PotionStatusRenderer",
     ModuleCategories.RENDER,
-    aliases = listOf("PotionHUD", "Effects"),
+    aliases = listOf("PotionHUD", "EffectsHUD"),
 ) {
 
-    /* ============================= 可调节参数 ============================= */
+    private val posX by float("Offset X", 8f, 0f..800f)
+    private val posY by float("Offset Y", 80f, 0f..600f)
+    private val scale by float("Scale", 1f, 0.6f..1.8f)
+    private val rightSide by boolean("Right Side", true)
 
-    // 布局
-    private val posX by float("Pos X", 2f, 0f..2000f)
-    private val posY by float("Pos Y", 2f, 0f..1200f)
-    private val scale by float("Scale", 1.0f, 0.5f..2.0f)
-    private val verticalMode by boolean("Vertical", true)
-    private val iconSize by float("Icon Size", 20f, 12f..32f)
-    private val textSize by float("Text Size", 10f, 6f..16f)
-    private val spacing by float("Spacing", 2f, 0f..10f)
+    private val width by float("Width", 134f, 80f..220f)
+    private val rowH by float("Row Height", 28f, 18f..40f)
+    private val gap by float("Gap", 5f, 0f..16f)
+    private val pad by float("Padding", 7f, 2f..16f)
+    private val bgRadius by float("BG Radius", 11f, 0f..20f)
+    private val itemRadius by float("Item Radius", 8f, 0f..16f)
 
-    // 背景
-    private val background by boolean("Background", true)
-    private val bgColor by color("BG Color", Color4b(0x00, 0x00, 0x00, 0x88))
-    private val bgRadius by float("BG Radius", 6f, 0f..16f)
+    private val bgColor by color("Background", Color4b(0x6E, 0x73, 0x7A, 0x7A))
+    private val borderColor by color("Border", Color4b(255, 255, 255, 48))
+    private val textColor by color("Text", Color4b(0xF6, 0xFF, 0xFF, 0xFF))
+    private val subTextColor by color("Sub Text", Color4b(0xCF, 0xFF, 0xFF, 0xFF))
+    private val showCountdown by boolean("Countdown", true)
+    private val showAmplifier by boolean("Amplifier", true)
+    private val animSpeed by float("Anim Speed", 10f, 2f..24f)
 
-    // 颜色
-    private val nameColor by color("Name Color", Color4b(0xFF, 0xFF, 0xFF, 0xFF))
-    private val durationColor by color("Duration Color", Color4b(0xCC, 0xCC, 0xCC, 0xFF))
-    private val amplifierColor by color("Amplifier Color", Color4b(0xFF, 0xAA, 0x00, 0xFF))
+    private const val HIDE_DELAY_MS = 260L
 
-    // 动画
-    private val fadeAnimSpeed by float("Fade Speed", 10f, 1f..30f)
-    private val blinkThreshold by int("Blink Threshold", 10, 5..30)
-
-    /* ============================= 常量 ============================= */
-
-    private const val ICON_TEX_SIZE = 18
-    private const val MAX_DURATION = 3600  // 1小时上限
-
-    /* ============================= 运行时状态 ============================= */
-
-    private var displayAlpha = 0f
-    private var lastRenderTime = 0L
-
-    /* ============================= 数据类 ============================= */
-
-    private data class PotionDisplay(
-        val effect: StatusEffectInstance,
-        val name: String,
-        val durationText: String,
-        val amplifierText: String,
-        val color: Int,
-        val isBad: Boolean,
-        val isInfinite: Boolean,
-        val progress: Float,  // 0-1 剩余时间比例
+    private data class Visual(
+        var effect: MobEffectInstance? = null,
+        var key: String = "",
+        var targetY: Float = 0f,
+        var currentY: Float = 0f,
+        var slide: Float = 0f,
+        var rowAlpha: Float = 0f,
+        var fillProgress: Float = 1f,
+        var displayTicks: Float = 0f,
+        var maxTicks: Float = 1f,
+        var hiding: Boolean = false,
+        var hideAt: Long = 0L,
     )
 
-    /* ============================= 工具方法 ============================= */
+    private val visuals = LinkedHashMap<String, Visual>()
+    private var lastNs = 0L
+    private var bgProgress = 0f
 
-    private fun easeTo(current: Float, target: Float, speed: Float, dt: Float): Float {
-        if (current < 0f) return target
-        val t = (1f - (1f - 0.15f).pow(dt * speed)).coerceIn(0f, 1f)
-        return current + (target - current) * t
+    private fun easeOutCubic(t: Float): Float {
+        val x = 1f - t.coerceIn(0f, 1f)
+        return 1f - x * x * x
     }
 
-    private fun formatDuration(ticks: Int): String {
-        if (ticks >= 32767 * 20) return "∞"  // 无限时长
-        val seconds = ticks / 20
-        val minutes = seconds / 60
-        val remainingSeconds = seconds % 60
-        return if (minutes > 0) {
-            String.format(Locale.ROOT, "%d:%02d", minutes, remainingSeconds)
-        } else {
-            "${remainingSeconds}s"
+    private fun withA(c: Color4b, a: Float) =
+        Color4b(c.r, c.g, c.b, (c.a * a.coerceIn(0f, 1f)).roundToInt().coerceIn(0, 255))
+
+    private fun effectKey(e: MobEffectInstance): String {
+        return try {
+            e.effect.registeredName + ":" + e.amplifier
+        } catch (_: Throwable) {
+            e.toString()
         }
     }
 
-    private fun getEffectColor(effect: StatusEffect): Int {
-        return when (effect) {
-            StatusEffects.SPEED -> 0x7CAFC6
-            StatusEffects.SLOWNESS -> 0x5A6C81
-            StatusEffects.HASTE -> 0xD9C043
-            StatusEffects.MINING_FATIGUE -> 0x4A4217
-            StatusEffects.STRENGTH -> 0x932423
-            StatusEffects.INSTANT_HEALTH -> 0xF82423
-            StatusEffects.INSTANT_DAMAGE -> 0x430A09
-            StatusEffects.JUMP_BOOST -> 0x786297
-            StatusEffects.NAUSEA -> 0x551D4A
-            StatusEffects.REGENERATION -> 0xCD5CAB
-            StatusEffects.RESISTANCE -> 0x99453A
-            StatusEffects.FIRE_RESISTANCE -> 0xE49A3A
-            StatusEffects.WATER_BREATHING -> 0x2E5299
-            StatusEffects.INVISIBILITY -> 0x7F8392
-            StatusEffects.BLINDNESS -> 0x1F1F23
-            StatusEffects.NIGHT_VISION -> 0xC2FF66
-            StatusEffects.HUNGER -> 0x587653
-            StatusEffects.WEAKNESS -> 0x484D48
-            StatusEffects.POISON -> 0x4E9331
-            StatusEffects.WITHER -> 0x352A27
-            StatusEffects.HEALTH_BOOST -> 0xF87D23
-            StatusEffects.ABSORPTION -> 0x2552A5
-            StatusEffects.GLOWING -> 0x94A061
-            StatusEffects.LEVITATION -> 0xCEFFFF
-            StatusEffects.LUCK -> 0x339900
-            StatusEffects.UNLUCK -> 0xC0A44D
-            StatusEffects.SLOW_FALLING -> 0xFFEFD1
-            StatusEffects.CONDUIT_POWER -> 0x1DC2D1
-            StatusEffects.DOLPHINS_GRACE -> 0x88A3BE
-            StatusEffects.BAD_OMEN -> 0x0B6128
-            StatusEffects.HERO_OF_THE_VILLAGE -> 0x44FF44
-            StatusEffects.DARKNESS -> 0x292721
-            else -> effect.color
+    private fun effectName(e: MobEffectInstance): String {
+        return try {
+            e.effect.value().displayName.string
+        } catch (_: Throwable) {
+            try {
+                e.descriptionId
+            } catch (_: Throwable) {
+                "Effect"
+            }
         }
     }
 
-    private fun getAmplifierString(amplifier: Int): String {
-        return when (amplifier) {
-            0 -> "I"
+    private fun effectColor(e: MobEffectInstance): Color4b {
+        return try {
+            val rgb = e.effect.value().color
+            Color4b((rgb shr 16) and 0xFF, (rgb shr 8) and 0xFF, rgb and 0xFF, 220)
+        } catch (_: Throwable) {
+            Color4b(120, 160, 255, 220)
+        }
+    }
+
+    private fun formatDuration(ticks: Float): String {
+        if (ticks < 0) return "∞"
+        val sec = (ticks / 20f).roundToInt().coerceAtLeast(0)
+        val m = sec / 60
+        val s = sec % 60
+        return "%d:%02d".format(m, s)
+    }
+
+    private fun amplifier(amp: Int): String {
+        if (!showAmplifier || amp <= 0) return ""
+        return when (amp) {
             1 -> "II"
             2 -> "III"
             3 -> "IV"
             4 -> "V"
-            else -> "${amplifier + 1}"
+            else -> (amp + 1).toString()
         }
     }
 
-    private fun shouldBlink(durationTicks: Int): Boolean {
-        val seconds = durationTicks / 20
-        return seconds in 1..blinkThreshold && (System.currentTimeMillis() / 500) % 2 == 0L
-    }
+    private fun syncEffects(dt: Float) {
+        val player = mc.player ?: return
+        val active = try {
+            player.activeEffects.toList()
+        } catch (_: Throwable) {
+            emptyList()
+        }
+        val seen = HashSet<String>()
+        val now = System.currentTimeMillis()
 
-    /* ============================= 渲染 ============================= */
+        active.forEachIndexed { i, e ->
+            val key = effectKey(e)
+            seen += key
+            val v = visuals.getOrPut(key) {
+                Visual(key = key, currentY = pad + i * (rowH + gap), slide = 0f, rowAlpha = 0f)
+            }
+            v.effect = e
+            v.hiding = false
+            v.targetY = pad + i * (rowH + gap)
+            val dur = try {
+                if (e.isInfiniteDuration) -1f else e.duration.toFloat()
+            } catch (_: Throwable) {
+                e.duration.toFloat()
+            }
+            v.displayTicks = dur
+            if (v.maxTicks < dur) v.maxTicks = max(dur, 1f)
+            if (dur < 0) {
+                v.fillProgress = 1f
+            } else {
+                val targetFill = (dur / v.maxTicks).coerceIn(0f, 1f)
+                v.fillProgress += (targetFill - v.fillProgress) * min(1f, dt * animSpeed)
+            }
+            v.slide += (1f - v.slide) * min(1f, dt * animSpeed)
+            v.rowAlpha += (1f - v.rowAlpha) * min(1f, dt * animSpeed)
+            v.currentY += (v.targetY - v.currentY) * min(1f, dt * animSpeed)
+        }
+
+        val it = visuals.entries.iterator()
+        while (it.hasNext()) {
+            val (k, v) = it.next()
+            if (k in seen) continue
+            if (!v.hiding) {
+                v.hiding = true
+                v.hideAt = now + HIDE_DELAY_MS
+            }
+            v.slide += (0f - v.slide) * min(1f, dt * animSpeed)
+            v.rowAlpha += (0f - v.rowAlpha) * min(1f, dt * animSpeed)
+            if (v.rowAlpha < 0.02f && now > v.hideAt) it.remove()
+        }
+
+        val count = visuals.values.count { it.rowAlpha > 0.02f }
+        val targetBg = if (count > 0) 1f else 0f
+        bgProgress += (targetBg - bgProgress) * min(1f, dt * animSpeed)
+    }
 
     @Suppress("unused")
     private val renderHandler = handler<OverlayRenderEvent> { event ->
-        if (!enabled) return@handler
+        val nowNs = System.nanoTime()
+        val dt = if (lastNs != 0L) ((nowNs - lastNs) / 1e9f).coerceIn(0.001f, 0.05f) else 0.016f
+        lastNs = nowNs
 
-        val player = mc.player ?: return@handler
-        val effects = player.statusEffects
+        syncEffects(dt)
+        if (bgProgress < 0.02f) return@handler
 
-        val now = System.currentTimeMillis()
-        val dt = if (lastRenderTime != 0L) ((now - lastRenderTime) / 1000f).coerceIn(0.001f, 0.05f) else 0.016f
-        lastRenderTime = now
+        val ctx = event.context
+        val font = mc.font
+        val s = scale
+        val w = width * s
+        val sw = ctx.guiWidth().toFloat()
+        val count = visuals.values.count { it.rowAlpha > 0.02f }
+        val contentH = (count * rowH + max(0, count - 1) * gap + pad * 2f) * s
+        val h = contentH * bgProgress
 
-        // 淡出动画
-        val targetAlpha = if (effects.isNotEmpty()) 1f else 0f
-        displayAlpha = easeTo(displayAlpha, targetAlpha, fadeAnimSpeed, dt)
+        var x = if (rightSide) sw - w - posX else posX
+        x = x.coerceIn(0f, max(0f, sw - w))
+        val y = posY
 
-        if (displayAlpha < 0.01f) return@handler
+        // background panel
+        val bgA = bgProgress
+        ctx.drawRoundedRect(x, y, x + w * bgProgress, y + h, bgRadius * s, withA(bgColor, bgA))
+        val border = withA(borderColor, bgA)
+        ctx.drawQuad(x, y, x + w * bgProgress, y + 1f, border)
+        ctx.drawQuad(x, y + h - 1f, x + w * bgProgress, y + h, border)
 
-        val context = event.context
+        val sorted = visuals.values.filter { it.rowAlpha > 0.02f }.sortedBy { it.currentY }
+        for (v in sorted) {
+            val e = v.effect ?: continue
+            val slide = easeOutCubic(v.slide)
+            val alpha = v.rowAlpha * bgProgress
+            val rowY = y + v.currentY * s
+            val drawX = x + pad * s + (1f - slide) * -24f * s
+            val drawW = (width - pad * 2f) * s
 
-        // 收集并排序药水效果
-        val displayList = effects.map { effect ->
-            val type = effect.effectType
-            val color = getEffectColor(type.value())
-            val durationTicks = effect.duration
-            val isInfinite = durationTicks >= 32767 * 20
+            // dark base
+            val dark = Color4b(20, 22, 28, (180 * alpha).roundToInt())
+            ctx.drawRoundedRect(drawX, rowY, drawX + drawW, rowY + rowH * s, itemRadius * s, dark)
 
-            PotionDisplay(
-                effect = effect,
-                name = type.value().name.string,
-                durationText = if (isInfinite) "∞" else formatDuration(durationTicks),
-                amplifierText = getAmplifierString(effect.amplifier),
-                color = color,
-                isBad = type.value().category == net.minecraft.entity.effect.StatusEffectCategory.HARMFUL,
-                isInfinite = isInfinite,
-                progress = if (isInfinite) 1f else (durationTicks.toFloat() / (MAX_DURATION * 20)).coerceIn(0f, 1f)
-            )
-        }.sortedWith(compareByDescending<PotionDisplay> {
-            it.effect.duration
-        }.thenBy {
-            it.name
-        })
-
-        if (displayList.isEmpty()) return@handler
-
-        renderPotionList(context, displayList)
-    }
-
-    private fun renderPotionList(context: GuiGraphicsExtractor, potions: List<PotionDisplay>) {
-        val scale = this.scale
-        val baseX = posX
-        val baseY = posY
-        val iconSize = this.iconSize
-        val textSize = this.textSize
-        val spacing = this.spacing
-
-        context.matrices.push()
-        context.matrices.translate(baseX, baseY, 0f)
-        context.matrices.scale(scale, scale, 1f)
-
-        val textRenderer = mc.textRenderer
-
-        if (verticalMode) {
-            // 垂直布局
-            var currentY = 0f
-
-            for (potion in potions) {
-                val blink = !potion.isInfinite && shouldBlink(potion.effect.duration)
-                if (blink) continue  // 闪烁时隐藏
-
-                val alpha = (displayAlpha * 255).toInt()
-
-                // 背景
-                if (background) {
-                    val itemHeight = iconSize + 4f
-                    val bgW = iconSize + 8f + max(
-                        textRenderer.getWidth(potion.name),
-                        textRenderer.getWidth(potion.durationText)
-                    )
-
-                    drawRoundedRect(
-                        context,
-                        0f, currentY,
-                        bgW + 8f, itemHeight,
-                        bgRadius,
-                        Color4b(bgColor.r, bgColor.g, bgColor.b, (bgColor.a * displayAlpha).toInt())
-                    )
-                }
-
-                // 图标背景 (使用药水颜色)
-                val potionColor = Color4b(
-                    (potion.color shr 16) and 0xFF,
-                    (potion.color shr 8) and 0xFF,
-                    potion.color and 0xFF,
-                    alpha
+            // fill by remaining duration
+            val fillW = drawW * v.fillProgress.coerceIn(0f, 1f)
+            if (fillW > 1f) {
+                ctx.drawRoundedRect(
+                    drawX, rowY, drawX + fillW, rowY + rowH * s, itemRadius * s,
+                    withA(effectColor(e), alpha * 0.86f),
                 )
-
-                drawRoundedRect(
-                    context,
-                    2f, currentY + 2f,
-                    iconSize - 4f, iconSize - 4f,
-                    4f,
-                    potionColor
-                )
-
-                // 药水图标 (简化版 - 使用颜色方块代替实际图标)
-                renderPotionIcon(context, potion, 4f, currentY + 4f, iconSize - 8f)
-
-                // 名称
-                val nameCol = Color4b(
-                    nameColor.r, nameColor.g, nameColor.b,
-                    (nameColor.a * displayAlpha).toInt()
-                )
-                context.drawText(
-                    textRenderer,
-                    potion.name,
-                    (iconSize + 4f).toInt(),
-                    (currentY + 2f).toInt(),
-                    nameCol.toARGB(),
-                    true
-                )
-
-                // 时长
-                val durCol = if (potion.isInfinite)
-                    Color4b(0x55, 0xFF, 0x55, (0xFF * displayAlpha).toInt())
-                else
-                    Color4b(
-                        durationColor.r, durationColor.g, durationColor.b,
-                        (durationColor.a * displayAlpha).toInt()
-                    )
-
-                context.drawText(
-                    textRenderer,
-                    potion.durationText,
-                    (iconSize + 4f).toInt(),
-                    (currentY + 2f + textSize + 2f).toInt(),
-                    durCol.toARGB(),
-                    false
-                )
-
-                // 等级
-                if (potion.effect.amplifier > 0) {
-                    val ampCol = Color4b(
-                        amplifierColor.r, amplifierColor.g, amplifierColor.b,
-                        (amplifierColor.a * displayAlpha).toInt()
-                    )
-                    val ampX = iconSize + 4f + textRenderer.getWidth(potion.durationText) + 4f
-                    context.drawText(
-                        textRenderer,
-                        potion.amplifierText,
-                        ampX.toInt(),
-                        (currentY + 2f + textSize + 2f).toInt(),
-                        ampCol.toARGB(),
-                        false
-                    )
-                }
-
-                currentY += iconSize + spacing
             }
-        } else {
-            // 水平布局
-            var currentX = 0f
+            // gloss
+            ctx.drawRoundedRect(
+                drawX, rowY, drawX + drawW, rowY + rowH * s * 0.45f, itemRadius * s,
+                Color4b(255, 255, 255, (12 * alpha).roundToInt()),
+            )
 
-            for (potion in potions) {
-                val blink = !potion.isInfinite && shouldBlink(potion.effect.duration)
-                if (blink) continue
+            // icon placeholder
+            val iconBox = 16f * s
+            ctx.drawRoundedRect(
+                drawX + 4f * s, rowY + (rowH * s - iconBox) / 2f,
+                drawX + 4f * s + iconBox, rowY + (rowH * s - iconBox) / 2f + iconBox,
+                4f * s, Color4b(255, 255, 255, (30 * alpha).roundToInt()),
+            )
 
-                val alpha = (displayAlpha * 255).toInt()
-
-                // 背景
-                if (background) {
-                    drawRoundedRect(
-                        context,
-                        currentX, 0f,
-                        iconSize + 4f, iconSize + 4f,
-                        bgRadius,
-                        Color4b(bgColor.r, bgColor.g, bgColor.b, (bgColor.a * displayAlpha).toInt())
-                    )
-                }
-
-                // 图标
-                val potionColor = Color4b(
-                    (potion.color shr 16) and 0xFF,
-                    (potion.color shr 8) and 0xFF,
-                    potion.color and 0xFF,
-                    alpha
-                )
-
-                drawRoundedRect(
-                    context,
-                    currentX + 2f, 2f,
-                    iconSize, iconSize,
-                    4f,
-                    potionColor
-                )
-
-                renderPotionIcon(context, potion, currentX + 4f, 4f, iconSize - 4f)
-
-                // 时长文字 (在图标下方)
-                if (iconSize >= 16f) {
-                    val durCol = if (potion.isInfinite)
-                        Color4b(0x55, 0xFF, 0x55, (0xFF * displayAlpha).toInt())
-                    else
-                        Color4b(
-                            durationColor.r, durationColor.g, durationColor.b,
-                            (durationColor.a * displayAlpha).toInt()
-                        )
-
-                    val durText = if (potion.durationText.length > 4) potion.durationText.substring(0, 4) else potion.durationText
-                    context.drawText(
-                        textRenderer,
-                        durText,
-                        (currentX + iconSize / 2 - textRenderer.getWidth(durText) / 2 + 2).toInt(),
-                        (iconSize + 6f).toInt(),
-                        durCol.toARGB(),
-                        false
-                    )
-                }
-
-                currentX += iconSize + spacing + 4f
+            val name = effectName(e)
+            val amp = amplifier(e.amplifier)
+            val textX = (drawX + iconBox + 10f * s).roundToInt()
+            if (showCountdown) {
+                ctx.text(font, name, textX, (rowY + 6f * s).roundToInt(), withA(textColor, alpha).argb, false)
+                val time = if (v.displayTicks < 0) "∞" else formatDuration(v.displayTicks)
+                val sub = if (amp.isEmpty()) time else "$amp  $time"
+                ctx.text(font, sub, textX, (rowY + 16f * s).roundToInt(), withA(subTextColor, alpha).argb, false)
+            } else {
+                val label = if (amp.isEmpty()) name else "$name $amp"
+                ctx.text(font, label, textX, (rowY + 10f * s).roundToInt(), withA(textColor, alpha).argb, false)
             }
         }
-
-        context.matrices.pop()
-    }
-
-    private fun renderPotionIcon(context: GuiGraphicsExtractor, potion: PotionDisplay, x: Float, y: Float, size: Float) {
-        // 使用原生方式渲染简化药水图标
-        // 在LB NextGen中可以使用drawItem或自定义渲染
-
-        val alpha = (displayAlpha * 255).toInt()
-
-        // 绘制药水瓶形状
-        val bottleColor = if (potion.isBad)
-            Color4b(0x88, 0x33, 0x33, alpha)
-        else
-            Color4b(0x33, 0x88, 0x33, alpha)
-
-        // 瓶身
-        drawRoundedRect(
-            context,
-            x + size * 0.2f, y + size * 0.15f,
-            size * 0.6f, size * 0.7f,
-            2f,
-            bottleColor
-        )
-
-        // 瓶口
-        drawRoundedRect(
-            context,
-            x + size * 0.35f, y,
-            size * 0.3f, size * 0.2f,
-            1f,
-            Color4b(0xCC, 0xCC, 0xCC, alpha)
-        )
     }
 }
