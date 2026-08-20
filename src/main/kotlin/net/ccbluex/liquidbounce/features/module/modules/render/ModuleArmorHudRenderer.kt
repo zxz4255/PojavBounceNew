@@ -7,7 +7,7 @@ import net.ccbluex.liquidbounce.features.module.ModuleCategories
 import net.ccbluex.liquidbounce.render.drawRoundedRect
 import net.ccbluex.liquidbounce.render.engine.type.Color4b
 import net.ccbluex.liquidbounce.utils.client.mc
-import net.minecraft.client.gui.DrawContext
+import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.item.ArmorItem
 import net.minecraft.item.ItemStack
 import net.minecraft.util.math.MathHelper
@@ -147,7 +147,7 @@ object ModuleArmorHudRenderer : ClientModule(
         renderArmorList(event.context, armorItems)
     }
 
-    private fun renderArmorList(context: DrawContext, armorItems: List<ArmorDisplay>) {
+    private fun renderArmorList(context: GuiGraphicsExtractor, armorItems: List<ArmorDisplay>) {
         val scale = this.scale
         val baseX = posX
         val baseY = posY
