@@ -264,15 +264,16 @@ object ModuleSolsticeNotification : ClientModule(
                 Type.ERROR -> theme = Color4b(255, 0, 0, 255)
                 Type.INFO -> Unit
             }
-            // 整体水平主题渐变背景 + 阴影（无黑竖条）
+            // 主题渐变背景：无黑色阴影/黑底层
             val aMul = n.currentDuration
-            val cLeft = theme.alpha((210 * aMul).toInt().coerceIn(0, 255))
+            val cLeft = theme.alpha((220 * aMul).toInt().coerceIn(0, 255))
             val cRight = getThemedColor(boxTop * 2f + boxW * 1.2f)
-                .alpha((160 * aMul).toInt().coerceIn(0, 255))
-            drawShadow(ctx, x, boxTop, x + boxW, boxBottom, Color4b(0, 0, 0, (70 * aMul).toInt()))
+                .alpha((200 * aMul).toInt().coerceIn(0, 255))
+            // 先铺一层不透明主题底，杜绝缝隙透出黑/游戏画面
+            ctx.drawRoundedRect(x, boxTop, x + boxW, boxBottom, cornerRadius, cLeft)
             if (colorGradient) {
-                // 连续分段渐变铺满整条，首尾不单独圆角避免分裂
-                val segs = 16
+                // 分段渐变叠在主题底上，段间轻微重叠，无黑条
+                val segs = 20
                 val segW = boxW / segs
                 for (i in 0 until segs) {
                     val t0 = i / (segs - 1).toFloat().coerceAtLeast(1f)
@@ -281,15 +282,18 @@ object ModuleSolsticeNotification : ClientModule(
                         lerp(cLeft.r.toFloat(), cRight.r.toFloat(), s).toInt().coerceIn(0, 255),
                         lerp(cLeft.g.toFloat(), cRight.g.toFloat(), s).toInt().coerceIn(0, 255),
                         lerp(cLeft.b.toFloat(), cRight.b.toFloat(), s).toInt().coerceIn(0, 255),
-                        lerp(cLeft.a.toFloat(), cRight.a.toFloat(), s).toInt().coerceIn(0, 255),
+                        (235 * aMul).toInt().coerceIn(0, 255),
                     )
-                    val sx = x + segW * i
-                    val ex = x + segW * (i + 1) + 0.25f
-                    ctx.drawQuad(sx, boxTop, ex.coerceAtMost(x + boxW), boxBottom, col)
+                    val sx = x + segW * i - 0.5f
+                    val ex = x + segW * (i + 1) + 0.5f
+                    ctx.drawQuad(
+                        sx.coerceAtLeast(x),
+                        boxTop,
+                        ex.coerceAtMost(x + boxW),
+                        boxBottom,
+                        col,
+                    )
                 }
-                // 圆角遮罩感：四角用深色淡化（可选，轻量）
-            } else {
-                ctx.drawRoundedRect(x, boxTop, x + boxW, boxBottom, cornerRadius, cLeft)
             }
 
             // 底部细进度（剩余时间），主题色连续条
