@@ -234,6 +234,9 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModuleRiseClickgu
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeModernTargetInfo
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleEpsilonTargetHud
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleDynamicIsland
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleArmorHudRenderer
+import net.ccbluex.liquidbounce.features.module.modules.render.ModulePotionStatusRenderer
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleTargetHudRenderer
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSmoothCamera
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleStorageESP
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleTNTTimer
@@ -677,6 +680,9 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleEpsilonNotification,
             ModuleEpsilonTargetHud,
             ModuleDynamicIsland,
+            ModuleArmorHudRenderer
+            ModulePotionStatusRenderer
+            ModuleTargetHudRenderer
             ModuleWatermark,
             ModuleNoBob,
             ModuleNoFov,
