@@ -7,7 +7,7 @@ import net.ccbluex.liquidbounce.features.module.ModuleCategories
 import net.ccbluex.liquidbounce.render.drawRoundedRect
 import net.ccbluex.liquidbounce.render.engine.type.Color4b
 import net.ccbluex.liquidbounce.utils.client.mc
-import net.minecraft.client.gui.DrawContext
+import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.network.AbstractClientPlayerEntity
 import net.minecraft.client.render.GameRenderer
 import net.minecraft.entity.Entity
@@ -331,7 +331,7 @@ object ModuleTargetHudRenderer : ClientModule(
         }
     }
 
-    private fun renderNewHud(context: DrawContext, entity: LivingEntity?, now: Long, dt: Float) {
+    private fun renderNewHud(context: GuiGraphicsExtractor, entity: LivingEntity?, now: Long, dt: Float) {
         if (entity == null) return
 
         val scale = targetHudScale
@@ -490,7 +490,7 @@ object ModuleTargetHudRenderer : ClientModule(
         context.matrices.pop()
     }
 
-    private fun renderOldHud(context: DrawContext, entity: LivingEntity?, now: Long, dt: Float) {
+    private fun renderOldHud(context: GuiGraphicsExtractor, entity: LivingEntity?, now: Long, dt: Float) {
         if (entity == null) return
 
         val scale = targetHudScale
@@ -592,7 +592,7 @@ object ModuleTargetHudRenderer : ClientModule(
         context.matrices.pop()
     }
 
-    private fun renderPlayerAvatar(context: DrawContext, player: AbstractClientPlayerEntity, x: Float, y: Float, size: Int) {
+    private fun renderPlayerAvatar(context: GuiGraphicsExtractor, player: AbstractClientPlayerEntity, x: Float, y: Float, size: Int) {
         // 使用 Minecraft 原生方式渲染玩家皮肤头像
         val skinTexture = player.skinTextures.texture()
 
@@ -621,7 +621,7 @@ object ModuleTargetHudRenderer : ClientModule(
         context.disableScissor()
     }
 
-    private fun renderAnimatedHealthText(context: DrawContext, now: Long) {
+    private fun renderAnimatedHealthText(context: GuiGraphicsExtractor, now: Long) {
         if (currentHealthText.isEmpty()) return
 
         val progress = if (healthTextAnimStart == 0L) 1f else
@@ -665,7 +665,7 @@ object ModuleTargetHudRenderer : ClientModule(
         context.disableScissor()
     }
 
-    private fun renderAnimatedDistText(context: DrawContext, now: Long) {
+    private fun renderAnimatedDistText(context: GuiGraphicsExtractor, now: Long) {
         if (currentDistText.isEmpty()) return
 
         val progress = if (distTextAnimStart == 0L) 1f else
