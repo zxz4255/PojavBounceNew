@@ -680,9 +680,9 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleEpsilonNotification,
             ModuleEpsilonTargetHud,
             ModuleDynamicIsland,
-            ModuleArmorHudRenderer
-            ModulePotionStatusRenderer
-            ModuleTargetHudRenderer
+            ModuleArmorHudRenderer,
+            ModulePotionStatusRenderer,
+            ModuleTargetHudRenderer,
             ModuleWatermark,
             ModuleNoBob,
             ModuleNoFov,
