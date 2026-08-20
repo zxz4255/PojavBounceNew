@@ -7,7 +7,7 @@ import net.ccbluex.liquidbounce.features.module.ModuleCategories
 import net.ccbluex.liquidbounce.render.drawRoundedRect
 import net.ccbluex.liquidbounce.render.engine.type.Color4b
 import net.ccbluex.liquidbounce.utils.client.mc
-import net.minecraft.client.gui.DrawContext
+import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.entity.effect.StatusEffect
 import net.minecraft.entity.effect.StatusEffectInstance
 import net.minecraft.entity.effect.StatusEffects
@@ -192,7 +192,7 @@ object ModulePotionStatusRenderer : ClientModule(
         renderPotionList(context, displayList)
     }
 
-    private fun renderPotionList(context: DrawContext, potions: List<PotionDisplay>) {
+    private fun renderPotionList(context: GuiGraphicsExtractor, potions: List<PotionDisplay>) {
         val scale = this.scale
         val baseX = posX
         val baseY = posY
@@ -370,7 +370,7 @@ object ModulePotionStatusRenderer : ClientModule(
         context.matrices.pop()
     }
 
-    private fun renderPotionIcon(context: DrawContext, potion: PotionDisplay, x: Float, y: Float, size: Float) {
+    private fun renderPotionIcon(context: GuiGraphicsExtractor, potion: PotionDisplay, x: Float, y: Float, size: Float) {
         // 使用原生方式渲染简化药水图标
         // 在LB NextGen中可以使用drawItem或自定义渲染
 
