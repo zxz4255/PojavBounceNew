@@ -184,6 +184,7 @@ object ModuleSolsticeClickgui : ClientModule(
     private var expandedModule: ClientModule? = null
     private var listeningBind: Value<*>? = null
     private val collapsedGroups = mutableSetOf<Value<*>>()
+    private val expandedSettings = mutableSetOf<Value<*>>()
     private val sliderDrag = IdentityHashMap<Value<*>, Float>()   // 滑块拖动值
     private var activeColorValue: Value<*>? = null
     private val paletteColors = listOf(
@@ -207,25 +208,73 @@ object ModuleSolsticeClickgui : ClientModule(
     /* ============================= 值工具 ============================= */
 
     private fun getActualValue(v: Value<*>): Any? {
-    var obj: Any? = try { v.get() } catch (_: Exception) { null }
-    var depth = 0
-    while (obj is Value<*> && depth < 5) {
-        val current = obj          // ← 提取到局部变量，智能转换生效
-        obj = try {
-            (current as Value<*>).get()
-        } catch (_: Exception) {
-            null
+        var obj: Any? = try { v.get() } catch (_: Exception) {
+            runCatching { v.javaClass.getMethod("getValue").invoke(v) }.getOrNull()
         }
-        depth++
+        var depth = 0
+        while (obj is Value<*> && depth < 6) {
+            val cur = obj as Value<*>
+            obj = try { cur.get() } catch (_: Exception) {
+                runCatching { cur.javaClass.getMethod("getValue").invoke(cur) }.getOrNull()
+            }
+            depth++
         }
         return obj
     }
 
     private fun trySetValue(v: Value<*>, value: Any) {
-        try {
-            v.javaClass.methods.firstOrNull { it.name == "set" && it.parameterCount == 1 }?.invoke(v, value)
-        } catch (_: Exception) {}
+        // 多种 setter 兼容 Choice / Enum / Boolean
+        val methods = v.javaClass.methods
+        for (m in methods) {
+            if (m.parameterCount != 1) continue
+            val n = m.name
+            if (n != "set" && n != "setByString" && n != "setValue" && n != "setActiveChoice" && n != "setCurrent") continue
+            try {
+                if (n == "setByString") {
+                    m.invoke(v, value.toString())
+                } else {
+                    m.invoke(v, value)
+                }
+                return
+            } catch (_: Exception) {}
+        }
+        // 布尔：toggle()
+        if (value is Boolean) {
+            runCatching {
+                methods.firstOrNull { it.name == "toggle" && it.parameterCount == 0 }?.invoke(v)
+            }
+        }
     }
+
+    /** 可读标签：去掉 Value/Choice 包装与过长类名 */
+    private fun displayName(v: Value<*>): String {
+        var raw = try { v.name } catch (_: Exception) { "" }
+        if (raw.isBlank()) {
+            raw = runCatching {
+                v.javaClass.methods.firstOrNull {
+                    it.parameterCount == 0 && (it.name == "getName" || it.name == "getTitle")
+                }?.invoke(v) as? String
+            }.getOrNull() ?: "Setting"
+        }
+        raw = raw
+            .substringAfterLast('/')
+            .substringAfterLast('.')
+            .removePrefix("Value")
+            .removePrefix("value")
+            .trim()
+        // 去掉 "Something[Value]" / "Value[foo]" 形式
+        if ('[' in raw) {
+            raw = raw.substringBefore('[').ifBlank { raw.substringAfter('[').substringBefore(']') }
+        }
+        if (raw.equals("Value", true) || raw.equals("Choice", true) || raw.isBlank()) {
+            raw = v.javaClass.simpleName
+                .removeSuffix("Value")
+                .removeSuffix("Setting")
+                .ifBlank { "Setting" }
+        }
+        return raw.take(28)
+    }
+
 
     private fun isGroupValue(v: Value<*>): Boolean = try {
         val n = v.javaClass.simpleName
@@ -257,54 +306,91 @@ object ModuleSolsticeClickgui : ClientModule(
         return out
     }
 
+    private fun listFrom(obj: Any?, names: List<String>): List<Any?>? {
+        if (obj == null) return null
+        for (name in names) {
+            val m = obj.javaClass.methods.firstOrNull {
+                it.parameterCount == 0 && it.name.equals(name, true)
+            } ?: continue
+            val r = runCatching { m.invoke(obj) }.getOrNull() ?: continue
+            when (r) {
+                is Collection<*> -> if (r.isNotEmpty()) return r.toList()
+                is Array<*> -> if (r.isNotEmpty()) return r.toList()
+            }
+        }
+        // 字段
+        for (name in names) {
+            val f = obj.javaClass.declaredFields.firstOrNull { it.name.equals(name, true) } ?: continue
+            runCatching {
+                f.isAccessible = true
+                when (val r = f.get(obj)) {
+                    is Collection<*> -> if (r.isNotEmpty()) return r.toList()
+                    is Array<*> -> if (r.isNotEmpty()) return r.toList()
+                }
+            }
+        }
+        return null
+    }
+
     private fun cycleChoice(v: Value<*>): Boolean {
-        val actual = getActualValue(v) ?: return false
+        val actual = getActualValue(v)
+        // Enum
         if (actual is Enum<*>) {
             val constants = actual.javaClass.enumConstants?.toList() ?: return false
             if (constants.isEmpty()) return false
-            val idx = constants.indexOf(actual)
+            val idx = constants.indexOf(actual).let { if (it < 0) 0 else it }
             trySetValue(v, constants[(idx + 1) % constants.size]!!)
             return true
         }
-        fun listFrom(obj: Any?, names: List<String>): List<Any?>? {
-            if (obj == null) return null
-            for (name in names) {
-                val m = obj.javaClass.methods.firstOrNull {
-                    it.parameterCount == 0 && it.name.equals(name, true)
-                } ?: continue
-                val r = runCatching { m.invoke(obj) }.getOrNull() ?: continue
-                when (r) {
-                    is Collection<*> -> return r.toList()
-                    is Array<*> -> return r.toList()
-                }
-            }
-            return null
-        }
-        val choices = listFrom(v, listOf("getChoices", "choices", "getModes", "modes", "getActiveChoices"))
+        val names = listOf(
+            "getChoices", "choices", "getModes", "modes",
+            "getActiveChoices", "getValues", "values", "getEntries", "entries",
+        )
+        val choices = listFrom(v, names) ?: listFrom(actual, names)
         if (choices != null && choices.isNotEmpty()) {
             val idx = choices.indexOf(actual).let { if (it < 0) 0 else it }
             trySetValue(v, choices[(idx + 1) % choices.size]!!)
             return true
         }
+        // 字符串模式：getAvailableValues / asString
+        val strs = listFrom(v, listOf("getAvailableValues", "availableValues"))
+        if (strs != null && strs.isNotEmpty()) {
+            val cur = actual?.toString()
+            val idx = strs.indexOfFirst { it.toString() == cur }.let { if (it < 0) 0 else it }
+            trySetValue(v, strs[(idx + 1) % strs.size]!!)
+            return true
+        }
         return false
     }
 
+
     private fun choiceLabel(actual: Any?): String {
-        if (actual == null) return "?"
+        if (actual == null) return "-"
+        if (actual is Boolean) return if (actual) "On" else "Off"
         if (actual is Enum<*>) return actual.name
-        runCatching {
-            val m = actual.javaClass.methods.firstOrNull {
-                it.parameterCount == 0 && (
-                    it.name.equals("getName", true)
-                        || it.name.equals("getChoiceName", true)
-                        || it.name.equals("getTag", true)
-                    )
-            }
-            val r = m?.invoke(actual)
-            if (r is String && r.isNotBlank()) return r
+        if (actual is Number) {
+            val d = actual.toDouble()
+            return if (d == d.toLong().toDouble()) actual.toLong().toString()
+            else String.format("%.2f", d)
         }
-        return actual.toString().substringAfterLast('.').substringBefore('@').take(18)
+        runCatching {
+            for (name in listOf("getName", "getChoiceName", "getTag", "getTitle", "getDisplayName")) {
+                val m = actual.javaClass.methods.firstOrNull {
+                    it.parameterCount == 0 && it.name.equals(name, true)
+                } ?: continue
+                val r = m.invoke(actual)
+                if (r is String && r.isNotBlank() && !r.contains("Value[", true)) {
+                    return r.substringAfterLast('.').take(18)
+                }
+            }
+        }
+        var s = actual.toString()
+        if ('[' in s) s = s.substringBefore('[')
+        s = s.substringAfterLast('.').substringBefore('@').substringBefore('$')
+        if (s.contains("Value", true) || s.length > 20) s = s.take(12)
+        return s.ifBlank { "-" }.take(18)
     }
+
 
     private fun isChoiceLike(actual: Any?): Boolean {
         if (actual == null || actual is Boolean || actual is Number) return false
@@ -704,7 +790,7 @@ object ModuleSolsticeClickgui : ClientModule(
                 if (expandedModule == mod) {
                     for (v in visibleValues(mod)) {
                         if (my in curY..(curY + itemHeight)) {
-                            if (button == 0 || (button == 1 && isGroupValue(v))) handleValueClick(v, mx, my, button)
+                            if (button == 0 || button == 1) handleValueClick(v, mx, my, button)
                             return
                         }
                         curY += itemHeight
@@ -714,30 +800,65 @@ object ModuleSolsticeClickgui : ClientModule(
         }
     }
 
+    private fun hasNested(v: Value<*>): Boolean {
+        if (isGroupValue(v)) return true
+        val kids = listFrom(v, listOf("getInner", "inner", "getValues", "values", "getChildren", "children"))
+        return kids != null && kids.isNotEmpty()
+    }
+
     private fun handleValueClick(v: Value<*>, mx: Float, my: Float, button: Int = 0) {
         val actual = getActualValue(v)
-        if (isGroupValue(v)) {
-            if (button == 0 || button == 1) {
+        // 分组 / 可展开：右键或左键折叠
+        if (isGroupValue(v) || (button == 1 && hasNested(v))) {
+            if (isGroupValue(v)) {
                 if (collapsedGroups.contains(v)) collapsedGroups.remove(v) else collapsedGroups.add(v)
+            } else {
+                if (expandedSettings.contains(v)) expandedSettings.remove(v) else expandedSettings.add(v)
             }
             return
         }
-        if (actual is Boolean && button == 0) {
+        if (button != 0) return
+
+        // 布尔
+        if (actual is Boolean) {
             trySetValue(v, !actual)
             return
         }
-        if (button == 0 && cycleChoice(v)) return
-        if (actual is Number && button == 0) {
+        // Toggleable 包装
+        if (actual != null && actual.javaClass.simpleName.contains("Toggle", true)) {
+            runCatching {
+                val en = actual.javaClass.methods.firstOrNull {
+                    it.parameterCount == 0 && (it.name == "isEnabled" || it.name == "getEnabled" || it.name == "enabled")
+                }?.invoke(actual)
+                if (en is Boolean) {
+                    actual.javaClass.methods.firstOrNull {
+                        it.parameterCount == 1 && (it.name == "setEnabled" || it.name == "set")
+                    }?.invoke(actual, !en)
+                    return
+                }
+            }
+        }
+        // Choice / Enum / 模式
+        if (cycleChoice(v)) return
+
+        if (actual is Number) {
+            // 滑块拖动在 mouseDrag 处理
             return
         }
-        if (actual != null && actual.javaClass.simpleName.contains("Color", true) && button == 0) {
+        if (actual != null && actual.javaClass.simpleName.contains("Color", true)) {
             activeColorValue = if (activeColorValue == v) null else v
             return
         }
-        if (v.name.contains("Bind", true) && button == 0) {
+        if (displayName(v).contains("Bind", true) || v.name.contains("Bind", true)) {
             listeningBind = if (listeningBind == v) null else v
+            return
+        }
+        // 最后：若有嵌套则展开
+        if (hasNested(v)) {
+            if (expandedSettings.contains(v)) expandedSettings.remove(v) else expandedSettings.add(v)
         }
     }
+
 
     private fun panelRightEdgeOf(v: Value<*>): Float {
         // 找到 v 所在面板右边缘
@@ -1047,7 +1168,7 @@ object ModuleSolsticeClickgui : ClientModule(
         // 标签 (限宽)
         val label = v.name
         val labelMaxW = (pw * 0.42f).toInt()
-        val shownLabel = if (font.width(label) > labelMaxW) label.take(8) + "…" else label
+        val shownLabel = displayName(v)
         val labelColor = Color4b(180, 180, 180, a)
 
         when {
@@ -1107,8 +1228,9 @@ object ModuleSolsticeClickgui : ClientModule(
                 )
             }
             else -> {
-                ctx.text(font, shownLabel, (px + 8f).roundToInt(), (y + 5f).roundToInt(), labelColor.argb, textShadow)
-                val dv = actual.toString().take(12)
+                val label = trimToWidth(font, shownLabel, (pw * 0.5f).toInt().coerceAtLeast(16))
+                ctx.text(font, label, (px + 8f).roundToInt(), (y + 5f).roundToInt(), labelColor.argb, textShadow)
+                val dv = trimToWidth(font, choiceLabel(actual), (pw * 0.4f).toInt().coerceAtLeast(12))
                 ctx.text(font, dv, (px + pw - 8f - font.width(dv)).roundToInt(), (y + 5f).roundToInt(), Color4b(150, 150, 150, a).argb, textShadow)
             }
         }
