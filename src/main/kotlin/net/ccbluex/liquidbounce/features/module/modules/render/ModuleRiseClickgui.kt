@@ -547,10 +547,56 @@ object ModuleRiseClickgui : ClientModule(
         }
     }
 
+    
+    private fun cycleChoice(v: Value<*>): Boolean {
+        val actual = getActual(v) ?: return false
+        if (actual is Enum<*>) {
+            val constants = actual.javaClass.enumConstants?.toList() ?: return false
+            if (constants.isEmpty()) return false
+            val idx = constants.indexOf(actual)
+            trySet(v, constants[(idx + 1) % constants.size]!!)
+            return true
+        }
+        val list = runCatching {
+            val m = v.javaClass.methods.firstOrNull {
+                it.parameterCount == 0 && (
+                    it.name.equals("getChoices", true) || it.name.equals("choices", true)
+                        || it.name.equals("getModes", true) || it.name.equals("modes", true)
+                    )
+            }?.invoke(v)
+            when (m) {
+                is Collection<*> -> m.toList()
+                is Array<*> -> m.toList()
+                else -> null
+            }
+        }.getOrNull()
+        if (list != null && list.isNotEmpty()) {
+            val idx = list.indexOf(actual).let { if (it < 0) 0 else it }
+            trySet(v, list[(idx + 1) % list.size]!!)
+            return true
+        }
+        return false
+    }
+
+    private fun choiceLabel(actual: Any?): String {
+        if (actual == null) return "?"
+        if (actual is Enum<*>) return actual.name
+        runCatching {
+            val m = actual.javaClass.methods.firstOrNull {
+                it.parameterCount == 0 && (
+                    it.name.equals("getName", true) || it.name.equals("getChoiceName", true) || it.name.equals("getTag", true)
+                    )
+            }?.invoke(actual)
+            if (m is String && m.isNotBlank()) return m
+        }
+        return actual.toString().substringAfterLast('.').substringBefore('@').take(18)
+    }
+
     private fun handleSettingClick(v: Value<*>, x: Float, w: Float, button: Int) {
         val actual = getActual(v) ?: return
         when {
             actual is Boolean && button == 0 -> trySet(v, !actual)
+            button == 0 && cycleChoice(v) -> {}
             actual is Enum<*> && button == 0 -> enumOpen[v] = !(enumOpen[v] ?: false)
             actual is Number && button == 0 -> {
                 val range = rangeOf(v)
@@ -831,9 +877,10 @@ object ModuleRiseClickgui : ClientModule(
             }
             actual is Enum<*> -> {
                 ctx.text(font, v.name, (x + 8f).roundToInt(), ty.roundToInt(), colSecondaryText.alpha(a).argb, false)
+                val mode = choiceLabel(actual)
                 ctx.text(
-                    font, actual.name,
-                    (x + w - 8f - font.width(actual.name)).roundToInt(), ty.roundToInt(),
+                    font, mode,
+                    (x + w - 8f - font.width(mode)).roundToInt(), ty.roundToInt(),
                     colAccent.alpha(a).argb, false,
                 )
             }
@@ -872,6 +919,12 @@ object ModuleRiseClickgui : ClientModule(
             }
             else -> {
                 ctx.text(font, v.name, (x + 8f).roundToInt(), ty.roundToInt(), colSecondaryText.alpha(a).argb, false)
+                val mode = choiceLabel(actual)
+                ctx.text(
+                    font, mode,
+                    (x + w - 8f - font.width(mode)).roundToInt(), ty.roundToInt(),
+                    colAccent.alpha(a).argb, false,
+                )
             }
         }
     }
