@@ -1,279 +1,604 @@
 /*
- * ModuleEpsilonNotification —— 还原 Epsilon Notifications.java / Notification.java / NotificationMode.java
- * LiquidBounce Nextgen · 原生 Overlay · 无 Web
- *
- * 动画阶段 (与 Java 一致):
- *  ENTER_BAR 0–300ms  色条展开
- *  ENTER_CONTENT 300–500ms  内容淡入 + 色条收窄
- *  SHOW 显示
- *  EXIT_CONTENT 0–200ms after display
- *  EXIT_BAR 200–500ms  色条收起
+ * ModuleEpsilonTargetHud —— 还原 Epsilon TargetHUD.java
+ * 原生 OverlayRender + GuiGraphicsExtractor，无 Web
+ * 血条延迟动画 / 受伤头像缩放 / 玩家皮肤 UV / 装备栏
  */
 package net.ccbluex.liquidbounce.features.module.modules.render
 
-import net.ccbluex.liquidbounce.config.types.list.Tagged
 import net.ccbluex.liquidbounce.event.events.OverlayRenderEvent
-import net.ccbluex.liquidbounce.event.events.ServerConnectEvent
-import net.ccbluex.liquidbounce.event.events.NotificationEvent
-import net.ccbluex.liquidbounce.event.events.ModuleToggleEvent
 import net.ccbluex.liquidbounce.event.handler
 import net.ccbluex.liquidbounce.features.module.ClientModule
 import net.ccbluex.liquidbounce.features.module.ModuleCategories
+import net.ccbluex.liquidbounce.features.module.modules.combat.killaura.KillAuraTargetTracker
 import net.ccbluex.liquidbounce.render.drawQuad
-import net.ccbluex.liquidbounce.render.engine.type.Color4b
+import net.ccbluex.liquidbounce.render.drawRoundedRect
 import net.ccbluex.liquidbounce.render.withPush
+import net.ccbluex.liquidbounce.render.engine.type.Color4b
 import net.ccbluex.liquidbounce.utils.client.mc
-import java.util.concurrent.CopyOnWriteArrayList
+import net.minecraft.client.gui.Font
+import net.minecraft.client.gui.GuiGraphicsExtractor
+import net.minecraft.client.gui.screens.ChatScreen
+import net.minecraft.client.player.AbstractClientPlayer
+import net.minecraft.resources.Identifier
+import net.minecraft.world.entity.EquipmentSlot
+import net.minecraft.world.entity.LivingEntity
+import net.minecraft.world.item.ItemStack
+import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.pow
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
-object ModuleEpsilonNotification : ClientModule(
-    "EpsilonNotification",
+object ModuleEpsilonTargetHud : ClientModule(
+    "EpsilonTargetHud",
     ModuleCategories.RENDER,
-    aliases = listOf("Notification", "EpsilonNotif"),
+    aliases = listOf("EpsilonTargetHUD", "TargetHUD"),
 ) {
-    init { enabled = true }
 
-    private enum class AnchorH(override val tag: String) : Tagged {
-        LEFT("Left"), CENTER("Center"), RIGHT("Right"),
+    /* ============================= 可调节 ============================= */
+
+    private val posX by float("Position X", 40f, 0f..2000f)
+    private val posY by float("Position Y", 40f, 0f..1200f)
+    private val scale by float("Scale", 0.9f, 0.5f..2.0f)
+    private val width by float("Width", 150f, 100f..300f)
+    private val height by float("Height", 52f, 30f..100f)
+    private val radius by float("Radius", 5f, 0f..20f)
+    private val blurStrength by float("Blur Strength", 5f, 0f..20f)
+    private val healthBarHeight by float("Bar Height", 3f, 2f..20f)
+    private val healthBarRadius by float("Bar Radius", 1.2f, 0f..15f)
+    private val nameSize by float("Name Size", 10.5f, 8f..18f)
+
+    private val delayBar by boolean("Delay Bar", true)
+    private val delayWait by boolean("Delay Wait", true)
+    private val delayTime by float("Delay Time", 250f, 0f..500f)
+    private val delaySpeed by float("Delay Speed", 2f, 0.1f..10f)
+
+    private val barOutline by boolean("Bar Outline", true)
+    private val barOutlineWidth by float("Bar Outline Width", 1f, 0.5f..5f)
+
+    private val backgroundColor by color("Background Color", Color4b(15, 15, 15, 145))
+    private val barBackgroundColor by color("Bar Background Color", Color4b(255, 255, 255, 55))
+    private val barFillColor by color("Bar Fill Color", Color4b(255, 236, 248, 235))
+    private val delayBarColor by color("Delay Bar Color", Color4b(190, 190, 190, 100))
+    private val barOutlineColor by color("Bar Outline Color", Color4b(255, 255, 255, 85))
+    private val textColor by color("Text Color", Color4b(255, 255, 255, 235))
+
+    private val drawShadow by boolean("Drop Shadow", true)
+    private val shadowBlur by float("Shadow Blur", 8f, 0f..24f)
+    private val shadowColor by color("Shadow Color", Color4b(0, 0, 0, 120))
+
+    private val showEquipment by boolean("Show Equipment", true)
+    private val showInChat by boolean("Show In Chat", true)
+
+    /* ============================= 状态 ============================= */
+
+    private const val VISIBILITY_MS = 300L
+    private const val HEAD_DAMAGE_SCALE = 0.15f
+    private const val EQUIP_SCALE = 0.85f
+
+    private var lastTargetId = Int.MIN_VALUE
+    private var displayedHealth = 0f
+    private var delayedHealth = 0f
+    private var lastKnownHealth = -1f
+    private var lastKnownMaxHealth = 1f
+    private var lastDamageTimeMs = 0L
+    private var renderedTarget: LivingEntity? = null
+    private var visibilityProgress = 0f
+    private var lastVisibilityUpdateMs = 0L
+    private var lastFrameNs = 0L
+
+    /* ============================= 工具 ============================= */
+
+    private fun easeOutSine(t: Float): Float {
+        val x = t.coerceIn(0f, 1f)
+        return sin((x * Math.PI) / 2.0).toFloat()
     }
-    private enum class AnchorV(override val tag: String) : Tagged {
-        TOP("Top"), BOTTOM("Bottom"),
+
+    private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t.coerceIn(0f, 1f)
+
+    private fun withAlpha(c: Color4b, scale: Float): Color4b {
+        val a = (c.a * scale.coerceIn(0f, 1f)).roundToInt().coerceIn(0, 255)
+        return Color4b(c.r, c.g, c.b, a)
     }
 
-    private val scale by float("Scale", 1.0f, 0.5f..2.0f)
-    private val fontScale by float("Font Scale", 1.0f, 0.5f..2.0f)
-    private val subtitleYOffset by float("Subtitle Y Offset", 0.4f, -10f..20f)
-    private val boxWidth by int("Width", 120, 80..300)
-    private val boxHeight by int("Height", 30, 24..80)
-    private val backgroundAlpha by int("Background Alpha", 145, 0..255)
-    private val displayTime by int("Display Time", 2000, 500..5000)
-    private val entryGap by float("Entry Gap", 3f, 0f..12f)
-    private val accentBarWidth by float("Accent Bar Width", 2.4f, 1f..8f)
-    private val textPadding by float("Text Padding", 6f, 2f..16f)
-    private val posX by float("Pos X", 8f, 0f..800f)
-    private val posY by float("Pos Y", 8f, 0f..600f)
-    private val anchorH by enumChoice("Horizontal Anchor", AnchorH.RIGHT)
-    private val anchorV by enumChoice("Vertical Anchor", AnchorV.TOP)
-    private val preview by boolean("Preview", false)
-
-    private val successColor by color("Success", Color4b(33, 207, 178, 255))
-    private val infoColor by color("Info", Color4b(255, 255, 255, 255))
-    private val errorColor by color("Error", Color4b(236, 67, 48, 255))
-
-    enum class Mode { SUCCESS, INFO, ERROR }
-
-    private data class Notif(
-        val id: Int,
-        var title: String,
-        var subTitle: String,
-        var mode: Mode,
-        val replaceable: Boolean,
-        var createTime: Long = System.currentTimeMillis(),
-        var skipIntro: Boolean = false,
-    ) {
-        fun elapsed() = System.currentTimeMillis() - createTime
-        fun exitTime(displayMs: Int) = elapsed() - displayMs
-        fun expired(displayMs: Int) = elapsed() > displayMs + 500L
+    private fun tintDamage(base: Color4b, damageProgress: Float): Color4b {
+        val d = damageProgress.coerceIn(0f, 1f)
+        val greenBlue = (255f - 155f * d).roundToInt().coerceIn(100, 255)
+        val red = (base.r + (255 - base.r) * d).roundToInt().coerceIn(0, 255)
+        val green = (base.g * greenBlue / 255f).roundToInt().coerceIn(0, 255)
+        val blue = (base.b * greenBlue / 255f).roundToInt().coerceIn(0, 255)
+        return Color4b(red, green, blue, base.a)
     }
 
-    private enum class Stage { ENTER_BAR, ENTER_CONTENT, SHOW, EXIT_CONTENT, EXIT_BAR, HIDDEN }
-    private data class Frame(val stage: Stage, val progress: Float, val occupied: Float)
+    private fun isRenderable(t: LivingEntity?): Boolean =
+        t != null && t.isAlive && !t.isDeadOrDying
 
-    private val queue = CopyOnWriteArrayList<Notif>()
-    private var nextId = 1
+    private fun resolveTarget(): LivingEntity? {
+        val fromKa = try {
+            KillAuraTargetTracker.target
+        } catch (_: Throwable) {
+            null
+        }
+        if (isRenderable(fromKa)) return fromKa
+        // 聊天界面预览自身（对应原版 HudEditor）
+        if (showInChat && (try { mc.gui.screen() } catch (_: Throwable) { null }) is ChatScreen) {
+            return mc.player
+        }
+        return null
+    }
 
-    /** 对外 API：推送通知 */
-    fun post(title: String, subTitle: String = "", mode: Mode = Mode.INFO, replaceableId: Int? = null) {
-        if (replaceableId != null) {
-            val existing = queue.find { it.replaceable && it.id == replaceableId }
-            if (existing != null) {
-                existing.title = title
-                existing.subTitle = subTitle
-                existing.mode = mode
-                existing.createTime = System.currentTimeMillis()
-                existing.skipIntro = true
-                return
+    private fun updateRenderedTarget(live: LivingEntity?): LivingEntity? {
+        val now = System.currentTimeMillis()
+        if (lastVisibilityUpdateMs == 0L) lastVisibilityUpdateMs = now
+        val delta = ((now - lastVisibilityUpdateMs) / VISIBILITY_MS.toFloat()).coerceIn(0f, 1f)
+        lastVisibilityUpdateMs = now
+
+        if (live != null) {
+            renderedTarget = live
+            visibilityProgress = min(1f, visibilityProgress + delta)
+            return renderedTarget
+        }
+        if (renderedTarget == null) {
+            visibilityProgress = 0f
+            return null
+        }
+        visibilityProgress = max(0f, visibilityProgress - delta)
+        if (visibilityProgress <= 0.01f) {
+            renderedTarget = null
+            resetAnimatedState()
+            return null
+        }
+        return renderedTarget
+    }
+
+    private fun resetAnimatedState() {
+        lastTargetId = Int.MIN_VALUE
+        displayedHealth = 0f
+        delayedHealth = 0f
+        lastKnownHealth = -1f
+        lastKnownMaxHealth = 1f
+        lastDamageTimeMs = 0L
+    }
+
+    private fun updateAnimatedHealth(
+        target: LivingEntity,
+        currentHealth: Float,
+        maxHealth: Float,
+        frameTime: Float,
+    ): Float {
+        val id = target.id
+        if (id != lastTargetId) {
+            lastTargetId = id
+            displayedHealth = currentHealth
+            delayedHealth = currentHealth
+            lastKnownHealth = currentHealth
+            lastKnownMaxHealth = maxHealth
+            lastDamageTimeMs = 0L
+        } else {
+            if (lastKnownHealth >= 0f && currentHealth < lastKnownHealth) {
+                lastDamageTimeMs = System.currentTimeMillis()
             }
-            queue += Notif(replaceableId, title, subTitle, mode, true)
+            val speed = (frameTime * 10f).coerceIn(0f, 1f)
+            displayedHealth = lerp(displayedHealth, currentHealth, speed)
+            delayedHealth = updateDelayedHealth(currentHealth, frameTime)
+            lastKnownHealth = currentHealth
+            lastKnownMaxHealth = maxHealth
+        }
+        displayedHealth = displayedHealth.coerceIn(0f, maxHealth)
+        delayedHealth = delayedHealth.coerceIn(0f, maxHealth)
+        return (displayedHealth / maxHealth).coerceIn(0f, 1f)
+    }
+
+    private fun updateDelayedHealth(currentHealth: Float, frameTime: Float): Float {
+        if (!delayBar) return currentHealth
+        if (currentHealth >= delayedHealth) return currentHealth
+        if (delayWait && System.currentTimeMillis() - lastDamageTimeMs < delayTime.toLong()) {
+            return delayedHealth
+        }
+        val speed = (frameTime * delaySpeed * 2f).coerceIn(0f, 1f)
+        return lerp(delayedHealth, currentHealth, speed)
+    }
+
+
+    /* ===================== 头像（多签名兼容，避免 UV 乱线） ===================== */
+
+    private fun playerSkinId(player: AbstractClientPlayer): Identifier {
+        runCatching { player.skin.body().texturePath() }.getOrNull()?.let { return it }
+        runCatching {
+            val skin = player.skin
+            for (m in skin.javaClass.methods) {
+                if (m.parameterCount != 0) continue
+                val n = m.name.lowercase()
+                if (!n.contains("texture") && n != "body") continue
+                val r = m.invoke(skin) ?: continue
+                if (r is Identifier) return r
+                val tp = r.javaClass.methods.firstOrNull {
+                    it.parameterCount == 0 && it.name.lowercase().contains("texture")
+                }?.invoke(r)
+                if (tp is Identifier) return tp
+            }
+            null
+        }.getOrNull()?.let { return it }
+        return Identifier.withDefaultNamespace("textures/entity/player/wide/steve.png")
+    }
+
+
+    /**
+     * 按「像素 UV 优先」尝试多种 blit，避免归一化 UV 被当成像素导致花屏乱线。
+     * 标准 64×64 皮肤: 脸 (8,8) 尺寸 8；帽 (40,8) 尺寸 8。
+     */
+    private fun GuiGraphicsExtractor.blitSkinFace(
+        texture: Identifier,
+        x: Int,
+        y: Int,
+        size: Int,
+        uPx: Float,
+        vPx: Float,
+    ) {
+        if (size <= 0) return
+        val x1 = x + size
+        val y1 = y + size
+        val region = 8f
+        val tex = 64
+
+        // A) 反射: blit(Identifier, x, y, u, v, width, height, textureWidth, textureHeight)
+        for (m in javaClass.methods) {
+            if (!m.name.equals("blit", true)) continue
+            val pts = m.parameterTypes
+            try {
+                if (pts.size == 9
+                    && (pts[0] == Identifier::class.java || pts[0].name.endsWith("Identifier"))
+                    && pts[1] == Int::class.javaPrimitiveType
+                ) {
+                    m.invoke(this, texture, x, y, uPx, vPx, size, size, tex, tex)
+                    return
+                }
+                // blit(id, x, y, z, u, v, w, h) 等
+                if (pts.size == 8 && pts[0] == Identifier::class.java) {
+                    m.invoke(this, texture, x, y, 0, uPx, vPx, size, size)
+                    return
+                }
+            } catch (_: Throwable) {
+            }
+        }
+
+        // B) 本 fork 常见: (texture, x0,y0,x1,y1, u0,v0,u1,v1) 归一化
+        val okB = runCatching {
+            blit(
+                texture, x, y, x1, y1,
+                uPx / 64f, vPx / 64f,
+                (uPx + region) / 64f, (vPx + region) / 64f,
+            )
+        }.isSuccess
+        if (okB) return
+
+        // C) (texture, x0,y0,x1,y1, u,v,uw,vh) 归一化
+        val okC = runCatching {
+            blit(texture, x, y, x1, y1, uPx / 64f, vPx / 64f, region / 64f, region / 64f)
+        }.isSuccess
+        if (okC) return
+
+        // D) 像素值直接塞进四 float（少数错误映射的 fork）
+        runCatching {
+            blit(texture, x, y, x1, y1, uPx, vPx, region, region)
+        }
+    }
+
+    private fun GuiGraphicsExtractor.drawEntityFace(
+        entity: LivingEntity,
+        x: Float,
+        y: Float,
+        size: Float,
+    ) {
+        val xi = x.roundToInt()
+        val yi = y.roundToInt()
+        val si = size.roundToInt().coerceAtLeast(1)
+
+        if (entity is AbstractClientPlayer) {
+            val tex = playerSkinId(entity)
+            // 正面脸
+            blitSkinFace(tex, xi, yi, si, 8f, 8f)
+            // 帽子层（半透明叠不上就再画一次）
+            runCatching { blitSkinFace(tex, xi, yi, si, 40f, 8f) }
             return
         }
-        queue += Notif(nextId++, title, subTitle, mode, false)
-    }
 
-    fun postToggle(moduleName: String, enabled: Boolean) {
-        post(moduleName, if (enabled) "Enabled" else "Disabled", if (enabled) Mode.SUCCESS else Mode.ERROR)
-    }
-
-    private fun modeColor(m: Mode, a: Int = 255): Color4b {
-        val c = when (m) {
-            Mode.SUCCESS -> successColor
-            Mode.INFO -> infoColor
-            Mode.ERROR -> errorColor
-        }
-        return Color4b(c.r, c.g, c.b, a.coerceIn(0, 255))
-    }
-
-    /** Easing.EASE_OUT_CUBIC */
-    private fun easeOutCubic(t: Float): Float {
-        val x = t.coerceIn(0f, 1f)
-        return 1f - (1f - x).pow(3)
-    }
-
-    private fun frameOf(n: Notif, occupied: Float): Frame {
-        val elapsed = n.elapsed()
-        if (!n.skipIntro) {
-            if (elapsed <= 300L) {
-                val p = easeOutCubic(elapsed / 300f)
-                return Frame(Stage.ENTER_BAR, p, occupied * p)
+        // 生物：不用 64 皮肤 UV（会花屏）。尝试实体贴图左上，失败则色块+首字
+        val tex = runCatching {
+            val renderer = mc.entityRenderDispatcher.getRenderer(entity) ?: return@runCatching null
+            for (m in renderer.javaClass.methods) {
+                if (!m.name.lowercase().contains("texture")) continue
+                if (m.parameterCount == 1) {
+                    val r = m.invoke(renderer, entity)
+                    if (r is Identifier) return@runCatching r
+                }
+                if (m.parameterCount == 0) {
+                    val r = m.invoke(renderer)
+                    if (r is Identifier) return@runCatching r
+                }
             }
-            if (elapsed <= 500L) {
-                val p = easeOutCubic((elapsed - 300L) / 200f)
-                return Frame(Stage.ENTER_CONTENT, p, occupied)
+            null
+        }.getOrNull()
+
+        if (tex != null) {
+            // 许多实体贴图头在左上 8×8（相对 64 图集），仍可能不准 → 再兜底
+            val drew = runCatching {
+                blitSkinFace(tex, xi, yi, si, 8f, 8f)
+                true
+            }.getOrDefault(false)
+            if (drew) return
+        }
+
+        val key = entity.type.descriptionId.hashCode()
+        val r = 70 + (key and 0x7F)
+        val g = 70 + ((key shr 7) and 0x7F)
+        val b = 70 + ((key shr 14) and 0x7F)
+        drawRoundedRect(
+            x, y, x + size, y + size, size * 0.22f,
+            Color4b(r.coerceIn(40, 220), g.coerceIn(40, 220), b.coerceIn(40, 220), 255),
+        )
+        val ch = (entity.displayName?.string ?: entity.name.string).firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+        val font = mc.font
+        val tw = font.width(ch)
+        text(font, ch, (x + (size - tw) / 2f).roundToInt(), (y + (size - 9f) / 2f).roundToInt(), 0xFFFFFFFF.toInt(), false)
+    }
+
+    private fun GuiGraphicsExtractor.drawSoftShadow(
+        x: Float, y: Float, w: Float, h: Float, r: Float, blur: Float, col: Color4b, alphaScale: Float,
+    ) {
+        if (blur < 0.5f || alphaScale < 0.02f) return
+        val layers = 5
+        for (i in 1..layers) {
+            val t = i / layers.toFloat()
+            val expand = blur * t
+            val a = (col.a * alphaScale * (1f - t) * (1f - t) * 0.55f).roundToInt().coerceIn(0, 60)
+            if (a < 2) continue
+            drawRoundedRect(
+                x - expand, y - expand, x + w + expand, y + h + expand,
+                r + expand * 0.2f,
+                Color4b(col.r, col.g, col.b, a),
+            )
+        }
+    }
+
+    private fun GuiGraphicsExtractor.drawOutlineRect(
+        x: Float, y: Float, w: Float, h: Float, r: Float, line: Float, col: Color4b,
+    ) {
+        if (line <= 0f || col.a < 2) return
+        // 四边近似描边
+        drawRoundedRect(x, y, x + w, y + line, min(r, line), col)
+        drawRoundedRect(x, y + h - line, x + w, y + h, min(r, line), col)
+        drawRoundedRect(x, y, x + line, y + h, min(r, line), col)
+        drawRoundedRect(x + w - line, y, x + w, y + h, min(r, line), col)
+    }
+
+    private fun entityHealth(entity: LivingEntity): Float {
+        return try {
+            entity.health + entity.absorptionAmount.coerceAtLeast(0f)
+        } catch (_: Throwable) {
+            entity.health
+        }
+    }
+
+    private fun entityMaxHealth(entity: LivingEntity): Float {
+        return max(1f, entity.maxHealth + try {
+            entity.absorptionAmount.coerceAtLeast(0f)
+        } catch (_: Throwable) {
+            0f
+        })
+    }
+
+    private fun equipmentList(target: LivingEntity): List<ItemStack> {
+        val list = ArrayList<ItemStack>(5)
+        fun add(s: ItemStack) {
+            if (!s.isEmpty) list += s
+        }
+        add(target.mainHandItem)
+        add(target.getItemBySlot(EquipmentSlot.HEAD))
+        add(target.getItemBySlot(EquipmentSlot.CHEST))
+        add(target.getItemBySlot(EquipmentSlot.LEGS))
+        add(target.getItemBySlot(EquipmentSlot.FEET))
+        return list
+    }
+
+    private fun GuiGraphicsExtractor.drawEquipment(
+        target: LivingEntity,
+        startX: Float,
+        y: Float,
+        itemScale: Float,
+        gap: Float,
+    ) {
+        val items = equipmentList(target)
+        if (items.isEmpty()) return
+        val itemSize = 16f * itemScale
+        var ix = startX
+        for ((i, stack) in items.withIndex()) {
+            runCatching {
+                // 1.21+ GuiGraphicsExtractor.item / renderItem
+                val methods = javaClass.methods
+                val rendered = methods.firstOrNull {
+                    (it.name == "renderItem" || it.name == "item") && it.parameterCount in 3..6
+                }?.let { m ->
+                    when (m.parameterCount) {
+                        3 -> m.invoke(this, stack, ix.roundToInt(), y.roundToInt())
+                        4 -> m.invoke(this, stack, ix.roundToInt(), y.roundToInt(), target.id + i)
+                        5 -> m.invoke(this, target, stack, ix.roundToInt(), y.roundToInt(), target.id + i)
+                        else -> m.invoke(this, target, stack, ix.roundToInt(), y.roundToInt(), target.id + i, 0)
+                    }
+                    true
+                } ?: false
+                if (!rendered) {
+                    // 占位小方块
+                    drawRoundedRect(ix, y, ix + itemSize * 0.9f, y + itemSize * 0.9f, 2f, Color4b(40, 40, 45, 180))
+                }
             }
+            ix += itemSize + gap
         }
-        val exit = n.exitTime(displayTime)
-        if (exit < 0L) return Frame(Stage.SHOW, 1f, occupied)
-        if (exit <= 200L) {
-            val p = 1f - easeOutCubic(exit / 200f)
-            return Frame(Stage.EXIT_CONTENT, p, occupied)
-        }
-        if (exit <= 500L) {
-            val p = 1f - easeOutCubic((exit - 200L) / 300f)
-            return Frame(Stage.EXIT_BAR, p, occupied * p)
-        }
-        return Frame(Stage.HIDDEN, 0f, 0f)
     }
 
-    private fun isLeftDocked() = anchorH == AnchorH.LEFT
-
-
-    @Suppress("unused")
-    private val toggleHandler = handler<ModuleToggleEvent> { ev ->
-        if (!enabled) return@handler
-        if (ev.hidden) return@handler
-        if (ev.moduleName.equals(name, true) || ev.moduleName.contains("Notification", true)) return@handler
-        postToggle(ev.moduleName, ev.enabled)
-    }
-
-    @Suppress("unused")
-    private val notifEventHandler = handler<NotificationEvent> { ev ->
-        if (!enabled) return@handler
-        val mode = when (ev.severity) {
-            NotificationEvent.Severity.ERROR -> Mode.ERROR
-            NotificationEvent.Severity.SUCCESS, NotificationEvent.Severity.ENABLED -> Mode.SUCCESS
-            NotificationEvent.Severity.DISABLED -> Mode.ERROR
-            else -> Mode.INFO
-        }
-        val title = ev.title.ifBlank { "Notice" }
-        val msg = ev.message
-        post(title, msg, mode)
-    }
-
-    @Suppress("unused")
-    private val connectHandler = handler<ServerConnectEvent> { ev ->
-        if (!enabled) return@handler
-        val addr = try { ev.address.toString() } catch (_: Throwable) {
-            try { ev.serverInfo.name } catch (_: Throwable) { "server" }
-        }
-        post("Connecting", addr.take(40), Mode.INFO)
-    }
-
-    override suspend fun enabledEffect() {
-        post("Epsilon Notification", "Enabled", Mode.SUCCESS)
-    }
+    /* ============================= 渲染 ============================= */
 
     @Suppress("unused")
     private val renderHandler = handler<OverlayRenderEvent> { event ->
-        if (!enabled) return@handler
-        queue.removeAll { it.expired(displayTime) }
+        val nowNs = System.nanoTime()
+        val frameTime = if (lastFrameNs != 0L) {
+            ((nowNs - lastFrameNs) / 1e9f).coerceIn(0.001f, 0.05f)
+        } else 0.016f
+        lastFrameNs = nowNs
+
+        val live = resolveTarget()
+        val target = updateRenderedTarget(live) ?: return@handler
+        val anim = easeOutSine(visibilityProgress)
+        if (anim <= 0.01f) return@handler
 
         val ctx = event.context
         val font = mc.font
-        val s = scale
-        val textScaleBase = fontScale * s
-        val bw = boxWidth * s
-        val bh = boxHeight * s
-        val spacing = bh + entryGap * s
-        val bgA = backgroundAlpha
+        val panelScale = scale
+        val panelW = width * panelScale
+        val panelH = height * panelScale
+        val baseX = posX
+        val baseY = posY
 
-        data class Entry(val n: Notif, val frame: Frame)
-        val entries = mutableListOf<Entry>()
-        var totalH = 0f
-        for (n in queue) {
-            val f = frameOf(n, spacing)
-            if (f.stage == Stage.HIDDEN) continue
-            totalH += f.occupied
-            entries += Entry(n, f)
+        val maxHp = if (live == target) {
+            val hp = entityHealth(target)
+            val mh = entityMaxHealth(target)
+            lastKnownMaxHealth = mh
+            updateAnimatedHealth(target, hp, mh, frameTime)
+            mh
+        } else {
+            displayedHealth = displayedHealth.coerceIn(0f, lastKnownMaxHealth)
+            delayedHealth = delayedHealth.coerceIn(0f, lastKnownMaxHealth)
+            lastKnownMaxHealth
         }
-        if (entries.isEmpty() && preview) {
-            val p = Notif(0, "Preview", "Notification", Mode.SUCCESS, false, skipIntro = true)
-            totalH = spacing
-            entries += Entry(p, Frame(Stage.SHOW, 1f, spacing))
-        }
-        if (entries.isEmpty()) return@handler
+        val healthPercent = (displayedHealth / max(1f, maxHp)).coerceIn(0f, 1f)
+        val delayPercent = (delayedHealth / max(1f, maxHp)).coerceIn(0f, 1f)
 
-        val sw = ctx.guiWidth().toFloat()
-        val sh = ctx.guiHeight().toFloat()
-        val baseX = when (anchorH) {
-            AnchorH.LEFT -> posX
-            AnchorH.CENTER -> (sw - bw) / 2f
-            AnchorH.RIGHT -> sw - bw - posX
-        }
-        var curY = when (anchorV) {
-            AnchorV.TOP -> posY
-            AnchorV.BOTTOM -> sh - posY - max(bh, totalH)
-        }
+        val pad = 5f * panelScale
+        val cornerR = radius * panelScale
+        val barH = healthBarHeight * panelScale
+        val barR = healthBarRadius * panelScale
+        val barW = max(1f, panelW - pad * 2f)
+        val delayedBarW = (barW * delayPercent).coerceIn(0f, barW)
+        val filledBarW = (barW * healthPercent).coerceIn(0f, barW)
 
-        for (e in entries) {
-            val n = e.n
-            val f = e.frame
-            when (f.stage) {
-                Stage.ENTER_BAR, Stage.EXIT_BAR -> {
-                    val width = if (isLeftDocked()) bw * f.progress else bw * f.progress
-                    val rx = if (isLeftDocked()) baseX else baseX + bw - width
-                    ctx.drawQuad(rx, curY, rx + width, curY + bh, modeColor(n.mode, 255))
-                }
-                Stage.ENTER_CONTENT, Stage.EXIT_CONTENT, Stage.SHOW -> {
-                    val alpha = (255f * f.progress).roundToInt().coerceIn(0, 255)
-                    // 背景
-                    ctx.drawQuad(baseX, curY, baseX + bw, curY + bh, Color4b(0, 0, 0, (bgA * f.progress).roundToInt().coerceIn(0, 255)))
-                    // 文字
-                    val pad = textPadding * s
-                    val barW = accentBarWidth * s
-                    val title = n.title
-                    val sub = n.subTitle
-                    val ts = textScaleBase
-                    val subTs = ts * 0.92f
-                    val titleH = font.lineHeight * ts
-                    val subH = if (sub.isNotEmpty()) font.lineHeight * subTs else 0f
-                    val lineGap = 1.8f * ts + subtitleYOffset * s
-                    val contentH = titleH + subH + if (sub.isNotEmpty()) lineGap else 0f
-                    val textX = if (isLeftDocked()) baseX + pad else baseX + barW + pad
-                    val titleY = curY + (bh - contentH) / 2f
+        val innerH = max(1f, panelH - pad * 2f)
+        val contentAreaH = max(1f, innerH - pad - barH)
+        val headSize = min(contentAreaH, max(26f * panelScale, panelH * 0.6f) * 1.05f)
+        val textScale = max(0.45f, nameSize / 14f) * panelScale
+        val textH = 9f * textScale
+        val contentRowH = max(headSize, textH)
+        val contentBlockH = contentRowH + pad + barH
+        val contentStartY = baseY + pad + max(0f, (innerH - contentBlockH) / 2f)
+        val headY = contentStartY + (contentRowH - headSize) / 2f
+        val headX = baseX + pad
+        val barY = contentStartY + contentRowH + pad
+        val textStartX = headX + headSize + pad
+        val contentY = headY + 2f * panelScale
+        val healthText = String.format(Locale.ROOT, "%.1f", displayedHealth)
+        val healthTextW = font.width(healthText) * textScale
+        val healthTextX = baseX + panelW - pad - healthTextW
+        val equipY = contentY + textH + 2.8f * panelScale
+        val equipScale = EQUIP_SCALE * panelScale
+        val equipGap = 1.5f * panelScale
 
-                    ctx.pose().withPush {
-                        translate(textX, titleY)
-                        scale(ts, ts)
-                        ctx.text(font, title, 0, 0, Color4b(255, 255, 255, alpha).argb, false)
-                    }
-                    if (sub.isNotEmpty()) {
-                        ctx.pose().withPush {
-                            translate(textX, titleY + titleH + lineGap)
-                            scale(subTs, subTs)
-                            ctx.text(font, sub, 0, 0, modeColor(n.mode, (alpha * 0.86f).roundToInt()).argb, false)
-                        }
-                    }
-                    // 色条：progress 小时更宽，完全显示时收为细条
-                    val accentW = barW + (bw - barW) * (1f - f.progress)
-                    val accentX = if (isLeftDocked()) baseX + bw - accentW else baseX
-                    ctx.drawQuad(accentX, curY, accentX + accentW, curY + bh, modeColor(n.mode, 255))
-                }
-                Stage.HIDDEN -> {}
+        // 可见性缩放（中心插值）
+        val centerX = baseX + panelW / 2f
+        val centerY = baseY + panelH / 2f
+        val sx = lerp(centerX, baseX, anim)
+        val sy = lerp(centerY, baseY, anim)
+        val sW = panelW * anim
+        val sH = panelH * anim
+        val sR = cornerR * anim
+        val sBarH = barH * anim
+        val sBarR = barR * anim
+        val sOutline = barOutlineWidth * panelScale * anim
+        val sTextScale = textScale * anim
+        val sHeadR = headSize * 0.23f * anim
+        val sPadX = lerp(centerX, baseX + pad, anim)
+        val sBarY = lerp(centerY, barY, anim)
+        val sBarW = barW * anim
+        val sDelayedW = delayedBarW * anim
+        val sFilledW = filledBarW * anim
+        val sHeadX = lerp(centerX, headX, anim)
+        val sHeadY = lerp(centerY, headY, anim)
+        val sHeadSize = headSize * anim
+        val sTextX = lerp(centerX, textStartX, anim)
+        val sContentY = lerp(centerY, contentY, anim)
+        val sHealthTextX = lerp(centerX, healthTextX, anim)
+        val sEquipX = lerp(centerX, textStartX, anim)
+        val sEquipY = lerp(centerY, equipY, anim)
+        val sEquipScale = equipScale * anim
+        val sEquipGap = equipGap * anim
+
+        val hurtFrac = (target.hurtTime / 10f).coerceIn(0f, 1f)
+        val damageProgress = easeOutSine(hurtFrac)
+        val headDamageScale = 1f - damageProgress * HEAD_DAMAGE_SCALE
+        val finalHeadSize = sHeadSize * headDamageScale
+        val finalHeadX = sHeadX + (sHeadSize - finalHeadSize) / 2f
+        val finalHeadY = sHeadY + (sHeadSize - finalHeadSize) / 2f
+        val headTint = withAlpha(tintDamage(Color4b(255, 255, 255, 255), damageProgress), anim)
+
+        // 模糊近似：多层半透明 + 阴影
+        if (blurStrength > 0.5f) {
+            val layers = min(6, (blurStrength / 2f).roundToInt().coerceAtLeast(2))
+            for (i in 1..layers) {
+                val t = i / layers.toFloat()
+                val e = blurStrength * 0.35f * t
+                val a = (18 * anim * (1f - t)).roundToInt().coerceIn(0, 40)
+                ctx.drawRoundedRect(sx - e, sy - e, sx + sW + e, sy + sH + e, sR + e * 0.15f, Color4b(0, 0, 0, a))
             }
-            curY += f.occupied
+        }
+        if (drawShadow) {
+            ctx.drawSoftShadow(sx, sy, sW, sH, sR, shadowBlur * anim, shadowColor, anim)
+        }
+
+        // 背景
+        ctx.drawRoundedRect(sx, sy, sx + sW, sy + sH, sR, withAlpha(backgroundColor, anim))
+
+        // 血条底
+        ctx.drawRoundedRect(sPadX, sBarY, sPadX + sBarW, sBarY + sBarH, sBarR, withAlpha(barBackgroundColor, anim))
+        // 延迟血条
+        if (delayBar && delayedHealth > displayedHealth + 0.05f) {
+            ctx.drawRoundedRect(sPadX, sBarY, sPadX + sDelayedW, sBarY + sBarH, sBarR, withAlpha(delayBarColor, anim))
+        }
+        // 当前血条
+        if (sFilledW > 0.5f) {
+            ctx.drawRoundedRect(sPadX, sBarY, sPadX + sFilledW, sBarY + sBarH, sBarR, withAlpha(barFillColor, anim))
+        }
+        // 描边
+        if (barOutline && sOutline > 0.2f) {
+            ctx.drawOutlineRect(sPadX, sBarY, sBarW, sBarH, sBarR, sOutline, withAlpha(barOutlineColor, anim))
+        }
+
+        // 头像
+        if (target is AbstractClientPlayer) {
+            ctx.drawEntityFace(target, finalHeadX, finalHeadY, finalHeadSize)
+        } else {
+            val gray = withAlpha(tintDamage(Color4b(80, 80, 80, 200), damageProgress), anim)
+            ctx.drawRoundedRect(finalHeadX, finalHeadY, finalHeadX + finalHeadSize, finalHeadY + finalHeadSize, sHeadR * headDamageScale, gray)
+        }
+
+        // 文字
+        val name = try {
+            target.name.string
+        } catch (_: Throwable) {
+            target.displayName?.string ?: "?"
+        }
+        val tc = withAlpha(textColor, anim)
+        // 简单字号：用矩阵缩放近似 nameSize
+        val ty = sContentY.roundToInt()
+        if (sTextScale > 0.55f) {
+            ctx.text(font, name, sTextX.roundToInt(), ty, tc.argb, true)
+            ctx.text(font, healthText, sHealthTextX.roundToInt(), ty, tc.argb, true)
+        } else {
+            // 偏小字号仍用默认字体
+            ctx.text(font, name, sTextX.roundToInt(), ty, tc.argb, false)
+            ctx.text(font, healthText, sHealthTextX.roundToInt(), ty, tc.argb, false)
+        }
+
+        // 装备
+        if (showEquipment && sEquipScale > 0.2f) {
+            ctx.drawEquipment(target, sEquipX, sEquipY, sEquipScale, sEquipGap)
         }
     }
 }
