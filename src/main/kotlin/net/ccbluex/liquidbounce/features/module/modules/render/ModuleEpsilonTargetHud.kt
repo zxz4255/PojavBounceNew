@@ -227,117 +227,126 @@ object ModuleEpsilonTargetHud : ClientModule(
      * 按「像素 UV 优先」尝试多种 blit，避免归一化 UV 被当成像素导致花屏乱线。
      * 标准 64×64 皮肤: 脸 (8,8) 尺寸 8；帽 (40,8) 尺寸 8。
      */
-    private fun GuiGraphicsExtractor.blitSkinFace(
-        texture: Identifier,
-        x: Int,
-        y: Int,
-        size: Int,
-        uPx: Float,
-        vPx: Float,
-    ) {
-        if (size <= 0) return
-        val x1 = x + size
-        val y1 = y + size
-        val region = 8f
-        val tex = 64
 
-        // A) 反射: blit(Identifier, x, y, u, v, width, height, textureWidth, textureHeight)
-        for (m in javaClass.methods) {
-            if (!m.name.equals("blit", true)) continue
-            val pts = m.parameterTypes
-            try {
-                if (pts.size == 9
-                    && (pts[0] == Identifier::class.java || pts[0].name.endsWith("Identifier"))
-                    && pts[1] == Int::class.javaPrimitiveType
-                ) {
-                    m.invoke(this, texture, x, y, uPx, vPx, size, size, tex, tex)
-                    return
-                }
-                // blit(id, x, y, z, u, v, w, h) 等
-                if (pts.size == 8 && pts[0] == Identifier::class.java) {
-                    m.invoke(this, texture, x, y, 0, uPx, vPx, size, size)
-                    return
-                }
-            } catch (_: Throwable) {
-            }
-        }
+    /* ===================== 头像：PlayerFaceRenderer / 实体预览（禁止错误 UV blit） ===================== */
 
-        // B) 本 fork 常见: (texture, x0,y0,x1,y1, u0,v0,u1,v1) 归一化
-        val okB = runCatching {
-            blit(
-                texture, x, y, x1, y1,
-                uPx / 64f, vPx / 64f,
-                (uPx + region) / 64f, (vPx + region) / 64f,
-            )
-        }.isSuccess
-        if (okB) return
-
-        // C) (texture, x0,y0,x1,y1, u,v,uw,vh) 归一化
-        val okC = runCatching {
-            blit(texture, x, y, x1, y1, uPx / 64f, vPx / 64f, region / 64f, region / 64f)
-        }.isSuccess
-        if (okC) return
-
-        // D) 像素值直接塞进四 float（少数错误映射的 fork）
-        runCatching {
-            blit(texture, x, y, x1, y1, uPx, vPx, region, region)
-        }
+    private fun playerSkinObject(player: AbstractClientPlayer): Any? {
+        return runCatching { player.skin }.getOrNull()
     }
 
-    private fun GuiGraphicsExtractor.drawEntityFace(
-        entity: LivingEntity,
-        x: Float,
-        y: Float,
-        size: Float,
-    ) {
+    private fun GuiGraphicsExtractor.rawGuiGraphics(): Any? {
+        return runCatching {
+            javaClass.methods.firstOrNull {
+                it.parameterCount == 0 && (
+                    it.name.equals("getGuiGraphics", true)
+                        || it.name.equals("guiGraphics", true)
+                        || it.name.equals("graphics", true)
+                        || it.returnType.name.contains("GuiGraphics")
+                    )
+            }?.invoke(this)
+        }.getOrNull() ?: runCatching {
+            javaClass.fields.firstOrNull { it.type.name.contains("GuiGraphics") }?.also { it.isAccessible = true }?.get(this)
+        }.getOrNull() ?: this
+    }
+
+    /** 玩家：优先 PlayerFaceRenderer；生物：InventoryScreen 实体预览；再不行才色块 */
+    private fun GuiGraphicsExtractor.drawEntityFace(entity: LivingEntity, x: Float, y: Float, size: Float) {
         val xi = x.roundToInt()
         val yi = y.roundToInt()
-        val si = size.roundToInt().coerceAtLeast(1)
+        val si = size.roundToInt().coerceAtLeast(8)
+        val g = rawGuiGraphics() ?: this
 
         if (entity is AbstractClientPlayer) {
-            val tex = playerSkinId(entity)
-            // 正面脸
-            blitSkinFace(tex, xi, yi, si, 8f, 8f)
-            // 帽子层（半透明叠不上就再画一次）
-            runCatching { blitSkinFace(tex, xi, yi, si, 40f, 8f) }
+            val skin = playerSkinObject(entity)
+            if (skin != null) {
+                runCatching {
+                    val cls = Class.forName("net.minecraft.client.gui.components.PlayerFaceRenderer")
+                    for (m in cls.methods) {
+                        if (!m.name.equals("draw", true) && !m.name.equals("render", true)) continue
+                        if (!java.lang.reflect.Modifier.isStatic(m.modifiers)) continue
+                        val n = m.parameterCount
+                        try {
+                            when (n) {
+                                5 -> { m.invoke(null, g, skin, xi, yi, si); return }
+                                6 -> { m.invoke(null, g, skin, xi, yi, si, true); return }
+                                7 -> { m.invoke(null, g, skin, xi, yi, si, true, true); return }
+                                4 -> { m.invoke(null, g, skin, xi, yi); return }
+                            }
+                        } catch (_: Throwable) {}
+                    }
+                }
+            }
+            // 用实体预览画玩家头/上半身
+            if (drawEntityPreview(g, entity, xi, yi, si)) return
+            drawFaceFallback(entity, x, y, size)
             return
         }
 
-        // 生物：不用 64 皮肤 UV（会花屏）。尝试实体贴图左上，失败则色块+首字
-        val tex = runCatching {
-            val renderer = mc.entityRenderDispatcher.getRenderer(entity) ?: return@runCatching null
-            for (m in renderer.javaClass.methods) {
-                if (!m.name.lowercase().contains("texture")) continue
-                if (m.parameterCount == 1) {
-                    val r = m.invoke(renderer, entity)
-                    if (r is Identifier) return@runCatching r
-                }
-                if (m.parameterCount == 0) {
-                    val r = m.invoke(renderer)
-                    if (r is Identifier) return@runCatching r
-                }
+        if (drawEntityPreview(g, entity, xi, yi, si)) return
+        drawFaceFallback(entity, x, y, size)
+    }
+
+    private fun drawEntityPreview(g: Any, entity: LivingEntity, x: Int, y: Int, size: Int): Boolean {
+        return runCatching {
+            val cls = Class.forName("net.minecraft.client.gui.screens.inventory.InventoryScreen")
+            // renderEntityInInventoryFollowsMouse / renderEntityInInventory
+            for (m in cls.methods) {
+                if (!m.name.lowercase().contains("renderentity")) continue
+                if (!java.lang.reflect.Modifier.isStatic(m.modifiers)) continue
+                val n = m.parameterCount
+                try {
+                    // 常见: (GuiGraphics, x1,y1,x2,y2, scale, ..., entity)
+                    if (n >= 7) {
+                        val x1 = x
+                        val y1 = y
+                        val x2 = x + size
+                        val y2 = y + size
+                        val scale = (size * 0.9).toInt().coerceAtLeast(8)
+                        when (n) {
+                            7 -> m.invoke(null, g, x1, y1, x2, y2, scale, entity)
+                            8 -> m.invoke(null, g, x1, y1, x2, y2, scale, 0f, entity)
+                            9 -> m.invoke(null, g, x1, y1, x2, y2, scale, 0f, 0f, entity)
+                            10 -> m.invoke(null, g, x1, y1, x2, y2, scale, 0.0625f, 0f, 0f, entity)
+                            11 -> m.invoke(null, g, x1, y1, x2, y2, scale, 0.0625f, 0f, 0f, entity)
+                            else -> {
+                                // 尝试按参数类型填
+                                val args = Array<Any?>(n) { null }
+                                args[0] = g
+                                // fill ints
+                                var intIdx = 0
+                                val ints = intArrayOf(x1, y1, x2, y2, scale)
+                                for (i in 1 until n) {
+                                    val t = m.parameterTypes[i]
+                                    when {
+                                        t == Int::class.javaPrimitiveType || t == Integer::class.java -> {
+                                            if (intIdx < ints.size) args[i] = ints[intIdx++]
+                                        }
+                                        t == Float::class.javaPrimitiveType || t == java.lang.Float::class.java -> args[i] = 0f
+                                        t.isAssignableFrom(entity.javaClass) -> args[i] = entity
+                                    }
+                                }
+                                m.invoke(null, *args)
+                            }
+                        }
+                        return@runCatching true
+                    }
+                } catch (_: Throwable) {}
             }
-            null
-        }.getOrNull()
+            false
+        }.getOrDefault(false)
+    }
 
-        if (tex != null) {
-            // 许多实体贴图头在左上 8×8（相对 64 图集），仍可能不准 → 再兜底
-            val drew = runCatching {
-                blitSkinFace(tex, xi, yi, si, 8f, 8f)
-                true
-            }.getOrDefault(false)
-            if (drew) return
-        }
-
+    private fun GuiGraphicsExtractor.drawFaceFallback(entity: LivingEntity, x: Float, y: Float, size: Float) {
         val key = entity.type.descriptionId.hashCode()
-        val r = 70 + (key and 0x7F)
-        val g = 70 + ((key shr 7) and 0x7F)
-        val b = 70 + ((key shr 14) and 0x7F)
+        val r = 60 + (key and 0x7F)
+        val g = 60 + ((key shr 7) and 0x7F)
+        val b = 60 + ((key shr 14) and 0x7F)
         drawRoundedRect(
-            x, y, x + size, y + size, size * 0.22f,
-            Color4b(r.coerceIn(40, 220), g.coerceIn(40, 220), b.coerceIn(40, 220), 255),
+            x, y, x + size, y + size, size * 0.2f,
+            Color4b(r.coerceIn(40, 200), g.coerceIn(40, 200), b.coerceIn(40, 200), 255),
         )
-        val ch = (entity.displayName?.string ?: entity.name.string).firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+        val ch = (entity.displayName?.string ?: entity.name.string)
+            .firstOrNull()?.uppercaseChar()?.toString() ?: "?"
         val font = mc.font
         val tw = font.width(ch)
         text(font, ch, (x + (size - tw) / 2f).roundToInt(), (y + (size - 9f) / 2f).roundToInt(), 0xFFFFFFFF.toInt(), false)
