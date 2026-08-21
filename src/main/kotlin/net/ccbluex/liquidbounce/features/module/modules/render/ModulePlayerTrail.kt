@@ -1,7 +1,3 @@
-/*
- * ModulePlayerTrail — 3D 平滑丝带拖尾
- * 适配: AABB + withPositionRelativeToCamera(x,y,z)
- */
 package net.ccbluex.liquidbounce.features.module.modules.render
 
 import net.ccbluex.liquidbounce.config.types.list.Tagged
@@ -10,10 +6,8 @@ import net.ccbluex.liquidbounce.event.handler
 import net.ccbluex.liquidbounce.features.module.ClientModule
 import net.ccbluex.liquidbounce.features.module.ModuleCategories
 import net.ccbluex.liquidbounce.render.drawBox
-import net.ccbluex.liquidbounce.render.drawLineStrip
 import net.ccbluex.liquidbounce.render.engine.type.Color4b
-import net.ccbluex.liquidbounce.render.engine.type.Vec3
-import net.ccbluex.liquidbounce.render.renderEnvironmentForWorld
+import net.ccbluex.liquidbounce.render.renderEnvironment
 import net.ccbluex.liquidbounce.render.withPositionRelativeToCamera
 import net.ccbluex.liquidbounce.utils.client.mc
 import net.minecraft.util.Mth
@@ -143,7 +137,7 @@ object ModulePlayerTrail : ClientModule(
         return Color4b(base.r, base.g, base.b, (base.a * soft).roundToInt().coerceIn(0, 255))
     }
 
-    private fun sideOffset(dx: Double, dy: Double, dz: Double, yawFallback: Double, halfW: Double): Pair<Double, Double> {
+    private fun sideOffset(dx: Double, dy: Double, dz: Double, yawFallback: Double): Pair<Double, Double> {
         val len = sqrt(dx * dx + dy * dy + dz * dz)
         val fx: Double
         val fz: Double
@@ -164,7 +158,7 @@ object ModulePlayerTrail : ClientModule(
             sx /= sl
             sz /= sl
         }
-        return sx * halfW to sz * halfW
+        return sx to sz
     }
 
     @Suppress("unused")
@@ -182,7 +176,7 @@ object ModulePlayerTrail : ClientModule(
         val halfW = ribbonWidth.toDouble() * 0.5
         val halfT = ribbonThickness.toDouble() * 0.5
 
-        renderEnvironmentForWorld(event.matrixStack) {
+        event.renderEnvironment {
             for ((_, q) in trails) {
                 if (q.size < 2) continue
                 val pts = q.toList()
@@ -214,7 +208,7 @@ object ModulePlayerTrail : ClientModule(
                         val mz = (z0 + z1) * 0.5
                         val segLen = hypot(hypot(x1 - x0, z1 - z0), y1 - y0).coerceAtLeast(0.01)
                         val yaw = a.yawRad + (b.yawRad - a.yawRad) * ((t0 + t1) * 0.5)
-                        val (sx, sz) = sideOffset(x1 - x0, y1 - y0, z1 - z0, yaw, 1.0)
+                        val (sx, sz) = sideOffset(x1 - x0, y1 - y0, z1 - z0, yaw)
                         val spreads = 4
                         for (k in -spreads..spreads) {
                             val u = k / spreads.toDouble()
@@ -238,13 +232,6 @@ object ModulePlayerTrail : ClientModule(
                                     noDepthTest = throughWalls,
                                 )
                             }
-                        }
-                        withPositionRelativeToCamera(x0, y0, z0) {
-                            drawLineStrip(
-                                col,
-                                Vec3(0.0, 0.0, 0.0),
-                                Vec3(x1 - x0, y1 - y0, z1 - z0),
-                            )
                         }
                     }
                 }
