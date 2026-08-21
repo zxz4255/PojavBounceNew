@@ -228,12 +228,110 @@ object ModuleSolsticeClickgui : ClientModule(
     }
 
     private fun isGroupValue(v: Value<*>): Boolean = try {
-        v.javaClass.simpleName.contains("Group", true) || v.javaClass.simpleName.contains("Container", true)
+        val n = v.javaClass.simpleName
+        n.contains("ValueGroup", true) || n.contains("ToggleableValueGroup", true)
+            || (n.contains("Group", true) && !n.contains("Choice", true))
     } catch (_: Exception) { false }
+
+    private fun groupTitle(v: Value<*>): String {
+        val raw = try { v.name } catch (_: Exception) { "Group" }
+        return raw.removePrefix("ValueGroup.").removePrefix("Group.").ifBlank { "Group" }
+    }
 
     private fun collectValues(module: ClientModule): List<Value<*>> = try {
         module.collectValuesRecursively().toList()
     } catch (_: Exception) { emptyList() }
+
+    private fun visibleValues(module: ClientModule): List<Value<*>> {
+        val src = collectValues(module)
+        val out = ArrayList<Value<*>>(src.size)
+        var skip = false
+        for (v in src) {
+            if (isGroupValue(v)) {
+                skip = collapsedGroups.contains(v)
+                out.add(v)
+                continue
+            }
+            if (!skip) out.add(v)
+        }
+        return out
+    }
+
+    private fun cycleChoice(v: Value<*>): Boolean {
+        val actual = getActualValue(v) ?: return false
+        if (actual is Enum<*>) {
+            val constants = actual.javaClass.enumConstants?.toList() ?: return false
+            if (constants.isEmpty()) return false
+            val idx = constants.indexOf(actual)
+            trySetValue(v, constants[(idx + 1) % constants.size]!!)
+            return true
+        }
+        fun listFrom(obj: Any?, names: List<String>): List<Any?>? {
+            if (obj == null) return null
+            for (name in names) {
+                val m = obj.javaClass.methods.firstOrNull {
+                    it.parameterCount == 0 && it.name.equals(name, true)
+                } ?: continue
+                val r = runCatching { m.invoke(obj) }.getOrNull() ?: continue
+                when (r) {
+                    is Collection<*> -> return r.toList()
+                    is Array<*> -> return r.toList()
+                }
+            }
+            return null
+        }
+        val choices = listFrom(v, listOf("getChoices", "choices", "getModes", "modes", "getActiveChoices"))
+        if (choices != null && choices.isNotEmpty()) {
+            val idx = choices.indexOf(actual).let { if (it < 0) 0 else it }
+            trySetValue(v, choices[(idx + 1) % choices.size]!!)
+            return true
+        }
+        return false
+    }
+
+    private fun choiceLabel(actual: Any?): String {
+        if (actual == null) return "?"
+        if (actual is Enum<*>) return actual.name
+        runCatching {
+            val m = actual.javaClass.methods.firstOrNull {
+                it.parameterCount == 0 && (
+                    it.name.equals("getName", true)
+                        || it.name.equals("getChoiceName", true)
+                        || it.name.equals("getTag", true)
+                    )
+            }
+            val r = m?.invoke(actual)
+            if (r is String && r.isNotBlank()) return r
+        }
+        return actual.toString().substringAfterLast('.').substringBefore('@').take(18)
+    }
+
+    private fun isChoiceLike(actual: Any?): Boolean {
+        if (actual == null || actual is Boolean || actual is Number) return false
+        if (actual is Enum<*>) return true
+        val n = actual.javaClass.simpleName
+        return n.contains("Choice", true) || n.contains("Mode", true) || n.contains("Named", true)
+    }
+
+    private fun trimToWidth(font: Font, text: String, maxW: Int): String {
+        if (font.width(text) <= maxW) return text
+        var s = text
+        while (s.isNotEmpty() && font.width("$s…") > maxW) s = s.dropLast(1)
+        return if (s.isEmpty()) "…" else "$s…"
+    }
+
+    private fun GuiGraphicsExtractor.drawTriangle(x: Float, y: Float, size: Float, expanded: Boolean, color: Color4b) {
+        if (expanded) {
+            drawQuad(x, y, x + size, y + 1.5f, color)
+            drawQuad(x + 1.5f, y + 1.5f, x + size - 1.5f, y + 3f, color)
+            drawQuad(x + 3f, y + 3f, x + size - 3f, y + 4.5f, color)
+        } else {
+            drawQuad(x, y, x + 1.5f, y + size, color)
+            drawQuad(x + 1.5f, y + 1.2f, x + 3f, y + size - 1.2f, color)
+            drawQuad(x + 3f, y + 2.4f, x + 4.5f, y + size - 2.4f, color)
+        }
+    }
+
 
     /* ============================= 输入隔离 (Screen 图层) ============================= */
 
@@ -604,9 +702,9 @@ object ModuleSolsticeClickgui : ClientModule(
                 }
                 curY += itemHeight
                 if (expandedModule == mod) {
-                    for (v in collectValues(mod)) {
+                    for (v in visibleValues(mod)) {
                         if (my in curY..(curY + itemHeight)) {
-                            if (button == 0) handleValueClick(v, mx, my)
+                            if (button == 0 || (button == 1 && isGroupValue(v))) handleValueClick(v, mx, my, button)
                             return
                         }
                         curY += itemHeight
@@ -616,53 +714,28 @@ object ModuleSolsticeClickgui : ClientModule(
         }
     }
 
-    private fun handleValueClick(v: Value<*>, mx: Float, my: Float) {
-        val actual = getActualValue(v) ?: return
+    private fun handleValueClick(v: Value<*>, mx: Float, my: Float, button: Int = 0) {
+        val actual = getActualValue(v)
         if (isGroupValue(v)) {
-            if (collapsedGroups.contains(v)) collapsedGroups.remove(v) else collapsedGroups.add(v)
+            if (button == 0 || button == 1) {
+                if (collapsedGroups.contains(v)) collapsedGroups.remove(v) else collapsedGroups.add(v)
+            }
             return
         }
-        if (actual is Boolean) {
+        if (actual is Boolean && button == 0) {
             trySetValue(v, !actual)
             return
         }
-        if (actual is Enum<*>) {
-            val constants = actual.javaClass.enumConstants?.toList() ?: emptyList()
-            if (constants.isNotEmpty()) {
-                val idx = constants.indexOfFirst { it.toString() == actual.name }
-                val next = constants[(idx + 1) % constants.size]
-                trySetValue(v, next)
-            }
+        if (button == 0 && cycleChoice(v)) return
+        if (actual is Number && button == 0) {
             return
         }
-        // 滑块
-        if (actual is Number && v is RangedValue<*>) {
-            val min = (v.range.start as? Number)?.toFloat() ?: 0f
-            val max = (v.range.endInclusive as? Number)?.toFloat() ?: 100f
-            val sliderW = 80f
-            val sliderX = panelRightEdgeOf(v) - sliderW
-            val p = ((mx - sliderX) / sliderW).coerceIn(0f, 1f)
-            val newVal = min + (max - min) * p
-            when (actual) {
-                is Float -> trySetValue(v, newVal)
-                is Double -> trySetValue(v, newVal.toDouble())
-                is Int -> trySetValue(v, newVal.toInt())
-                is Long -> trySetValue(v, newVal.toLong())
-            }
-            sliderDrag[v] = newVal
-            return
-        }
-        // 绑键
-        if (v.name.contains("Bind", true)) {
-            listeningBind = if (listeningBind == v) null else v
-            return
-        }
-        // 颜色
-        if (actual.javaClass.simpleName.contains("Color", true)) {
+        if (actual != null && actual.javaClass.simpleName.contains("Color", true) && button == 0) {
             activeColorValue = if (activeColorValue == v) null else v
-            paletteX = (panelRightEdgeOf(v) - 12 * 14f).coerceAtLeast(4f)
-            paletteY = (my + 8f).coerceAtMost((mc.window.guiScaledHeight - 12 * 14f - 4f))
             return
+        }
+        if (v.name.contains("Bind", true) && button == 0) {
+            listeningBind = if (listeningBind == v) null else v
         }
     }
 
@@ -857,7 +930,7 @@ object ModuleSolsticeClickgui : ClientModule(
         val expanded = expandedModule
         for (mod in modules) {
             contentH += itemHeight
-            if (expanded == mod) contentH += collectValues(mod).size * itemHeight
+            if (expanded == mod) contentH += visibleValues(mod).size * itemHeight
         }
         val maxScroll = max(0f, (contentH - (panelMaxHeight - headerHeight)).toFloat())
         panel.targetScroll = panel.targetScroll.coerceIn(0f, maxScroll)
@@ -909,7 +982,7 @@ object ModuleSolsticeClickgui : ClientModule(
 
             // 设置项：模块头滚出视野后仍继续遍历，可见的子项照常绘制
             if (isExpanded) {
-                for (v in collectValues(mod)) {
+                for (v in visibleValues(mod)) {
                     if (rowVisible(curY)) {
                         // 子项文字必须整行在 clip 内，否则只画背景不画字，避免上下溢出
                         val fullText = curY >= clipTop + 1f && curY + itemHeight <= clipBottom - 1f
@@ -956,10 +1029,11 @@ object ModuleSolsticeClickgui : ClientModule(
             val collapsed = collapsedGroups.contains(v)
             ctx.drawQuad(px, y, px + pw, y + itemHeight, Color4b(accent.r, accent.g, accent.b, 18))
             if (drawText) {
+                ctx.drawTriangle(px + 8f, y + itemHeight / 2f - 3f, 7f, expanded = !collapsed, Color4b(220, 220, 220, a))
                 ctx.text(
-                    font, "${if (collapsed) "▶" else "▼"} ${v.name}",
-                    (px + 8f).roundToInt(), (y + 5f).roundToInt(),
-                    Color4b(200, 200, 200, a).argb, textShadow,
+                    font, groupTitle(v),
+                    (px + 20f).roundToInt(), (y + 5f).roundToInt(),
+                    Color4b(210, 210, 210, a).argb, textShadow,
                 )
             }
             return
@@ -987,16 +1061,18 @@ object ModuleSolsticeClickgui : ClientModule(
                 val knobX = if (actual) swX + 16f else swX + 2f
                 ctx.drawRoundedRect(knobX, swY + 2f, knobX + 8f, swY + 8f, 4f, Color4b.WHITE.alpha(a))
             }
-            actual is Enum<*> -> {
-                ctx.text(font, shownLabel, (px + 8f).roundToInt(), (y + 5f).roundToInt(), labelColor.argb, textShadow)
+            actual is Enum<*> || isChoiceLike(actual) -> {
+                val label = trimToWidth(font, shownLabel, (pw * 0.45f).toInt().coerceAtLeast(20))
+                ctx.text(font, label, (px + 8f).roundToInt(), (y + 5f).roundToInt(), labelColor.argb, textShadow)
+                val mode = trimToWidth(font, choiceLabel(actual), (pw * 0.4f).toInt().coerceAtLeast(20))
                 ctx.text(
-                    font, actual.name,
-                    (px + pw - 8f - font.width(actual.name)).roundToInt(), (y + 5f).roundToInt(),
+                    font, mode,
+                    (px + pw - 8f - font.width(mode)).roundToInt(), (y + 5f).roundToInt(),
                     accent.alpha(a).argb, textShadow,
                 )
             }
             actual is Number && v is RangedValue<*> -> {
-                ctx.text(font, shownLabel, (px + 8f).roundToInt(), (y + 3f).roundToInt(), labelColor.argb, textShadow)
+                ctx.text(font, trimToWidth(font, shownLabel, (pw - 90f).toInt().coerceAtLeast(20)), (px + 8f).roundToInt(), (y + 3f).roundToInt(), labelColor.argb, textShadow)
                 val min = (v.range.start as? Number)?.toFloat() ?: 0f
                 val max = (v.range.endInclusive as? Number)?.toFloat() ?: 100f
                 val fv = actual.toFloat()
