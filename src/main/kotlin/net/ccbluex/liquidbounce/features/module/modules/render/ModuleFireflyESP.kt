@@ -1,7 +1,3 @@
-/*
- * ModuleFireflyESP — FireflyESP.java 还原
- * 适配: AABB + withPositionRelativeToCamera(x,y,z) + drawBox
- */
 package net.ccbluex.liquidbounce.features.module.modules.render
 
 import net.ccbluex.liquidbounce.config.types.list.Tagged
@@ -12,7 +8,7 @@ import net.ccbluex.liquidbounce.features.module.ModuleCategories
 import net.ccbluex.liquidbounce.features.module.modules.combat.killaura.KillAuraTargetTracker
 import net.ccbluex.liquidbounce.render.drawBox
 import net.ccbluex.liquidbounce.render.engine.type.Color4b
-import net.ccbluex.liquidbounce.render.renderEnvironmentForWorld
+import net.ccbluex.liquidbounce.render.renderEnvironment
 import net.ccbluex.liquidbounce.render.withPositionRelativeToCamera
 import net.ccbluex.liquidbounce.utils.client.mc
 import net.minecraft.util.Mth
@@ -119,11 +115,9 @@ object ModuleFireflyESP : ClientModule(
 
         val tickDelta = try {
             mc.deltaTracker.getGameTimeDeltaPartialTick(true)
-        } catch (_: Throwable) {
-            1f
-        }
+        } catch (_: Throwable) { 1f }
 
-        renderEnvironmentForWorld(event.matrixStack) {
+        event.renderEnvironment {
             for (target in ents) {
                 val tPosX = Mth.lerp(tickDelta, target.xo.toFloat(), target.x.toFloat()).toDouble()
                 val tPosY = Mth.lerp(tickDelta, target.yo.toFloat(), target.y.toFloat()).toDouble()
