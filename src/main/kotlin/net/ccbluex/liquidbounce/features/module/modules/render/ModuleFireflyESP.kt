@@ -1,12 +1,6 @@
 /*
- * ModuleFireflyESP — 还原 FireflyESP.java + firefly.png 柔光粒子
- *
- * 贴图请放到:
- *   src/main/resources/assets/liquidbounce/textures/esp/firefly.png
- * （可用 artifacts/esp_textures/firefly.png）
- *
- * 原版为 POSITION_TEX_COLOR 的 billboard 四边形；
- * 无自定义 RenderLayer 时用扁盒模拟柔光点，颜色/轨迹公式 1:1。
+ * ModuleFireflyESP — FireflyESP.java 还原
+ * 适配: AABB + withPositionRelativeToCamera(x,y,z) + drawBox
  */
 package net.ccbluex.liquidbounce.features.module.modules.render
 
@@ -16,17 +10,15 @@ import net.ccbluex.liquidbounce.event.handler
 import net.ccbluex.liquidbounce.features.module.ClientModule
 import net.ccbluex.liquidbounce.features.module.ModuleCategories
 import net.ccbluex.liquidbounce.features.module.modules.combat.killaura.KillAuraTargetTracker
-import net.ccbluex.liquidbounce.render.Box
 import net.ccbluex.liquidbounce.render.drawBox
 import net.ccbluex.liquidbounce.render.engine.type.Color4b
 import net.ccbluex.liquidbounce.render.renderEnvironmentForWorld
 import net.ccbluex.liquidbounce.render.withPositionRelativeToCamera
 import net.ccbluex.liquidbounce.utils.client.mc
-import net.minecraft.resources.Identifier
 import net.minecraft.util.Mth
 import net.minecraft.world.entity.LivingEntity
 import net.minecraft.world.entity.player.Player
-import net.minecraft.world.phys.Vec3 as McVec3
+import net.minecraft.world.phys.AABB
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -64,14 +56,6 @@ object ModuleFireflyESP : ClientModule(
     private val throughWalls by boolean("Through Walls", true)
     private val particleScale by float("Particle Scale", 1f, 0.3f..3f)
     private val softGlow by boolean("Soft Glow Layers", true)
-
-    private val texturePath by text("Texture Path", "liquidbounce:textures/esp/firefly.png")
-
-    private fun texId(): Identifier = try {
-        Identifier.parse(texturePath)
-    } catch (_: Throwable) {
-        Identifier.fromNamespaceAndPath("liquidbounce", "textures/esp/firefly.png")
-    }
 
     private fun lerpColor(a: Color4b, b: Color4b, t: Float): Color4b {
         val u = t.coerceIn(0f, 1f)
@@ -132,25 +116,18 @@ object ModuleFireflyESP : ClientModule(
     private val worldHandler = handler<WorldRenderEvent> { event ->
         val ents = targets()
         if (ents.isEmpty()) return@handler
-        runCatching { texId() }
 
         val tickDelta = try {
             mc.deltaTracker.getGameTimeDeltaPartialTick(true)
-        } catch (_: Throwable) { 1f }
+        } catch (_: Throwable) {
+            1f
+        }
 
         renderEnvironmentForWorld(event.matrixStack) {
-            if (throughWalls) {
-                runCatching {
-                    javaClass.methods.firstOrNull {
-                        it.parameterCount == 0 && it.name.contains("Depth", true)
-                    }?.invoke(this)
-                }
-            }
-
             for (target in ents) {
-                val tPosX = Mth.lerp(tickDelta, target.xo, target.x.toFloat()).toDouble()
-                val tPosY = Mth.lerp(tickDelta, target.yo, target.y.toFloat()).toDouble()
-                val tPosZ = Mth.lerp(tickDelta, target.zo, target.z.toFloat()).toDouble()
+                val tPosX = Mth.lerp(tickDelta, target.xo.toFloat(), target.x.toFloat()).toDouble()
+                val tPosY = Mth.lerp(tickDelta, target.yo.toFloat(), target.y.toFloat()).toDouble()
+                val tPosZ = Mth.lerp(tickDelta, target.zo.toFloat(), target.z.toFloat()).toDouble()
                 val iAge = (target.tickCount - 1).toFloat() + tickDelta
                 val bbW = target.bbWidth.toDouble()
                 val bbH = target.bbHeight.toDouble()
@@ -171,26 +148,22 @@ object ModuleFireflyESP : ClientModule(
                         val col = resolveColor(iAge, i, j, len)
                         if (col.a < 3) continue
 
-                        // firefly.png 为中心亮、边缘软；用多层扁盒模拟
                         val base = max(0.24f * offset, 0.2f) * 0.5f * particleScale
                         val layers = if (softGlow) 3 else 1
                         for (L in 0 until layers) {
                             val t = L / layers.toFloat()
-                            val s = base * (1f + t * 1.1f)
+                            val s = (base * (1f + t * 1.1f)).toDouble()
                             val c = Color4b(
                                 col.r, col.g, col.b,
                                 (col.a * (1f - t * 0.7f)).roundToInt().coerceIn(0, 255),
                             )
                             if (c.a < 3) continue
-                            val sd = s.toDouble()
-                            runCatching {
-                                withPositionRelativeToCamera(McVec3(px, py, pz)) {
-                                    drawBox(Box(-sd, -sd * 0.35, -sd, sd, sd * 0.35, sd), c)
-                                }
-                            }.recoverCatching {
+                            withPositionRelativeToCamera(px, py, pz) {
                                 drawBox(
-                                    Box(px - sd, py - sd * 0.35, pz - sd, px + sd, py + sd * 0.35, pz + sd),
-                                    c,
+                                    AABB(-s, -s * 0.35, -s, s, s * 0.35, s),
+                                    faceColor = c,
+                                    outlineColor = null,
+                                    noDepthTest = throughWalls,
                                 )
                             }
                         }
