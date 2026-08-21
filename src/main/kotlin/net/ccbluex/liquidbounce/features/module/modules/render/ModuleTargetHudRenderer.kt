@@ -99,22 +99,42 @@ object ModuleTargetHudRenderer : ClientModule(
     /* ===================== 头像（正确 64x64 皮肤 UV） ===================== */
 
     private fun resolveSkinTexture(player: AbstractClientPlayer): Identifier? {
+        // 全程反射，避免 skin.texture() 在部分映射中不存在
         runCatching {
-            val skin = player.skin
-            runCatching { skin.texture() as? Identifier }.getOrNull()?.let { return it }
-            runCatching {
-                val body = skin.javaClass.methods.firstOrNull {
-                    it.parameterCount == 0 && it.name.equals("body", true)
-                }?.invoke(skin)
-                body?.javaClass?.methods?.firstOrNull {
-                    it.parameterCount == 0 && it.name.lowercase().contains("texture")
-                }?.invoke(body) as? Identifier
-            }.getOrNull()?.let { return it }
-            for (f in skin.javaClass.declaredFields) {
-                if (Identifier::class.java.isAssignableFrom(f.type)) {
-                    f.isAccessible = true
-                    (f.get(skin) as? Identifier)?.let { return it }
+            val skin = player.javaClass.methods.firstOrNull {
+                it.parameterCount == 0 && (it.name == "getSkin" || it.name == "skin")
+            }?.invoke(player) ?: return@runCatching
+            // PlayerSkin.texture() / texture / body().texturePath()
+            for (m in skin.javaClass.methods) {
+                if (m.parameterCount != 0) continue
+                val n = m.name.lowercase()
+                if (n == "texture" || n == "gettexture" || n.contains("texturepath") || n.contains("texturelocation")) {
+                    val r = runCatching { m.invoke(skin) }.getOrNull()
+                    when (r) {
+                        is Identifier -> return r
+                        is String -> return Identifier.parse(r)
+                    }
                 }
+            }
+            // body layer
+            val body = skin.javaClass.methods.firstOrNull {
+                it.parameterCount == 0 && it.name.equals("body", true)
+            }?.invoke(skin)
+            if (body != null) {
+                for (m in body.javaClass.methods) {
+                    if (m.parameterCount != 0) continue
+                    if (!m.name.lowercase().contains("texture")) continue
+                    val r = runCatching { m.invoke(body) }.getOrNull()
+                    when (r) {
+                        is Identifier -> return r
+                        is String -> return Identifier.parse(r)
+                    }
+                }
+            }
+            for (f in skin.javaClass.declaredFields) {
+                f.isAccessible = true
+                val v = f.get(skin)
+                if (v is Identifier) return v
             }
         }
         runCatching {
@@ -122,6 +142,7 @@ object ModuleTargetHudRenderer : ClientModule(
                 it.parameterCount == 0 && (
                     it.name.equals("getSkinTextureLocation", true)
                         || it.name.equals("getSkinLocation", true)
+                        || it.name == "locationSkin"
                     )
             }?.invoke(player) as? Identifier
         }.getOrNull()?.let { return it }
