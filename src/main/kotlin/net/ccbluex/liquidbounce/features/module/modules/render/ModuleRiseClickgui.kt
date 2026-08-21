@@ -159,20 +159,44 @@ object ModuleRiseClickgui : ClientModule(
     }
 
     private fun getActual(v: Value<*>): Any? {
-        var o: Any? = try { v.get() } catch (_: Exception) { null }
-        var d = 0
-        while (o is Value<*> && d < 5) {
-            o = try { o.get() } catch (_: Exception) { null }
-            d++
+        var obj: Any? = try { v.get() } catch (_: Exception) {
+            runCatching { v.javaClass.getMethod("getValue").invoke(v) }.getOrNull()
         }
-        return o
+        var depth = 0
+        while (obj is Value<*> && depth < 6) {
+            val cur = obj as Value<*>
+            obj = try { cur.get() } catch (_: Exception) {
+                runCatching { cur.javaClass.getMethod("getValue").invoke(cur) }.getOrNull()
+            }
+            depth++
+        }
+        return obj
     }
 
     private fun trySet(v: Value<*>, value: Any) {
-        try {
-            v.javaClass.methods.firstOrNull { it.name == "set" && it.parameterCount == 1 }
-                ?.invoke(v, value)
-        } catch (_: Exception) {}
+        for (m in v.javaClass.methods) {
+            if (m.parameterCount != 1) continue
+            val n = m.name
+            if (n != "set" && n != "setByString" && n != "setValue" && n != "setActiveChoice" && n != "setCurrent") continue
+            try {
+                if (n == "setByString") m.invoke(v, value.toString()) else m.invoke(v, value)
+                return
+            } catch (_: Exception) {}
+        }
+        if (value is Boolean) {
+            runCatching { v.javaClass.methods.firstOrNull { it.name == "toggle" && it.parameterCount == 0 }?.invoke(v) }
+        }
+    }
+
+    private fun displayName(v: Value<*>): String {
+        var raw = try { v.name } catch (_: Exception) { "" }
+        if (raw.isBlank()) raw = "Setting"
+        raw = raw.substringAfterLast('/').substringAfterLast('.')
+        if ('[' in raw) raw = raw.substringBefore('[').ifBlank { raw.substringAfter('[').substringBefore(']') }
+        if (raw.equals("Value", true) || raw.isBlank()) {
+            raw = v.javaClass.simpleName.removeSuffix("Value").removeSuffix("Setting").ifBlank { "Setting" }
+        }
+        return raw.take(28)
     }
 
     /** 解析数值范围：优先 RangedValue，否则反射 min/max */
@@ -548,68 +572,98 @@ object ModuleRiseClickgui : ClientModule(
     }
 
     
+    private fun listFrom(obj: Any?, names: List<String>): List<Any?>? {
+        if (obj == null) return null
+        for (name in names) {
+            val m = obj.javaClass.methods.firstOrNull {
+                it.parameterCount == 0 && it.name.equals(name, true)
+            } ?: continue
+            val r = runCatching { m.invoke(obj) }.getOrNull() ?: continue
+            when (r) {
+                is Collection<*> -> if (r.isNotEmpty()) return r.toList()
+                is Array<*> -> if (r.isNotEmpty()) return r.toList()
+            }
+        }
+        return null
+    }
+
     private fun cycleChoice(v: Value<*>): Boolean {
-        val actual = getActual(v) ?: return false
+        val actual = getActual(v)
         if (actual is Enum<*>) {
             val constants = actual.javaClass.enumConstants?.toList() ?: return false
             if (constants.isEmpty()) return false
-            val idx = constants.indexOf(actual)
+            val idx = constants.indexOf(actual).let { if (it < 0) 0 else it }
             trySet(v, constants[(idx + 1) % constants.size]!!)
             return true
         }
-        val list = runCatching {
-            val m = v.javaClass.methods.firstOrNull {
-                it.parameterCount == 0 && (
-                    it.name.equals("getChoices", true) || it.name.equals("choices", true)
-                        || it.name.equals("getModes", true) || it.name.equals("modes", true)
-                    )
-            }?.invoke(v)
-            when (m) {
-                is Collection<*> -> m.toList()
-                is Array<*> -> m.toList()
-                else -> null
-            }
-        }.getOrNull()
-        if (list != null && list.isNotEmpty()) {
-            val idx = list.indexOf(actual).let { if (it < 0) 0 else it }
-            trySet(v, list[(idx + 1) % list.size]!!)
+        val names = listOf("getChoices", "choices", "getModes", "modes", "getActiveChoices", "getValues", "values", "entries")
+        val choices = listFrom(v, names) ?: listFrom(actual, names)
+        if (choices != null && choices.isNotEmpty()) {
+            val idx = choices.indexOf(actual).let { if (it < 0) 0 else it }
+            trySet(v, choices[(idx + 1) % choices.size]!!)
             return true
         }
         return false
     }
 
     private fun choiceLabel(actual: Any?): String {
-        if (actual == null) return "?"
+        if (actual == null) return "-"
+        if (actual is Boolean) return if (actual) "On" else "Off"
         if (actual is Enum<*>) return actual.name
-        runCatching {
-            val m = actual.javaClass.methods.firstOrNull {
-                it.parameterCount == 0 && (
-                    it.name.equals("getName", true) || it.name.equals("getChoiceName", true) || it.name.equals("getTag", true)
-                    )
-            }?.invoke(actual)
-            if (m is String && m.isNotBlank()) return m
+        if (actual is Number) {
+            val d = actual.toDouble()
+            return if (d == d.toLong().toDouble()) actual.toLong().toString()
+            else String.format("%.2f", d)
         }
-        return actual.toString().substringAfterLast('.').substringBefore('@').take(18)
+        runCatching {
+            for (name in listOf("getName", "getChoiceName", "getTag", "getTitle", "getDisplayName")) {
+                val m = actual.javaClass.methods.firstOrNull {
+                    it.parameterCount == 0 && it.name.equals(name, true)
+                } ?: continue
+                val r = m.invoke(actual)
+                if (r is String && r.isNotBlank() && !r.contains("Value[")) {
+                    return r.substringAfterLast('.').take(18)
+                }
+            }
+        }
+        var s = actual.toString()
+        if ('[' in s) s = s.substringBefore('[')
+        s = s.substringAfterLast('.').substringBefore('@').substringBefore('$')
+        return s.ifBlank { "-" }.take(18)
     }
 
     private fun handleSettingClick(v: Value<*>, x: Float, w: Float, button: Int) {
-        val actual = getActual(v) ?: return
+        val actual = getActual(v)
+        if (button == 1) {
+            // 右键展开枚举列表
+            if (actual is Enum<*> || cycleChoice(v).let { false }) {
+                enumOpen[v] = !(enumOpen[v] ?: false)
+            } else {
+                enumOpen[v] = !(enumOpen[v] ?: false)
+            }
+            return
+        }
+        if (button != 0) return
         when {
-            actual is Boolean && button == 0 -> trySet(v, !actual)
-            button == 0 && cycleChoice(v) -> {}
-            actual is Enum<*> && button == 0 -> enumOpen[v] = !(enumOpen[v] ?: false)
-            actual is Number && button == 0 -> {
+            actual is Boolean -> trySet(v, !actual)
+            cycleChoice(v) -> {}
+            actual is Enum<*> -> enumOpen[v] = !(enumOpen[v] ?: false)
+            actual is Number -> {
                 val range = rangeOf(v)
                 if (range != null) {
                     sliderDrag = v
                     applySliderValue(v, x + w * 0.38f, x + w - 10f)
                 }
             }
-            actual != null && actual.javaClass.simpleName.contains("Color", true) && button == 0 -> {
+            actual != null && actual.javaClass.simpleName.contains("Color", true) -> {
                 colorEdit = if (colorEdit == v) null else v
                 colorAlpha = readColor4b(actual).a
                 paletteX = (x + w - 6 * 14f - 8f).coerceAtLeast(4f)
                 paletteY = (mouseY + 8f)
+            }
+            else -> {
+                // 尝试当 choice 打开列表
+                enumOpen[v] = !(enumOpen[v] ?: false)
             }
         }
     }
@@ -868,7 +922,7 @@ object ModuleRiseClickgui : ClientModule(
 
         when {
             actual is Boolean -> {
-                ctx.text(font, v.name, (x + 8f).roundToInt(), ty.roundToInt(), colSecondaryText.alpha(a).argb, false)
+                ctx.text(font, displayName(v), (x + 8f).roundToInt(), ty.roundToInt(), colSecondaryText.alpha(a).argb, false)
                 val bx = x + w - 28f
                 ctx.drawRoundedRect(bx, y + 4f, bx + 20f, y + settingRowH - 4f, 4f,
                     if (actual) colAccent.alpha(a) else Color4b(60, 60, 70, a))
@@ -876,7 +930,7 @@ object ModuleRiseClickgui : ClientModule(
                 ctx.drawRoundedRect(kx, y + 5f, kx + 8f, y + settingRowH - 5f, 3f, Color4b.WHITE.alpha(a))
             }
             actual is Enum<*> -> {
-                ctx.text(font, v.name, (x + 8f).roundToInt(), ty.roundToInt(), colSecondaryText.alpha(a).argb, false)
+                ctx.text(font, displayName(v), (x + 8f).roundToInt(), ty.roundToInt(), colSecondaryText.alpha(a).argb, false)
                 val mode = choiceLabel(actual)
                 ctx.text(
                     font, mode,
@@ -886,7 +940,7 @@ object ModuleRiseClickgui : ClientModule(
             }
             actual is Number -> {
                 val range = rangeOf(v)
-                ctx.text(font, v.name, (x + 8f).roundToInt(), (y + 2f).roundToInt(), colSecondaryText.alpha(a).argb, false)
+                ctx.text(font, displayName(v), (x + 8f).roundToInt(), (y + 2f).roundToInt(), colSecondaryText.alpha(a).argb, false)
                 val fv = actual.toFloat()
                 if (range != null) {
                     val (minV, maxV) = range
@@ -913,12 +967,12 @@ object ModuleRiseClickgui : ClientModule(
                 }
             }
             actual != null && actual.javaClass.simpleName.contains("Color", true) -> {
-                ctx.text(font, v.name, (x + 8f).roundToInt(), ty.roundToInt(), colSecondaryText.alpha(a).argb, false)
+                ctx.text(font, displayName(v), (x + 8f).roundToInt(), ty.roundToInt(), colSecondaryText.alpha(a).argb, false)
                 val col = readColor4b(actual)
                 ctx.drawRoundedRect(x + w - 22f, y + 3f, x + w - 6f, y + settingRowH - 3f, 3f, col.alpha(a))
             }
             else -> {
-                ctx.text(font, v.name, (x + 8f).roundToInt(), ty.roundToInt(), colSecondaryText.alpha(a).argb, false)
+                ctx.text(font, displayName(v), (x + 8f).roundToInt(), ty.roundToInt(), colSecondaryText.alpha(a).argb, false)
                 val mode = choiceLabel(actual)
                 ctx.text(
                     font, mode,
