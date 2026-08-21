@@ -237,9 +237,6 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModuleArmorHudRen
 import net.ccbluex.liquidbounce.features.module.modules.render.ModulePotionStatusRenderer
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleTargetHudRenderer
 import net.ccbluex.liquidbounce.features.module.modules.render.ModulePlayerTrail
-import net.ccbluex.liquidbounce.features.module.modules.render.ModuleCaptureMarkESP
-import net.ccbluex.liquidbounce.features.module.modules.render.ModuleFireflyESP
-import net.ccbluex.liquidbounce.features.module.modules.render.ModuleCombatVisuals
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSmoothCamera
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleStorageESP
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleTNTTimer
@@ -687,9 +684,6 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModulePotionStatusRenderer,
             ModuleTargetHudRenderer,
             ModulePlayerTrail,
-            ModuleFireflyESP,
-            ModuleCaptureMarkESP,
-            ModuleCombatVisuals,
             ModuleNoBob,
             ModuleNoFov,
             ModuleNoHurtCam,
