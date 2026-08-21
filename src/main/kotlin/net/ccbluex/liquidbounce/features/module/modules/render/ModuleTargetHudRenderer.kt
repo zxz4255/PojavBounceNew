@@ -332,7 +332,7 @@ object ModuleTargetHudRenderer : ClientModule(
         val av = AVATAR * s
         val ax = x + PAD * s
         val ay = y + (h - av) / 2f
-        ctx.drawEntityFace(t, ax, ay)
+        ctx.drawEntityFace(t, ax, ay, av)
 
         val tx = ax + av + PAD * s
         val name = try { t.name.string } catch (_: Throwable) { "?" }
@@ -396,7 +396,7 @@ object ModuleTargetHudRenderer : ClientModule(
         val av = 32f * s * anim
         val ax = x + 10f * s
         val ay = y + (h - av) / 2f
-        ctx.drawEntityFace(t, ax, ay)
+        ctx.drawEntityFace(t, ax, ay, av)
 
         val name = try { t.name.string } catch (_: Throwable) { "?" }
         val tx = ax + av + 10f * s
