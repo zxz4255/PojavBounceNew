@@ -1,6 +1,6 @@
 /*
- * ModulePlayerTrail — 世界空间平滑丝带拖尾 (Ribbon)
- * LiquidBounce Nextgen 0.39 · 原生 Render · 无 Web
+ * ModulePlayerTrail — 3D 平滑丝带拖尾
+ * 适配: AABB + withPositionRelativeToCamera(x,y,z)
  */
 package net.ccbluex.liquidbounce.features.module.modules.render
 
@@ -9,7 +9,6 @@ import net.ccbluex.liquidbounce.event.events.WorldRenderEvent
 import net.ccbluex.liquidbounce.event.handler
 import net.ccbluex.liquidbounce.features.module.ClientModule
 import net.ccbluex.liquidbounce.features.module.ModuleCategories
-import net.ccbluex.liquidbounce.render.Box
 import net.ccbluex.liquidbounce.render.drawBox
 import net.ccbluex.liquidbounce.render.drawLineStrip
 import net.ccbluex.liquidbounce.render.engine.type.Color4b
@@ -19,7 +18,7 @@ import net.ccbluex.liquidbounce.render.withPositionRelativeToCamera
 import net.ccbluex.liquidbounce.utils.client.mc
 import net.minecraft.util.Mth
 import net.minecraft.world.entity.player.Player
-import net.minecraft.world.phys.Vec3 as McVec3
+import net.minecraft.world.phys.AABB
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -38,17 +37,12 @@ object ModulePlayerTrail : ClientModule(
     }
 
     private val targets by enumChoice("Targets", TargetMode.SELF)
-
     private val maxPoints by int("Max Points", 72, 12..256)
     private val sampleDist by float("Sample Distance", 0.12f, 0.03f..1.0f)
     private val lifetimeMs by int("Lifetime Ms", 1400, 300..8000)
     private val heightOffset by float("Height Offset", 0.06f, -0.5f..1.5f)
-
-    /** 丝带半宽（米） */
     private val ribbonWidth by float("Ribbon Width", 0.28f, 0.05f..1.2f)
-    /** 丝带厚度（竖向，越小越扁） */
     private val ribbonThickness by float("Ribbon Thickness", 0.03f, 0.005f..0.2f)
-    /** 每段细分，越大越圆滑 */
     private val segmentSteps by int("Segment Steps", 4, 1..10)
 
     private val colorStart by color("Color Start", Color4b(90, 230, 255, 230))
@@ -59,15 +53,10 @@ object ModulePlayerTrail : ClientModule(
     private val onlyWhenMoving by boolean("Only When Moving", true)
     private val minSpeed by float("Min Speed", 0.03f, 0f..0.5f)
     private val throughWalls by boolean("Through Walls", true)
-    private val doubleSided by boolean("Double Sided", true)
 
     private data class TrailPoint(
-        val x: Double,
-        val y: Double,
-        val z: Double,
-        val time: Long,
-        /** 水平朝向（采样时的 yaw），用于丝带侧向 */
-        val yawRad: Double,
+        val x: Double, val y: Double, val z: Double,
+        val time: Long, val yawRad: Double,
     )
 
     private val trails = HashMap<Int, ArrayDeque<TrailPoint>>()
@@ -150,50 +139,32 @@ object ModulePlayerTrail : ClientModule(
         } else {
             lerpColor(colorStart, colorEnd, ageT)
         }
-        // 尾部更透明，头端更实 → 平滑消散
-        val fade = (1f - ageT)
-        val soft = fade * fade // ease
-        val a = (base.a * soft).roundToInt().coerceIn(0, 255)
-        return Color4b(base.r, base.g, base.b, a)
+        val soft = (1f - ageT).let { it * it }
+        return Color4b(base.r, base.g, base.b, (base.a * soft).roundToInt().coerceIn(0, 255))
     }
 
-    /** 路径切线 × 上方向 → 侧向，得到丝带左右偏移 */
-    private fun sideOffset(
-        dx: Double, dy: Double, dz: Double,
-        yawFallback: Double,
-        halfW: Double,
-    ): Triple<Double, Double, Double> {
+    private fun sideOffset(dx: Double, dy: Double, dz: Double, yawFallback: Double, halfW: Double): Pair<Double, Double> {
         val len = sqrt(dx * dx + dy * dy + dz * dz)
         val fx: Double
-        val fy: Double
         val fz: Double
         if (len > 1e-6) {
             fx = dx / len
-            fy = dy / len
             fz = dz / len
         } else {
             fx = -kotlin.math.sin(yawFallback)
-            fy = 0.0
             fz = kotlin.math.cos(yawFallback)
         }
-        // up × forward = side (水平为主)
-        var sx = fy * 0.0 - 1.0 * fz
-        var sy = 1.0 * fx - fx * 0.0
-        var sz = fx * 0.0 - fy * 0.0
-        // up=(0,1,0) cross f = (fz, 0, -fx) wait
-        sx = fz
-        sy = 0.0
-        sz = -fx
-        val sl = sqrt(sx * sx + sy * sy + sz * sz)
+        var sx = fz
+        var sz = -fx
+        val sl = sqrt(sx * sx + sz * sz)
         if (sl < 1e-6) {
             sx = kotlin.math.cos(yawFallback)
-            sy = 0.0
             sz = kotlin.math.sin(yawFallback)
         } else {
             sx /= sl
             sz /= sl
         }
-        return Triple(sx * halfW, sy * halfW, sz * halfW)
+        return sx * halfW to sz * halfW
     }
 
     @Suppress("unused")
@@ -212,19 +183,10 @@ object ModulePlayerTrail : ClientModule(
         val halfT = ribbonThickness.toDouble() * 0.5
 
         renderEnvironmentForWorld(event.matrixStack) {
-            if (throughWalls) {
-                runCatching {
-                    javaClass.methods.firstOrNull {
-                        it.parameterCount == 0 && it.name.contains("Depth", true)
-                    }?.invoke(this)
-                }
-            }
-
             for ((_, q) in trails) {
                 if (q.size < 2) continue
                 val pts = q.toList()
                 val n = pts.size
-
                 for (i in 0 until n - 1) {
                     val a = pts[i]
                     val b = pts[i + 1]
@@ -232,7 +194,6 @@ object ModulePlayerTrail : ClientModule(
                     val col = colorAt(age, i / max(1f, n - 1f))
                     if (col.a < 4) continue
 
-                    // 内联丝带段（不依赖 WorldEnvDraw）
                     val dx = b.x - a.x
                     val dy = b.y - a.y
                     val dz = b.z - a.z
@@ -253,7 +214,7 @@ object ModulePlayerTrail : ClientModule(
                         val mz = (z0 + z1) * 0.5
                         val segLen = hypot(hypot(x1 - x0, z1 - z0), y1 - y0).coerceAtLeast(0.01)
                         val yaw = a.yawRad + (b.yawRad - a.yawRad) * ((t0 + t1) * 0.5)
-                        val (sx, _, sz) = sideOffset(x1 - x0, y1 - y0, z1 - z0, yaw, 1.0)
+                        val (sx, sz) = sideOffset(x1 - x0, y1 - y0, z1 - z0, yaw, 1.0)
                         val spreads = 4
                         for (k in -spreads..spreads) {
                             val u = k / spreads.toDouble()
@@ -266,35 +227,24 @@ object ModulePlayerTrail : ClientModule(
                             )
                             if (c.a < 3) continue
                             val halfF = segLen * 0.52
-                            val center = McVec3(mx + ox, my, mz + oz)
-                            runCatching {
-                                withPositionRelativeToCamera(center) {
-                                    drawBox(
-                                        Box(
-                                            -halfF * 0.4, -halfT, -halfF * 0.4,
-                                            halfF * 0.4, halfT, halfF * 0.4,
-                                        ),
-                                        c,
-                                    )
-                                }
-                            }.recoverCatching {
+                            withPositionRelativeToCamera(mx + ox, my, mz + oz) {
                                 drawBox(
-                                    Box(
-                                        mx + ox - halfF * 0.4, my - halfT, mz + oz - halfF * 0.4,
-                                        mx + ox + halfF * 0.4, my + halfT, mz + oz + halfF * 0.4,
+                                    AABB(
+                                        -halfF * 0.4, -halfT, -halfF * 0.4,
+                                        halfF * 0.4, halfT, halfF * 0.4,
                                     ),
-                                    c,
+                                    faceColor = c,
+                                    outlineColor = null,
+                                    noDepthTest = throughWalls,
                                 )
                             }
                         }
-                        runCatching {
-                            withPositionRelativeToCamera(McVec3(x0, y0, z0)) {
-                                drawLineStrip(
-                                    col,
-                                    Vec3(0.0, 0.0, 0.0),
-                                    Vec3(x1 - x0, y1 - y0, z1 - z0),
-                                )
-                            }
+                        withPositionRelativeToCamera(x0, y0, z0) {
+                            drawLineStrip(
+                                col,
+                                Vec3(0.0, 0.0, 0.0),
+                                Vec3(x1 - x0, y1 - y0, z1 - z0),
+                            )
                         }
                     }
                 }
