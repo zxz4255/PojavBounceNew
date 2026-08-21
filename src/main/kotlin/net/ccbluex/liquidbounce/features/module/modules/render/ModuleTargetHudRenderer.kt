@@ -93,27 +93,148 @@ object ModuleTargetHudRenderer : ClientModule(
         return null
     }
 
-    private fun playerSkin(player: AbstractClientPlayer): Identifier? {
+
+    /* ===================== 头像（多签名兼容，避免 UV 乱线） ===================== */
+
+    private fun playerSkinId(player: AbstractClientPlayer): Identifier {
         runCatching { player.skin.body().texturePath() }.getOrNull()?.let { return it }
+        runCatching {
+            val skin = player.skin
+            for (m in skin.javaClass.methods) {
+                if (m.parameterCount != 0) continue
+                val n = m.name.lowercase()
+                if (!n.contains("texture") && n != "body") continue
+                val r = m.invoke(skin) ?: continue
+                if (r is Identifier) return r
+                val tp = r.javaClass.methods.firstOrNull {
+                    it.parameterCount == 0 && it.name.lowercase().contains("texture")
+                }?.invoke(r)
+                if (tp is Identifier) return tp
+            }
+            null
+        }.getOrNull()?.let { return it }
         return Identifier.withDefaultNamespace("textures/entity/player/wide/steve.png")
     }
 
-    private fun GuiGraphicsExtractor.drawHead(entity: LivingEntity, x: Float, y: Float, size: Float, alpha: Float) {
-        val x0 = x.roundToInt()
-        val y0 = y.roundToInt()
-        val x1 = (x + size).roundToInt()
-        val y1 = (y + size).roundToInt()
+
+    /**
+     * 按「像素 UV 优先」尝试多种 blit，避免归一化 UV 被当成像素导致花屏乱线。
+     * 标准 64×64 皮肤: 脸 (8,8) 尺寸 8；帽 (40,8) 尺寸 8。
+     */
+    private fun GuiGraphicsExtractor.blitSkinFace(
+        texture: Identifier,
+        x: Int,
+        y: Int,
+        size: Int,
+        uPx: Float,
+        vPx: Float,
+    ) {
+        if (size <= 0) return
+        val x1 = x + size
+        val y1 = y + size
+        val region = 8f
+        val tex = 64
+
+        // A) 反射: blit(Identifier, x, y, u, v, width, height, textureWidth, textureHeight)
+        for (m in javaClass.methods) {
+            if (!m.name.equals("blit", true)) continue
+            val pts = m.parameterTypes
+            try {
+                if (pts.size == 9
+                    && (pts[0] == Identifier::class.java || pts[0].name.endsWith("Identifier"))
+                    && pts[1] == Int::class.javaPrimitiveType
+                ) {
+                    m.invoke(this, texture, x, y, uPx, vPx, size, size, tex, tex)
+                    return
+                }
+                // blit(id, x, y, z, u, v, w, h) 等
+                if (pts.size == 8 && pts[0] == Identifier::class.java) {
+                    m.invoke(this, texture, x, y, 0, uPx, vPx, size, size)
+                    return
+                }
+            } catch (_: Throwable) {
+            }
+        }
+
+        // B) 本 fork 常见: (texture, x0,y0,x1,y1, u0,v0,u1,v1) 归一化
+        val okB = runCatching {
+            blit(
+                texture, x, y, x1, y1,
+                uPx / 64f, vPx / 64f,
+                (uPx + region) / 64f, (vPx + region) / 64f,
+            )
+        }.isSuccess
+        if (okB) return
+
+        // C) (texture, x0,y0,x1,y1, u,v,uw,vh) 归一化
+        val okC = runCatching {
+            blit(texture, x, y, x1, y1, uPx / 64f, vPx / 64f, region / 64f, region / 64f)
+        }.isSuccess
+        if (okC) return
+
+        // D) 像素值直接塞进四 float（少数错误映射的 fork）
+        runCatching {
+            blit(texture, x, y, x1, y1, uPx, vPx, region, region)
+        }
+    }
+
+    private fun GuiGraphicsExtractor.drawEntityFace(
+        entity: LivingEntity,
+        x: Float,
+        y: Float,
+        size: Float,
+    ) {
+        val xi = x.roundToInt()
+        val yi = y.roundToInt()
+        val si = size.roundToInt().coerceAtLeast(1)
+
         if (entity is AbstractClientPlayer) {
-            val tex = playerSkin(entity) ?: return
-            runCatching { blit(tex, x0, y0, x1, y1, 8f / 64f, 8f / 64f, 8f / 64f, 8f / 64f) }
-            runCatching { blit(tex, x0, y0, x1, y1, 40f / 64f, 8f / 64f, 8f / 64f, 8f / 64f) }
-        } else {
-            drawRoundedRect(x, y, x + size, y + size, size * 0.2f, Color4b(70, 70, 78, (200 * alpha).roundToInt()))
+            val tex = playerSkinId(entity)
+            // 正面脸
+            blitSkinFace(tex, xi, yi, si, 8f, 8f)
+            // 帽子层（半透明叠不上就再画一次）
+            runCatching { blitSkinFace(tex, xi, yi, si, 40f, 8f) }
+            return
         }
-        if (hurtFlash && entity.hurtTime > 0) {
-            val a = ((entity.hurtTime / 10f) * 90 * alpha).roundToInt().coerceIn(0, 120)
-            drawQuad(x, y, x + size, y + size, Color4b(255, 40, 40, a))
+
+        // 生物：不用 64 皮肤 UV（会花屏）。尝试实体贴图左上，失败则色块+首字
+        val tex = runCatching {
+            val renderer = mc.entityRenderDispatcher.getRenderer(entity) ?: return@runCatching null
+            for (m in renderer.javaClass.methods) {
+                if (!m.name.lowercase().contains("texture")) continue
+                if (m.parameterCount == 1) {
+                    val r = m.invoke(renderer, entity)
+                    if (r is Identifier) return@runCatching r
+                }
+                if (m.parameterCount == 0) {
+                    val r = m.invoke(renderer)
+                    if (r is Identifier) return@runCatching r
+                }
+            }
+            null
+        }.getOrNull()
+
+        if (tex != null) {
+            // 许多实体贴图头在左上 8×8（相对 64 图集），仍可能不准 → 再兜底
+            val drew = runCatching {
+                blitSkinFace(tex, xi, yi, si, 8f, 8f)
+                true
+            }.getOrDefault(false)
+            if (drew) return
         }
+
+        val key = entity.type.descriptionId.hashCode()
+        val r = 70 + (key and 0x7F)
+        val g = 70 + ((key shr 7) and 0x7F)
+        val b = 70 + ((key shr 14) and 0x7F)
+        drawRoundedRect(
+            x, y, x + size, y + size, size * 0.22f,
+            Color4b(r.coerceIn(40, 220), g.coerceIn(40, 220), b.coerceIn(40, 220), 255),
+        )
+        val ch = (entity.displayName?.string ?: entity.name.string).firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+        val font = mc.font
+        val tw = font.width(ch)
+        text(font, ch, (x + (size - tw) / 2f).roundToInt(), (y + (size - 9f) / 2f).roundToInt(), 0xFFFFFFFF.toInt(), false)
     }
 
     private fun healthColor(ratio: Float, a: Float): Color4b {
@@ -211,7 +332,7 @@ object ModuleTargetHudRenderer : ClientModule(
         val av = AVATAR * s
         val ax = x + PAD * s
         val ay = y + (h - av) / 2f
-        ctx.drawHead(t, ax, ay, av, a)
+        ctx.drawEntityFace(t, ax, ay)
 
         val tx = ax + av + PAD * s
         val name = try { t.name.string } catch (_: Throwable) { "?" }
@@ -275,7 +396,7 @@ object ModuleTargetHudRenderer : ClientModule(
         val av = 32f * s * anim
         val ax = x + 10f * s
         val ay = y + (h - av) / 2f
-        ctx.drawHead(t, ax, ay, av, a)
+        ctx.drawEntityFace(t, ax, ay)
 
         val name = try { t.name.string } catch (_: Throwable) { "?" }
         val tx = ax + av + 10f * s
