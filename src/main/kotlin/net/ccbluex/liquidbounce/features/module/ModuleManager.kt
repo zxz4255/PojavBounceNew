@@ -223,7 +223,6 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModuleProtectionZ
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleQuickPerspectiveSwap
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleRadar
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleRotations
-import net.ccbluex.liquidbounce.features.module.modules.render.ModuleWatermark
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSilentHotbar
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSkinChanger
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeArraylist
@@ -237,6 +236,9 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModuleDynamicIsla
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleArmorHudRenderer
 import net.ccbluex.liquidbounce.features.module.modules.render.ModulePotionStatusRenderer
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleTargetHudRenderer
+import net.ccbluex.liquidbounce.features.module.modules.render.ModulePlayerTrail
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleCaptureMarkESP
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleFireflyESP
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSmoothCamera
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleStorageESP
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleTNTTimer
@@ -683,7 +685,9 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleArmorHudRenderer,
             ModulePotionStatusRenderer,
             ModuleTargetHudRenderer,
-            ModuleWatermark,
+            ModulePlayerTrail
+            ModuleFireflyESP
+            ModuleCaptureMarkESP
             ModuleNoBob,
             ModuleNoFov,
             ModuleNoHurtCam,
