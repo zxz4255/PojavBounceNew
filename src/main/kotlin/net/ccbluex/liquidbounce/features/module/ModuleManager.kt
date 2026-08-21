@@ -685,9 +685,9 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleArmorHudRenderer,
             ModulePotionStatusRenderer,
             ModuleTargetHudRenderer,
-            ModulePlayerTrail
-            ModuleFireflyESP
-            ModuleCaptureMarkESP
+            ModulePlayerTrail,
+            ModuleFireflyESP,
+            ModuleCaptureMarkESP,
             ModuleNoBob,
             ModuleNoFov,
             ModuleNoHurtCam,
