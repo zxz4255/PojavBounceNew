@@ -40,7 +40,7 @@ object ModulePlayerTrail : ClientModule(
     private val lifetimeMs by int("Lifetime Ms", 1400, 300..6000)
 
     /** 屏幕上丝带半宽（像素） */
-    private val ribbonHalfWidth by float("Ribbon Width Px", 10f, 2f..40f)
+    private val ribbonHalfWidth by float("Ribbon Width Px", 3.5f, 0.5f..40f)
     private val yOffset by float("World Y Offset", 0.9f, 0f..2.5f)
     private val backOffset by float("Back Offset", 0.2f, 0f..1.5f)
 
@@ -163,32 +163,77 @@ object ModulePlayerTrail : ClientModule(
             }
         }
 
-        // 2) 手动投影
+        // 2) 手动投影：不访问 private mainCamera，用反射或玩家视角近似
         return runCatching {
-            val camera = mc.gameRenderer.mainCamera
-            val camPos = camera.position()
-            val relX = (x - camPos.x).toFloat()
-            val relY = (y - camPos.y).toFloat()
-            val relZ = (z - camPos.z).toFloat()
+            var camX = 0.0
+            var camY = 0.0
+            var camZ = 0.0
+            var yawDeg = 0f
+            var pitchDeg = 0f
+
+            // 反射 GameRenderer 取 Camera
+            val camObj = runCatching {
+                val gr = mc.gameRenderer
+                gr.javaClass.methods.firstOrNull {
+                    it.parameterCount == 0 && (
+                        it.name.equals("getMainCamera", true)
+                            || it.name.equals("mainCamera", true)
+                            || it.returnType.name.contains("Camera")
+                        )
+                }?.invoke(gr)
+                    ?: gr.javaClass.declaredFields.firstOrNull {
+                        it.type.name.contains("Camera")
+                    }?.also { it.isAccessible = true }?.get(gr)
+            }.getOrNull()
+
+            if (camObj != null) {
+                runCatching {
+                    val pos = camObj.javaClass.methods.firstOrNull {
+                        it.parameterCount == 0 && (
+                            it.name == "position" || it.name == "getPosition" || it.name == "pos"
+                            )
+                    }?.invoke(camObj)
+                    if (pos is Vec3) {
+                        camX = pos.x; camY = pos.y; camZ = pos.z
+                    }
+                }
+                runCatching {
+                    yawDeg = (camObj.javaClass.methods.firstOrNull {
+                        it.parameterCount == 0 && (it.name == "yRot" || it.name == "getYRot")
+                    }?.invoke(camObj) as? Number)?.toFloat() ?: yawDeg
+                    pitchDeg = (camObj.javaClass.methods.firstOrNull {
+                        it.parameterCount == 0 && (it.name == "xRot" || it.name == "getXRot")
+                    }?.invoke(camObj) as? Number)?.toFloat() ?: pitchDeg
+                }
+            } else {
+                val p = mc.player ?: return@runCatching null
+                camX = p.x
+                camY = p.y + p.eyeHeight
+                camZ = p.z
+                yawDeg = p.yRot
+                pitchDeg = p.xRot
+            }
+
+            val relX = (x - camX).toFloat()
+            val relY = (y - camY).toFloat()
+            val relZ = (z - camZ).toFloat()
 
             val view = Matrix4f()
-            // 用相机旋转近似 view
-            val yaw = Math.toRadians(camera.yRot().toDouble()).toFloat()
-            val pitch = Math.toRadians(camera.xRot().toDouble()).toFloat()
+            val yaw = Math.toRadians(yawDeg.toDouble()).toFloat()
+            val pitch = Math.toRadians(pitchDeg.toDouble()).toFloat()
             view.rotationY(-yaw)
             view.rotateX(pitch)
 
             val world = Vector4f(relX, relY, relZ, 1f)
             view.transform(world)
-
-            if (world.z >= 0f) return@runCatching null // 背后
+            if (world.z >= 0f) return@runCatching null
 
             val fov = try {
                 mc.options.fov().get().toFloat()
             } catch (_: Throwable) {
                 70f
             }
-            val aspect = screenW / screenH
+            val aspect = screenW / max(1f, screenH)
             val proj = Matrix4f().perspective(
                 Math.toRadians(fov.toDouble()).toFloat(),
                 aspect,
