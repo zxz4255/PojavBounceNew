@@ -24,8 +24,8 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.math.exp
 import kotlin.math.roundToInt
 
-object ModuleGapple : ClientModule(
-    "Gapple",
+object ModuleAutoGapple : ClientModule(
+    "AutoGapple",
     ModuleCategories.PLAYER,
     aliases = listOf("BlinkGapple", "PacketGapple"),
 ) {
