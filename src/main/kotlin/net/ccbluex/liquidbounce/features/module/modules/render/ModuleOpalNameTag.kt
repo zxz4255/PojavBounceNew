@@ -175,12 +175,20 @@ object ModuleOpalNameTag : ClientModule(
             if (showAbsorption && absText.isNotEmpty()) segments += absText to absorbColor
             if (showArmor && p is AbstractClientPlayer) {
                 var dmg = 0
-                for (slot in 0..3) {
-                    val stack = try { p.inventory.getArmor(slot) } catch (_: Throwable) {
-                        try { p.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.entries[slot + 2]) } catch (_: Throwable) { null }
-                    }
-                    if (stack != null && !stack.isEmpty && stack.isDamageableItem) {
-                        dmg += stack.maxDamage - stack.damageValue
+                val slots = listOf(
+                    net.minecraft.world.entity.EquipmentSlot.HEAD,
+                    net.minecraft.world.entity.EquipmentSlot.CHEST,
+                    net.minecraft.world.entity.EquipmentSlot.LEGS,
+                    net.minecraft.world.entity.EquipmentSlot.FEET,
+                )
+                for (slot in slots) {
+                    val stack = runCatching { p.getItemBySlot(slot) }.getOrNull() ?: continue
+                    if (!stack.isEmpty) {
+                        runCatching {
+                            if (stack.isDamageableItem) {
+                                dmg += stack.maxDamage - stack.damageValue
+                            }
+                        }
                     }
                 }
                 if (dmg > 0) segments += "${dmg}a" to Color4b(85, 255, 255, 255)
