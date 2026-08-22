@@ -1,175 +1,271 @@
+/*
+ * ModuleGapple — 移植自 Lizz/LB 1.8.9 Gapple（Blink + C03 计数版）
+ * 逻辑: 血量过低 → 吞包攒 C03 → 满额后发包切槽/使用金苹果/切回
+ * LiquidBounce Nextgen 0.39
+ */
 package net.ccbluex.liquidbounce.features.module.modules.player
 
-import net.ccbluex.liquidbounce.event.handler
-import net.ccbluex.liquidbounce.event.events.GameTickEvent
-import net.ccbluex.liquidbounce.event.events.MovementInputEvent
 import net.ccbluex.liquidbounce.event.events.OverlayRenderEvent
+import net.ccbluex.liquidbounce.event.events.PacketEvent
+import net.ccbluex.liquidbounce.event.events.PlayerTickEvent
+import net.ccbluex.liquidbounce.event.handler
 import net.ccbluex.liquidbounce.features.module.ClientModule
 import net.ccbluex.liquidbounce.features.module.ModuleCategories
+import net.ccbluex.liquidbounce.render.drawQuad
 import net.ccbluex.liquidbounce.render.drawRoundedRect
 import net.ccbluex.liquidbounce.render.engine.type.Color4b
 import net.ccbluex.liquidbounce.utils.client.mc
-import net.ccbluex.liquidbounce.utils.client.player
-import net.ccbluex.liquidbounce.utils.client.interaction
-import net.ccbluex.liquidbounce.utils.client.chat
-import net.ccbluex.liquidbounce.utils.network.sendHeldItemChange
-import net.ccbluex.liquidbounce.utils.network.sendPacketSilently
-import net.ccbluex.liquidbounce.utils.entity.useItem
-import net.ccbluex.liquidbounce.utils.movement.DirectionalInput
+import net.minecraft.network.protocol.Packet
+import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket
+import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket
+import net.minecraft.network.protocol.game.ServerboundUseItemPacket
 import net.minecraft.world.InteractionHand
 import net.minecraft.world.item.Items
+import java.util.concurrent.ConcurrentLinkedQueue
+import kotlin.math.exp
+import kotlin.math.roundToInt
 
-/**
- * Re‑implementation of the legacy "Gapple" module for LiquidBounce‑0.39.
- *
- * Features:
- *  • Eat golden apples automatically when health drops below the configurable threshold.
- *  • Optional **Stuck** mode freezes the player’s velocity while eating.
- *  • Optional **StopMove** blocks all movement inputs while eating.
- *  • Sends a dummy movement packet every [sendDelay] ticks to mimic the old Blink behaviour.
- *  • Renders a small progress‑bar on the screen during the eating animation.
- */
-object ModuleGapple : ClientModule("Gapple", ModuleCategories.PLAYER) {
-    // --------------------------------------------------------------------
-    // Configuration (defaults match the original Java version)
-    // --------------------------------------------------------------------
-    private val heal          by int   ("Health",        20, 0..40)   // start eating when health < this value
-    private val sendDelay     by int   ("SendDelay",      3, 1..10)  // send a keep‑alive packet every N ticks
-    private val stuckEnabled  by boolean("Stuck",        false)      // freeze the player while eating
-    private val stopMove      by boolean("StopMove",    false)      // block movement input while eating
-    private val autoGapple    by boolean("AutoGapple",  false)      // continue eating automatically after each apple
-    private val startColor    by color ("ProgressStartColor", Color4b(76, 157, 240, 255))
-    private val endColor      by color ("ProgressEndColor",   Color4b(53, 200, 167, 255))
+object ModuleGapple : ClientModule(
+    "Gapple",
+    ModuleCategories.PLAYER,
+    aliases = listOf("BlinkGapple", "PacketGapple"),
+) {
 
-    // --------------------------------------------------------------------
-    // Runtime state (mirrors fields from the original implementation)
-    // --------------------------------------------------------------------
-    private var slot = -1               // hot‑bar slot (0‑8) of the golden apple, -1 = not found
-    private var c03s = 0                // number of intercepted movement packets (max 32)
-    private var eating = false          // are we currently in the eating phase?
-    private var pulsing = false         // used for the UI progress bar animation
-    private var internalTick = 0        // simple tick counter (replaces mc.tickCount)
+    private val health by int("Health", 14, 1..40)
+    private val needC03 by int("Need C03", 32, 16..40)
+    private val sendDelay by int("Send Delay", 3, 1..10)
+    private val autoGapple by boolean("Auto Gapple", true)
+    private val stopMove by boolean("Stop Move", false)
+    private val stuckMode by boolean("Stuck", false)
 
-    // --------------------------------------------------------------------
-    // Helper utilities
-    // --------------------------------------------------------------------
-    private fun findAppleSlot(): Int {
-        for (i in 0 until 9) {
-            val stack = player.inventory.getItem(i)
-            if (stack.item == Items.GOLDEN_APPLE || stack.item == Items.ENCHANTED_GOLDEN_APPLE) return i
+    private val showProgress by boolean("Show Progress", true)
+    private val barWidth by float("Bar Width", 140f, 60f..300f)
+    private val barHeight by float("Bar Height", 7f, 3f..20f)
+    private val barRadius by float("Bar Radius", 3f, 0f..10f)
+    private val progressStart by color("Progress Start", Color4b(76, 157, 240, 255))
+    private val progressEnd by color("Progress End", Color4b(53, 200, 167, 255))
+    private val barBg by color("Bar Background", Color4b(0, 0, 0, 128))
+
+    private var slot = -1
+    private var c03Count = 0
+    private var eating = false
+    private var blinking = false
+    private var previousSlot = -1
+    private val queue = ConcurrentLinkedQueue<Packet<*>>()
+    private var anim = 0f
+    private var lastNs = 0L
+    private var sequence = 0
+
+    private fun findGapSlot(): Int {
+        val inv = mc.player?.inventory ?: return -1
+        for (i in 0..8) {
+            val s = inv.getItem(i)
+            if (!s.isEmpty && s.item == Items.GOLDEN_APPLE) return i
+        }
+        for (i in 0..8) {
+            val s = inv.getItem(i)
+            if (!s.isEmpty && s.item == Items.ENCHANTED_GOLDEN_APPLE) return i
         }
         return -1
     }
 
-    private fun sendKeepAlive() = sendPacketSilently(
-        net.minecraft.network.protocol.game.ServerboundMovePlayerPacket.StatusOnly(
-            player.onGround(),
-            player.horizontalCollision
-        )
-    )
-
-    private fun consumeApple() {
-        // Switch to apple slot
-        sendHeldItemChange(slot)
-        // Use the apple (handles rotation internally)
-        useItem(InteractionHand.MAIN_HAND)
-        // Switch back to the previously selected slot
-        sendHeldItemChange(player.inventory.selectedSlot)
+    private fun send(packet: Packet<*>) {
+        runCatching { mc.connection?.send(packet) }
     }
 
-    // --------------------------------------------------------------------
-    // Event handlers (0.39 DSL)
-    // --------------------------------------------------------------------
-    private val gameTickHandler = handler<GameTickEvent> {
-        internalTick++
+    private fun sendUse() {
+        val p = mc.player ?: return
+        val hand = InteractionHand.MAIN_HAND
+        val yaw = p.yRot
+        val pitch = p.xRot
+        runCatching {
+            for (c in ServerboundUseItemPacket::class.java.constructors) {
+                try {
+                    val pkt = when (c.parameterCount) {
+                        1 -> c.newInstance(hand)
+                        2 -> c.newInstance(hand, sequence++)
+                        4 -> c.newInstance(hand, sequence++, yaw, pitch)
+                        else -> continue
+                    }
+                    send(pkt as Packet<*>)
+                    return
+                } catch (_: Throwable) {
+                }
+            }
+            mc.gameMode?.useItem(p, hand)
+        }
+    }
+
+    private fun flushQueue(count: Int = Int.MAX_VALUE) {
+        var n = 0
+        while (n < count && queue.isNotEmpty()) {
+            val pkt = queue.poll() ?: break
+            send(pkt)
+            n++
+        }
+    }
+
+    private fun stopBlink() {
+        blinking = false
+        flushQueue()
+        queue.clear()
+    }
+
+    private fun finishEat() {
+        if (slot < 0) {
+            eating = false
+            stopBlink()
+            return
+        }
+        val p = mc.player ?: return
+        if (previousSlot < 0) previousSlot = p.inventory.selected
+
+        // 切到金苹果 → 使用 → 切回（对齐 C09 + C08 + C09）
+        send(ServerboundSetCarriedItemPacket(slot))
+        runCatching { p.inventory.selected = slot }
+        sendUse()
+        stopBlink()
+        send(ServerboundSetCarriedItemPacket(previousSlot.coerceIn(0, 8)))
+        runCatching { p.inventory.selected = previousSlot.coerceIn(0, 8) }
+
+        eating = false
+        c03Count = 0
+        previousSlot = -1
+
+        if (!autoGapple) {
+            enabled = false
+        } else {
+            slot = findGapSlot()
+        }
+    }
+
+    @Suppress("unused")
+    private val packetHandler = handler<PacketEvent> { event ->
+        if (!eating || !blinking) return@handler
+        val packet = event.packet
+        // 拦截移动包，计入 C03 并入队
+        if (packet is ServerboundMovePlayerPacket) {
+            c03Count++
+            queue.offer(packet)
+            runCatching { event.cancelEvent() }
+            return@handler
+        }
+        // 可选：吞掉其它干扰包（简化，仅队列移动包）
+    }
+
+    @Suppress("unused")
+    private val tickHandler = handler<PlayerTickEvent> {
+        val player = mc.player ?: return@handler
         if (player.isDeadOrDying) {
+            eating = false
+            stopBlink()
             enabled = false
             return@handler
         }
 
-        if (player.health < heal) {
-            // Start eating if not already
-            if (!eating) {
-                slot = findAppleSlot()
-                if (slot == -1) {
-                    // No apples → disable module (legacy behaviour)
-                    enabled = false
-                    return@handler
-                }
-                c03s = 0
-                eating = true
-                pulsing = false
-            }
-
-            // Optional Stuck – freeze velocity
-            if (stuckEnabled) player.setDeltaMovement(0.0, 0.0, 0.0)
-
-            // Send dummy packet every [sendDelay] ticks
-            if (internalTick % sendDelay == 0) sendKeepAlive()
-
-            // Increment counter – after 32 packets we actually consume the apple
-            c03s++
-            if (c03s >= 32) {
-                consumeApple()
+        if (player.health >= health) {
+            if (eating) {
                 eating = false
-                pulsing = true
-                c03s = 0
-                if (autoGapple) {
-                    slot = findAppleSlot()
-                    if (slot != -1) eating = true else enabled = false
-                } else {
-                    enabled = false
-                }
+                stopBlink()
+                c03Count = 0
+            }
+            return@handler
+        }
+
+        // 需要吃
+        if (!eating) {
+            slot = findGapSlot()
+            if (slot == -1) {
+                enabled = false
+                return@handler
+            }
+            eating = true
+            c03Count = 0
+            previousSlot = player.inventory.selected
+            blinking = true
+        }
+
+        if (slot == -1) {
+            slot = findGapSlot()
+            if (slot == -1) {
+                enabled = false
+                return@handler
+            }
+        }
+
+        // 攒够 C03 → 完成食用
+        if (c03Count >= needC03) {
+            finishEat()
+            return@handler
+        }
+
+        // 按间隔释放部分队列（对齐 sendDelay / releasePacket）
+        if (blinking && player.tickCount % sendDelay == 0) {
+            flushQueue(1)
+        }
+
+        // StopMove：清零输入（尽量）
+        if (stopMove && eating) {
+            runCatching {
+                player.xxa = 0f
+                player.zza = 0f
+            }
+        }
+    }
+
+    @Suppress("unused")
+    private val renderHandler = handler<OverlayRenderEvent> { event ->
+        if (!showProgress) return@handler
+        val target = if (eating) (c03Count / needC03.toFloat()).coerceIn(0f, 1f) else 0f
+        val now = System.nanoTime()
+        val ft = if (lastNs != 0L) ((now - lastNs) / 1e9f).coerceIn(0.001f, 0.05f) else 0.016f
+        lastNs = now
+        anim += (target - anim) * (1f - exp(-14f * ft))
+        if (anim < 0.02f && target <= 0f) return@handler
+
+        val ctx = event.context
+        val sw = try { ctx.guiWidth().toFloat() } catch (_: Throwable) {
+            mc.window.guiScaledWidth.toFloat()
+        }
+        val sh = try { ctx.guiHeight().toFloat() } catch (_: Throwable) {
+            mc.window.guiScaledHeight.toFloat()
+        }
+        val w = barWidth
+        val h = barHeight
+        val x = (sw - w) / 2f
+        val y = sh * 0.75f
+
+        if (barRadius > 0.5f) {
+            ctx.drawRoundedRect(x, y, x + w, y + h, barRadius, barBg)
+            if (anim > 0.02f) {
+                // 渐变近似：两段色
+                val mid = x + w * anim * 0.5f
+                val end = x + w * anim
+                ctx.drawRoundedRect(x, y, mid.coerceAtLeast(x + barRadius), y + h, barRadius, progressStart)
+                ctx.drawRoundedRect(mid, y, end.coerceAtLeast(mid + 0.5f), y + h, barRadius, progressEnd)
             }
         } else {
-            // Health sufficient – reset eating state
-            eating = false
-            pulsing = false
-            c03s = 0
+            ctx.drawQuad(x, y, x + w, y + h, barBg)
+            ctx.drawQuad(x, y, x + w * anim, y + h, progressStart)
         }
+
+        val font = mc.font
+        val pct = "${(anim * 100).roundToInt()}%"
+        ctx.text(font, pct, (x + w + 5).roundToInt(), y.roundToInt(), -1, true)
     }
 
-    private val movementInputHandler = handler<MovementInputEvent> { ev ->
-        if (eating && stopMove) {
-            ev.directionalInput = DirectionalInput.ZERO
-            ev.jump = false
-            ev.sneak = false
-        }
+    override fun onEnabled() {
+        slot = findGapSlot()
+        c03Count = 0
+        eating = false
+        blinking = false
+        queue.clear()
     }
 
-    private val overlayHandler = handler<OverlayRenderEvent> { ev ->
-        if (eating || pulsing) {
-            val ctx = ev.context
-            val width = ctx.guiWidth().toFloat()
-            val height = ctx.guiHeight().toFloat()
-            val barWidth = 140f
-            val barHeight = 7f
-            val startY = (height / 4f) * 3f
-            val startX = (width / 2f) - (barWidth / 2f)
-            val progress = (c03s / 32f).coerceIn(0f, 1f)
-            val filled = barWidth * progress
-
-            // Background (semi‑transparent black)
-            drawRoundedRect(
-                startX - 2f, startY - 2f,
-                startX + barWidth + 2f, startY + barHeight + 2f,
-                radius = 3f,
-                fillColor = Color4b(0, 0, 0, 128)
-            )
-            if (filled > 0f) {
-                val cur = Color4b(
-                    ((startColor.r * (1 - progress) + endColor.r * progress).toInt()),
-                    ((startColor.g * (1 - progress) + endColor.g * progress).toInt()),
-                    ((startColor.b * (1 - progress) + endColor.b * progress).toInt()),
-                    255
-                )
-                drawRoundedRect(
-                    startX, startY,
-                    startX + filled, startY + barHeight,
-                    radius = 2f,
-                    fillColor = cur
-                )
-            }
-        }
+    override fun onDisabled() {
+        eating = false
+        stopBlink()
+        c03Count = 0
+        anim = 0f
     }
 }
