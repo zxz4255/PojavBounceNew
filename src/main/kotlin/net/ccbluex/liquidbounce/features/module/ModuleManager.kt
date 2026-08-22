@@ -168,6 +168,7 @@ import net.ccbluex.liquidbounce.features.module.modules.player.ModuleEagle
 import net.ccbluex.liquidbounce.features.module.modules.player.ModuleFastExp
 import net.ccbluex.liquidbounce.features.module.modules.player.ModuleFastUse
 import net.ccbluex.liquidbounce.features.module.modules.player.ModuleAutoGapple
+import net.ccbluex.liquidbounce.features.module.modules.player.ModuleAutoEatGapple
 import net.ccbluex.liquidbounce.features.module.modules.player.ModuleNoBlockInteract
 import net.ccbluex.liquidbounce.features.module.modules.player.ModuleNoEntityInteract
 import net.ccbluex.liquidbounce.features.module.modules.player.ModuleNoRotateSet
@@ -621,6 +622,7 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleAutoBreak,
             ModuleAutoCrafter,
             ModuleAutoGapple,
+            ModuleAutoEatGapple,
             ModuleAutoFish,
             ModuleAutoRespawn,
             ModuleAutoWindCharge,
