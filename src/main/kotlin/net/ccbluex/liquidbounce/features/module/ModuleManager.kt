@@ -32,6 +32,7 @@ import net.ccbluex.liquidbounce.event.events.WorldChangeEvent
 import net.ccbluex.liquidbounce.event.handler
 import net.ccbluex.liquidbounce.event.sequenceHandler
 import net.ccbluex.liquidbounce.event.tickUntil
+import net.ccbluex.liquidbounce.features.module.modules.combat.ModuleGapple
 import net.ccbluex.liquidbounce.features.module.modules.combat.ModuleAimbot
 import net.ccbluex.liquidbounce.features.module.modules.combat.ModuleAutoClicker
 import net.ccbluex.liquidbounce.features.module.modules.world.automobheal.AutoMobHeal
