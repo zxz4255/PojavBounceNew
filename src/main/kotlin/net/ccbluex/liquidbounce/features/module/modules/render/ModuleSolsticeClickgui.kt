@@ -86,8 +86,12 @@ object ModuleSolsticeClickgui : ClientModule(
     private val themeSeconds by float("Theme Cycle Sec", 3.0f, 0.5f..10.0f)
     private val panelWidth by int("Panel Width", 200, 140..280)
     private val panelMaxHeight by int("Panel Max Height", 340, 200..500)
-    private val radius by int("Radius", 8, 0..16)
+    private val radius by int("Radius", 10, 0..20)
     private val backgroundAlpha by int("Background Alpha", 230, 0..255)
+    private val screenDim by boolean("Screen Dim", true)
+    private val screenDimAlpha by int("Screen Dim Alpha", 35, 0..80)
+    private val bottomGlow by boolean("Bottom Glow", true)
+    private val bottomGlowAlpha by int("Bottom Glow Alpha", 40, 0..100)
     private val textShadow by boolean("Text Shadow", true)
     private val showStatusDot by boolean("Show Status Dot", true)
     private val headerHeight by int("Header Height", 30, 22..44)
@@ -924,27 +928,31 @@ object ModuleSolsticeClickgui : ClientModule(
         val screenW = context.guiWidth().toFloat()
         val screenH = context.guiHeight().toFloat()
 
-        // —— ① 模糊 / 遮罩近似 (ModernDropdown: black*0.38 + addBlur) ——
-        // 单层半透明遮罩，更干净
-        val dimA = (180 * animAlpha * 0.38f).roundToInt().coerceIn(0, 90)
-        context.drawQuad(0f, 0f, screenW, screenH, Color4b(0, 0, 0, dimA))
+        // —— ① 屏幕遮罩：低透明度，避免整屏灰黑 ——
+        if (screenDim && animAlpha > 0.05f && screenW > 1f && screenH > 1f) {
+            val dimA = (screenDimAlpha * animAlpha).roundToInt().coerceIn(0, 80)
+            if (dimA > 0) {
+                context.drawQuad(0f, 0f, screenW, screenH, Color4b(0, 0, 0, dimA))
+            }
+        }
 
-        // —— ② 底部主题色渐变 (ModernDropdown: 下 1/3, alpha 随高度上淡) ——
-        // firstheight = lerp(screenH, screenH - screenH/3, inScale)
-        val firstH = lerp(screenH, screenH - screenH / 3f, inScale)
-        val steps = 24
-        for (s in 0 until steps) {
-            val t0 = s / steps.toFloat()
-            val t1 = (s + 1) / steps.toFloat()
-            val y0 = lerp(firstH, screenH, t0)
-            val y1 = lerp(firstH, screenH, t1)
-            // 越往上越淡: smoothstep 曲线让过渡更自然
-            val fade = (1f - t0) * (1f - t0) // 二次衰减，上淡下浓
-            val al = (0.35f * inScale * animAlpha * fade * 255f).roundToInt().coerceIn(0, 100)
-            if (al < 1) continue
-            // 横向颜色随位置轻微变化，增加流动感
-            val col = getThemedColor(y0 * 0.3f + screenW * 0.1f).alpha(al)
-            context.drawQuad(0f, y0, screenW, y1, col)
+        // —— ② 底部主题微光：仅下 1/4，透明度严格封顶，避免盖住整屏 ——
+        if (bottomGlow && inScale > 0.2f && animAlpha > 0.05f) {
+            val firstH = lerp(screenH, screenH - screenH / 4f, inScale.coerceIn(0f, 1f))
+            val steps = 16
+            for (s in 0 until steps) {
+                val t0 = s / steps.toFloat()
+                val t1 = (s + 1) / steps.toFloat()
+                val y0 = lerp(firstH, screenH, t0)
+                val y1 = lerp(firstH, screenH, t1)
+                if (y1 <= y0) continue
+                // 仅贴底、上淡：最大不超过 bottomGlowAlpha
+                val fade = (t0 * t0) // 越靠下越浓
+                val al = (bottomGlowAlpha * inScale * animAlpha * fade).roundToInt().coerceIn(0, 80)
+                if (al < 2) continue
+                val col = getThemedColor(y0 * 0.3f + screenW * 0.1f).alpha(al)
+                context.drawQuad(0f, y0, screenW, y1, col)
+            }
         }
 
         // 整体动画: 缩放 (以屏幕中心为锚点) — 仅面板/控件
@@ -1038,7 +1046,7 @@ object ModuleSolsticeClickgui : ClientModule(
             )
         }
 
-        // 整板底
+        // 整板底：四个角全部圆角
         ctx.drawRoundedRect(px, py, px + pw, py + ph, rr, bg)
 
         val clipTop = py + headerHeight
@@ -1118,15 +1126,23 @@ object ModuleSolsticeClickgui : ClientModule(
             if (curY > clipBottom + itemHeight * 2) break
         }
 
-        // 最后一层：不透明标题条盖住列表溢出（唯一标题绘制，无黑罩叠层）
-        ctx.drawQuad(px, py, px + pw, clipTop, titleBg)
+        // 最后一层：圆角标题条（只圆上面两角）+ 底部圆角补齐
+        // 整条标题用圆角，再把下半段用直角盖住，保留上圆角
+        ctx.drawRoundedRect(px, py, px + pw, clipTop, rr, titleBg)
+        if (headerHeight > rr + 1f) {
+            ctx.drawQuad(px, py + rr, px + pw, clipTop, titleBg)
+        }
         ctx.text(
             font, cat.tag,
             (px + 8f).roundToInt(), (py + headerHeight / 2f - 4f).roundToInt(),
             Color4b.WHITE.alpha(a).argb, textShadow,
         )
-        if (clipBottom < py + ph) {
-            ctx.drawQuad(px, clipBottom, px + pw, py + ph, bg)
+        // 底部空白区：圆角底边，避免直角露出
+        if (clipBottom < py + ph - 0.5f) {
+            ctx.drawRoundedRect(px, max(clipBottom - rr, py + headerHeight), px + pw, py + ph, rr, bg)
+            if (clipBottom < py + ph - rr) {
+                ctx.drawQuad(px, clipBottom, px + pw, py + ph - rr, bg)
+            }
         }
     }
 
