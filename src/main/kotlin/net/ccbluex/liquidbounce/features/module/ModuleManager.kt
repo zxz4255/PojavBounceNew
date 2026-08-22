@@ -236,7 +236,12 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModuleDynamicIsla
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleArmorHudRenderer
 import net.ccbluex.liquidbounce.features.module.modules.render.ModulePotionStatusRenderer
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleTargetHudRenderer
-import net.ccbluex.liquidbounce.features.module.modules.render.ModulePlayerTrail
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleModuleTrail
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSessionInfo
+import net.ccbluex.liquidbounce.features.module.modules.render.ModulePlayerList
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleNovolineTargetInfo
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleOpalNameTag
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleChestESP
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSmoothCamera
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleStorageESP
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleTNTTimer
@@ -684,6 +689,12 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModulePotionStatusRenderer,
             ModuleTargetHudRenderer,
             ModulePlayerTrail,
+            ModuleChestESP,
+            ModuleOpalNameTag,
+            ModuleTrail,
+            ModuleSessionInfo,
+            ModuleNovolineTargetInfo,
+            ModulePlayerList,
             ModuleNoBob,
             ModuleNoFov,
             ModuleNoHurtCam,
