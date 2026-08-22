@@ -69,6 +69,53 @@ object ModuleGapple : ClientModule(
         return -1
     }
 
+
+    private fun selectedSlot(): Int {
+        val inv = mc.player?.inventory ?: return 0
+        return runCatching {
+            inv.javaClass.methods.firstOrNull {
+                it.parameterCount == 0 && (
+                    it.name == "getSelected" || it.name == "getSelectedSlot" || it.name == "selectedSlot"
+                    )
+            }?.invoke(inv) as? Int
+        }.getOrNull()
+            ?: runCatching {
+                val f = inv.javaClass.getDeclaredField("selected")
+                f.isAccessible = true
+                f.getInt(inv)
+            }.getOrNull()
+            ?: runCatching {
+                val f = inv.javaClass.getDeclaredField("selectedSlot")
+                f.isAccessible = true
+                f.getInt(inv)
+            }.getOrNull()
+            ?: 0
+    }
+
+    private fun setSelectedSlot(slot: Int) {
+        val inv = mc.player?.inventory ?: return
+        val s = slot.coerceIn(0, 8)
+        runCatching {
+            inv.javaClass.methods.firstOrNull {
+                it.parameterCount == 1 && (
+                    it.name == "setSelectedSlot" || it.name == "setSelected"
+                    )
+            }?.invoke(inv, s)
+        }.onFailure {
+            runCatching {
+                val f = inv.javaClass.getDeclaredField("selected")
+                f.isAccessible = true
+                f.setInt(inv, s)
+            }
+            runCatching {
+                val f = inv.javaClass.getDeclaredField("selectedSlot")
+                f.isAccessible = true
+                f.setInt(inv, s)
+            }
+        }
+    }
+
+
     private fun send(packet: Packet<*>) {
         runCatching { mc.connection?.send(packet) }
     }
@@ -118,15 +165,15 @@ object ModuleGapple : ClientModule(
             return
         }
         val p = mc.player ?: return
-        if (previousSlot < 0) previousSlot = p.inventory.selected
+        if (previousSlot < 0) previousSlot = selectedSlot() //
 
         // 切到金苹果 → 使用 → 切回（对齐 C09 + C08 + C09）
         send(ServerboundSetCarriedItemPacket(slot))
-        runCatching { p.inventory.selected = slot }
+        runCatching { selectedSlot() // = slot }
         sendUse()
         stopBlink()
         send(ServerboundSetCarriedItemPacket(previousSlot.coerceIn(0, 8)))
-        runCatching { p.inventory.selected = previousSlot.coerceIn(0, 8) }
+        runCatching { selectedSlot() // = previousSlot.coerceIn(0, 8) }
 
         eating = false
         c03Count = 0
@@ -181,7 +228,7 @@ object ModuleGapple : ClientModule(
             }
             eating = true
             c03Count = 0
-            previousSlot = player.inventory.selected
+            previousSlot = selectedSlot()
             blinking = true
         }
 
