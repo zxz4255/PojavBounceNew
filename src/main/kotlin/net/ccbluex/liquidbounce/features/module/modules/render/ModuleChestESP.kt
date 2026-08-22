@@ -19,8 +19,6 @@ import net.minecraft.core.BlockPos
 import net.minecraft.network.protocol.game.ClientboundBlockEventPacket
 import net.minecraft.world.level.block.Blocks
 import net.minecraft.world.level.block.ChestBlock
-import net.minecraft.world.level.block.entity.ChestBlockEntity
-import net.minecraft.world.level.block.entity.TrappedChestBlockEntity
 import net.minecraft.world.level.block.state.properties.ChestType
 import net.minecraft.world.phys.AABB
 import java.util.concurrent.CopyOnWriteArrayList
@@ -62,25 +60,6 @@ object ModuleChestESP : ClientModule(
     private fun colorUnopened() = if (style == Style.NITRO) nitroUnopened else unopenedColor
     private fun colorOpened() = if (style == Style.NITRO) nitroOpened else openedColor
 
-    private fun chestAabb(be: ChestBlockEntity): AABB? {
-        val state = be.blockState
-        val type = try {
-            state.getValue(ChestBlock.TYPE)
-        } catch (_: Throwable) {
-            return fullBox(be.blockPos)
-        }
-        if (type == ChestType.LEFT) return null
-        var box = fullBox(be.blockPos)
-        if (type != ChestType.SINGLE) {
-            runCatching {
-                val dir = ChestBlock.getConnectedDirection(state)
-                val other = be.blockPos.relative(dir)
-                box = box.minmax(fullBox(other))
-            }
-        }
-        return box
-    }
-
     private fun fullBox(pos: BlockPos): AABB =
         if (fullBlock) AABB(pos)
         else AABB(
@@ -95,50 +74,36 @@ object ModuleChestESP : ClientModule(
         enderBoxes.clear()
         val r = range
         val origin = self.blockPosition()
-        runCatching {
-            for (be in world.blockEntities) {
-                val pos = be.blockPos
-                if (hypot3(origin, pos) > r) continue
-                when (be) {
-                    is ChestBlockEntity -> {
-                        if (!showTrapped && be is TrappedChestBlockEntity) continue
-                        val aabb = chestAabb(be) ?: continue
-                        val isOpen = opened.contains(pack(pos)) ||
-                            opened.contains(pack(BlockPos.containing(aabb.minX, aabb.minY, aabb.minZ)))
-                        boxes += aabb to isOpen
-                    }
-                    else -> {
-                        if (showEnder) {
-                            val name = be.type.toString().lowercase()
-                            if (name.contains("ender")) {
-                                enderBoxes += fullBox(pos)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        // 兜底：按区块扫描方块类型
-        if (boxes.isEmpty()) {
-            runCatching {
-                for (dx in -r..r) for (dy in -r / 2..r / 2) for (dz in -r..r) {
+        // 按范围扫描方块（不依赖 blockEntities 迭代 API）
+        val rSq = r * r
+        for (dx in -r..r) {
+            for (dz in -r..r) {
+                if (dx * dx + dz * dz > rSq) continue
+                for (dy in -r / 2..r / 2) {
                     val pos = origin.offset(dx, dy, dz)
                     val st = world.getBlockState(pos)
                     val b = st.block
-                    if (b == Blocks.CHEST || b == Blocks.TRAPPED_CHEST) {
-                        if (b == Blocks.TRAPPED_CHEST && !showTrapped) continue
-                        val type = try { st.getValue(ChestBlock.TYPE) } catch (_: Throwable) { ChestType.SINGLE }
-                        if (type == ChestType.LEFT) continue
-                        var box = fullBox(pos)
-                        if (type != ChestType.SINGLE) {
-                            runCatching {
-                                val dir = ChestBlock.getConnectedDirection(st)
-                                box = box.minmax(fullBox(pos.relative(dir)))
+                    when {
+                        b == Blocks.CHEST || b == Blocks.TRAPPED_CHEST -> {
+                            if (b == Blocks.TRAPPED_CHEST && !showTrapped) continue
+                            val type = try {
+                                st.getValue(ChestBlock.TYPE)
+                            } catch (_: Throwable) {
+                                ChestType.SINGLE
                             }
+                            if (type == ChestType.LEFT) continue
+                            var box = fullBox(pos)
+                            if (type != ChestType.SINGLE) {
+                                runCatching {
+                                    val dir = ChestBlock.getConnectedDirection(st)
+                                    box = box.minmax(fullBox(pos.relative(dir)))
+                                }
+                            }
+                            boxes += box to opened.contains(pack(pos))
                         }
-                        boxes += box to opened.contains(pack(pos))
-                    } else if (showEnder && b == Blocks.ENDER_CHEST) {
-                        enderBoxes += fullBox(pos)
+                        showEnder && b == Blocks.ENDER_CHEST -> {
+                            enderBoxes += fullBox(pos)
+                        }
                     }
                 }
             }
