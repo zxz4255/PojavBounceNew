@@ -177,7 +177,7 @@ object ModuleAutoEatGapple : ClientModule(
                 if (silentSwitch) {
                     sendUsePacket()
                 } else {
-                    runCatching { mc.gameMode?.useItem(mc.player, InteractionHand.MAIN_HAND) }
+                    runCatching { mc.player?.let { pl -> mc.gameMode?.useItem(pl, InteractionHand.MAIN_HAND) } }
                 }
             }
             Mode.PACKET -> {
@@ -263,22 +263,44 @@ object ModuleAutoEatGapple : ClientModule(
     }
 
     /** Legit：强制 use 键按下 */
+    private fun optionsUseKey(): Any? {
+        val opt = mc.options
+        return runCatching {
+            opt.javaClass.methods.firstOrNull {
+                it.parameterCount == 0 && (
+                    it.name == "useKey" || it.name == "getUseKey" || it.name == "keyUse"
+                    )
+            }?.invoke(opt)
+        }.getOrNull()
+            ?: runCatching {
+                opt.javaClass.getDeclaredField("keyUse").also { it.isAccessible = true }.get(opt)
+            }.getOrNull()
+            ?: runCatching {
+                opt.javaClass.getDeclaredField("useKey").also { it.isAccessible = true }.get(opt)
+            }.getOrNull()
+    }
+
     @Suppress("unused")
     private val keyHandler = handler<KeybindIsPressedEvent> { event ->
         if (!forceUse) return@handler
+        val useKey = optionsUseKey() ?: return@handler
         runCatching {
-            if (event.keyBinding == mc.options.useKey) {
-                event.isPressed = true
-            }
-        }.onFailure {
-            runCatching {
-                val use = mc.options.useKey
-                val kb = event.javaClass.methods.firstOrNull {
-                    it.parameterCount == 0 && it.name.lowercase().contains("key")
-                }?.invoke(event)
-                if (kb == use || kb == use.key) {
+            val kb = event.javaClass.methods.firstOrNull {
+                it.parameterCount == 0 && (
+                    it.name == "keyBinding" || it.name == "getKeyBinding" || it.name.contains("key", true)
+                    )
+            }?.invoke(event)
+            if (kb == useKey) {
+                runCatching {
+                    event.javaClass.methods.firstOrNull {
+                        it.parameterCount == 1 && (
+                            it.name == "setPressed" || it.name.contains("pressed", true)
+                            )
+                    }?.invoke(event, true)
+                }
+                runCatching {
                     val f = event.javaClass.declaredFields.firstOrNull {
-                        it.name.contains("pressed", true) || it.name.contains("isPressed", true)
+                        it.name.contains("pressed", true)
                     }
                     f?.isAccessible = true
                     f?.setBoolean(event, true)
