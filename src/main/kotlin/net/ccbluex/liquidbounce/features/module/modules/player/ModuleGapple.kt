@@ -1,7 +1,6 @@
 /*
- * ModuleGapple — 移植自 Lizz/LB 1.8.9 Gapple（Blink + C03 计数版）
- * 逻辑: 血量过低 → 吞包攒 C03 → 满额后发包切槽/使用金苹果/切回
- * LiquidBounce Nextgen 0.39
+ * ModuleGapple — 移植自 LB 1.8.9 Blink Gapple
+ * 血量过低 → 拦截移动包计数 → 满额后发包切槽/使用/切回
  */
 package net.ccbluex.liquidbounce.features.module.modules.player
 
@@ -36,7 +35,6 @@ object ModuleGapple : ClientModule(
     private val sendDelay by int("Send Delay", 3, 1..10)
     private val autoGapple by boolean("Auto Gapple", true)
     private val stopMove by boolean("Stop Move", false)
-    private val stuckMode by boolean("Stuck", false)
 
     private val showProgress by boolean("Show Progress", true)
     private val barWidth by float("Bar Width", 140f, 60f..300f)
@@ -46,7 +44,7 @@ object ModuleGapple : ClientModule(
     private val progressEnd by color("Progress End", Color4b(53, 200, 167, 255))
     private val barBg by color("Bar Background", Color4b(0, 0, 0, 128))
 
-    private var slot = -1
+    private var gapSlot = -1
     private var c03Count = 0
     private var eating = false
     private var blinking = false
@@ -69,7 +67,6 @@ object ModuleGapple : ClientModule(
         return -1
     }
 
-
     private fun selectedSlot(): Int {
         val inv = mc.player?.inventory ?: return 0
         return runCatching {
@@ -80,14 +77,10 @@ object ModuleGapple : ClientModule(
             }?.invoke(inv) as? Int
         }.getOrNull()
             ?: runCatching {
-                val f = inv.javaClass.getDeclaredField("selected")
-                f.isAccessible = true
-                f.getInt(inv)
+                inv.javaClass.getDeclaredField("selected").also { it.isAccessible = true }.getInt(inv)
             }.getOrNull()
             ?: runCatching {
-                val f = inv.javaClass.getDeclaredField("selectedSlot")
-                f.isAccessible = true
-                f.getInt(inv)
+                inv.javaClass.getDeclaredField("selectedSlot").also { it.isAccessible = true }.getInt(inv)
             }.getOrNull()
             ?: 0
     }
@@ -97,24 +90,17 @@ object ModuleGapple : ClientModule(
         val s = slot.coerceIn(0, 8)
         runCatching {
             inv.javaClass.methods.firstOrNull {
-                it.parameterCount == 1 && (
-                    it.name == "setSelectedSlot" || it.name == "setSelected"
-                    )
+                it.parameterCount == 1 && (it.name == "setSelectedSlot" || it.name == "setSelected")
             }?.invoke(inv, s)
         }.onFailure {
             runCatching {
-                val f = inv.javaClass.getDeclaredField("selected")
-                f.isAccessible = true
-                f.setInt(inv, s)
+                inv.javaClass.getDeclaredField("selected").also { it.isAccessible = true }.setInt(inv, s)
             }
             runCatching {
-                val f = inv.javaClass.getDeclaredField("selectedSlot")
-                f.isAccessible = true
-                f.setInt(inv, s)
+                inv.javaClass.getDeclaredField("selectedSlot").also { it.isAccessible = true }.setInt(inv, s)
             }
         }
     }
-
 
     private fun send(packet: Packet<*>) {
         runCatching { mc.connection?.send(packet) }
@@ -159,21 +145,20 @@ object ModuleGapple : ClientModule(
     }
 
     private fun finishEat() {
-        if (slot < 0) {
+        if (gapSlot < 0) {
             eating = false
             stopBlink()
             return
         }
-        val p = mc.player ?: return
-        if (previousSlot < 0) previousSlot = selectedSlot() //
+        if (previousSlot < 0) previousSlot = selectedSlot()
 
-        // 切到金苹果 → 使用 → 切回（对齐 C09 + C08 + C09）
-        send(ServerboundSetCarriedItemPacket(slot))
-        runCatching { selectedSlot() // = slot }
+        send(ServerboundSetCarriedItemPacket(gapSlot))
+        setSelectedSlot(gapSlot)
         sendUse()
         stopBlink()
-        send(ServerboundSetCarriedItemPacket(previousSlot.coerceIn(0, 8)))
-        runCatching { selectedSlot() // = previousSlot.coerceIn(0, 8) }
+        val back = previousSlot.coerceIn(0, 8)
+        send(ServerboundSetCarriedItemPacket(back))
+        setSelectedSlot(back)
 
         eating = false
         c03Count = 0
@@ -182,7 +167,7 @@ object ModuleGapple : ClientModule(
         if (!autoGapple) {
             enabled = false
         } else {
-            slot = findGapSlot()
+            gapSlot = findGapSlot()
         }
     }
 
@@ -190,14 +175,11 @@ object ModuleGapple : ClientModule(
     private val packetHandler = handler<PacketEvent> { event ->
         if (!eating || !blinking) return@handler
         val packet = event.packet
-        // 拦截移动包，计入 C03 并入队
         if (packet is ServerboundMovePlayerPacket) {
             c03Count++
             queue.offer(packet)
             runCatching { event.cancelEvent() }
-            return@handler
         }
-        // 可选：吞掉其它干扰包（简化，仅队列移动包）
     }
 
     @Suppress("unused")
@@ -219,10 +201,9 @@ object ModuleGapple : ClientModule(
             return@handler
         }
 
-        // 需要吃
         if (!eating) {
-            slot = findGapSlot()
-            if (slot == -1) {
+            gapSlot = findGapSlot()
+            if (gapSlot == -1) {
                 enabled = false
                 return@handler
             }
@@ -232,26 +213,23 @@ object ModuleGapple : ClientModule(
             blinking = true
         }
 
-        if (slot == -1) {
-            slot = findGapSlot()
-            if (slot == -1) {
+        if (gapSlot == -1) {
+            gapSlot = findGapSlot()
+            if (gapSlot == -1) {
                 enabled = false
                 return@handler
             }
         }
 
-        // 攒够 C03 → 完成食用
         if (c03Count >= needC03) {
             finishEat()
             return@handler
         }
 
-        // 按间隔释放部分队列（对齐 sendDelay / releasePacket）
         if (blinking && player.tickCount % sendDelay == 0) {
             flushQueue(1)
         }
 
-        // StopMove：清零输入（尽量）
         if (stopMove && eating) {
             runCatching {
                 player.xxa = 0f
@@ -271,10 +249,14 @@ object ModuleGapple : ClientModule(
         if (anim < 0.02f && target <= 0f) return@handler
 
         val ctx = event.context
-        val sw = try { ctx.guiWidth().toFloat() } catch (_: Throwable) {
+        val sw = try {
+            ctx.guiWidth().toFloat()
+        } catch (_: Throwable) {
             mc.window.guiScaledWidth.toFloat()
         }
-        val sh = try { ctx.guiHeight().toFloat() } catch (_: Throwable) {
+        val sh = try {
+            ctx.guiHeight().toFloat()
+        } catch (_: Throwable) {
             mc.window.guiScaledHeight.toFloat()
         }
         val w = barWidth
@@ -285,7 +267,6 @@ object ModuleGapple : ClientModule(
         if (barRadius > 0.5f) {
             ctx.drawRoundedRect(x, y, x + w, y + h, barRadius, barBg)
             if (anim > 0.02f) {
-                // 渐变近似：两段色
                 val mid = x + w * anim * 0.5f
                 val end = x + w * anim
                 ctx.drawRoundedRect(x, y, mid.coerceAtLeast(x + barRadius), y + h, barRadius, progressStart)
@@ -296,13 +277,12 @@ object ModuleGapple : ClientModule(
             ctx.drawQuad(x, y, x + w * anim, y + h, progressStart)
         }
 
-        val font = mc.font
         val pct = "${(anim * 100).roundToInt()}%"
-        ctx.text(font, pct, (x + w + 5).roundToInt(), y.roundToInt(), -1, true)
+        ctx.text(mc.font, pct, (x + w + 5).roundToInt(), y.roundToInt(), -1, true)
     }
 
     override fun onEnabled() {
-        slot = findGapSlot()
+        gapSlot = findGapSlot()
         c03Count = 0
         eating = false
         blinking = false
