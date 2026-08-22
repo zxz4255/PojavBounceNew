@@ -236,7 +236,7 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModuleDynamicIsla
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleArmorHudRenderer
 import net.ccbluex.liquidbounce.features.module.modules.render.ModulePotionStatusRenderer
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleTargetHudRenderer
-import net.ccbluex.liquidbounce.features.module.modules.render.ModuleModuleTrail
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleTrail
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSessionInfo
 import net.ccbluex.liquidbounce.features.module.modules.render.ModulePlayerList
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleNovolineTargetInfo
@@ -688,7 +688,6 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleArmorHudRenderer,
             ModulePotionStatusRenderer,
             ModuleTargetHudRenderer,
-            ModulePlayerTrail,
             ModuleChestESP,
             ModuleOpalNameTag,
             ModuleTrail,
