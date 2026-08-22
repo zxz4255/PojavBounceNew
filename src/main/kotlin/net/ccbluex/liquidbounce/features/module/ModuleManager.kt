@@ -167,7 +167,7 @@ import net.ccbluex.liquidbounce.features.module.modules.player.ModuleChestCleane
 import net.ccbluex.liquidbounce.features.module.modules.player.ModuleEagle
 import net.ccbluex.liquidbounce.features.module.modules.player.ModuleFastExp
 import net.ccbluex.liquidbounce.features.module.modules.player.ModuleFastUse
-import net.ccbluex.liquidbounce.features.module.modules.player.ModuleGapple
+import net.ccbluex.liquidbounce.features.module.modules.player.ModuleAutoGapple
 import net.ccbluex.liquidbounce.features.module.modules.player.ModuleNoBlockInteract
 import net.ccbluex.liquidbounce.features.module.modules.player.ModuleNoEntityInteract
 import net.ccbluex.liquidbounce.features.module.modules.player.ModuleNoRotateSet
