@@ -47,6 +47,8 @@ object ModuleRiseClickgui : ClientModule(
     private val colSecondaryText by color("Secondary Text", Color4b(255, 255, 255, 220))
     private val colTrinaryText by color("Trinary Text", Color4b(255, 255, 255, 130))
     private val colOverlay by color("Overlay", Color4b(0, 0, 0, 50))
+    private val screenDim by boolean("Screen Dim", true)
+    private val screenDimAlpha by int("Screen Dim Alpha", 28, 0..60)
     private val colAccent by color("Accent", Color4b(0x56, 0xB4, 0xE9, 255))
 
     private val windowW by float("Window Width", 420f, 300f..600f)
@@ -742,7 +744,11 @@ object ModuleRiseClickgui : ClientModule(
         val cx = winX + windowW / 2f
         val cy = winY + windowH / 2f
 
-        ctx.drawQuad(0f, 0f, sw, sh, Color4b(0, 0, 0, (40 * opacity).roundToInt()))
+        // 轻遮罩，避免偶发整屏灰黑（过高 alpha / 异常 opacity）
+        if (screenDim && sw > 1f && sh > 1f) {
+            val dimA = (screenDimAlpha * opacity.coerceIn(0f, 1f)).roundToInt().coerceIn(0, 60)
+            if (dimA > 0) ctx.drawQuad(0f, 0f, sw, sh, Color4b(0, 0, 0, dimA))
+        }
 
         ctx.pose().withPush {
             if (scaleAnim && sVis < 0.999f) {
