@@ -620,6 +620,7 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleAntiExploit,
             ModuleAutoBreak,
             ModuleAutoCrafter,
+            ModuleAutoGapple,
             ModuleAutoFish,
             ModuleAutoRespawn,
             ModuleAutoWindCharge,
