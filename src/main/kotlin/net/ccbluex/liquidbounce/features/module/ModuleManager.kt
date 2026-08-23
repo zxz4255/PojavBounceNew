@@ -246,6 +246,7 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSessionInfo
 import net.ccbluex.liquidbounce.features.module.modules.render.ModulePlayerList
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleNovolineTargetInfo
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleOpalNameTag
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleProjectilePredict
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleChestESP
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSmoothCamera
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleStorageESP
@@ -705,6 +706,7 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleSessionInfo,
             ModuleNovolineTargetInfo,
             ModulePlayerList,
+            ModuleProjectilePredict,
             ModuleNoBob,
             ModuleNoFov,
             ModuleNoHurtCam,
