@@ -1,7 +1,6 @@
 /*
- * ModuleProjectilePredict — 投掷物轨迹预测线
- * 珍珠 / 箭 / 雪球 / 蛋 / 药水 / 三叉戟 等
- * LiquidBounce Nextgen 0.39 · WorldRender 原生绘制
+ * ModuleProjectilePredict — 投掷物轨迹预测（修复映射/API）
+ * 不依赖易变类名：用 EntityType / Item 判断
  */
 package net.ccbluex.liquidbounce.features.module.modules.render
 
@@ -15,12 +14,8 @@ import net.ccbluex.liquidbounce.render.engine.type.Color4b
 import net.ccbluex.liquidbounce.render.renderEnvironment
 import net.ccbluex.liquidbounce.render.withPositionRelativeToCamera
 import net.ccbluex.liquidbounce.utils.client.mc
-import net.minecraft.util.Mth
-import net.minecraft.world.entity.projectile.AbstractArrow
+import net.minecraft.world.entity.Entity
 import net.minecraft.world.entity.projectile.Projectile
-import net.minecraft.world.entity.projectile.ThrownEnderpearl
-import net.minecraft.world.entity.projectile.ThrownPotion
-import net.minecraft.world.entity.projectile.ThrowableItemProjectile
 import net.minecraft.world.item.BowItem
 import net.minecraft.world.item.CrossbowItem
 import net.minecraft.world.item.ItemStack
@@ -32,6 +27,7 @@ import net.minecraft.world.phys.HitResult
 import net.minecraft.world.phys.Vec3
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 object ModuleProjectilePredict : ClientModule(
     "ProjectilePredict",
@@ -72,14 +68,14 @@ object ModuleProjectilePredict : ClientModule(
     private val colorOther by color("Other Color", Color4b(255, 255, 255, 180))
     private val colorLand by color("Land Color", Color4b(255, 80, 80, 220))
 
-    private data class SimType(
-        val gravity: Double,
-        val drag: Double,
-        val speed: Double,
-        val color: Color4b,
-    )
+    private data class SimType(val gravity: Double, val drag: Double, val speed: Double, val color: Color4b)
+    private data class Point(val x: Double, val y: Double, val z: Double)
+
+    private fun typeName(e: Entity): String =
+        runCatching { e.type.toString().lowercase() }.getOrDefault(e.javaClass.simpleName.lowercase())
 
     private fun heldSim(stack: ItemStack): SimType? {
+        if (stack.isEmpty) return null
         val item = stack.item
         return when {
             pearl && item == Items.ENDER_PEARL ->
@@ -96,55 +92,58 @@ object ModuleProjectilePredict : ClientModule(
                 SimType(0.05, 0.99, bowSpeed(stack), colorArrow)
             arrow && item is CrossbowItem ->
                 SimType(0.05, 0.99, 3.15, colorArrow)
-            otherThrowable && (item == Items.EXPERIENCE_BOTTLE) ->
+            otherThrowable && item == Items.EXPERIENCE_BOTTLE ->
                 SimType(0.07, 0.99, 0.7, colorOther)
             else -> null
         }
     }
 
     private fun bowSpeed(stack: ItemStack): Double {
-        val p = mc.player ?: return 1.0
-        // 拉弓进度
-        val use = try {
-            if (p.isUsingItem && p.useItem == stack) {
-                val left = p.useItemRemainingTicks
-                val max = stack.useDuration(p)
-                val used = (max - left).coerceAtLeast(0)
-                BowItem.getPowerForTime(used).toDouble().coerceIn(0.1, 1.0)
-            } else 1.0
-        } catch (_: Throwable) {
-            1.0
-        }
-        return use * 3.0
+        val p = mc.player ?: return 3.0
+        return runCatching {
+            if (!p.isUsingItem) return@runCatching 3.0
+            // 兼容不同映射的拉弓进度
+            val remain = p.useItemRemainingTicks
+            val maxUse = runCatching {
+                stack.javaClass.methods.firstOrNull {
+                    it.parameterCount == 1 && it.name.lowercase().contains("useduration")
+                }?.invoke(stack, p) as? Int
+            }.getOrNull() ?: 20
+            val used = (maxUse - remain).coerceAtLeast(0)
+            val power = (used / 20.0).coerceIn(0.1, 1.0)
+            // 近似 BowItem.getPowerForTime
+            val pwr = ((power * power + power * 2.0) / 3.0).coerceAtMost(1.0)
+            pwr * 3.0
+        }.getOrDefault(3.0)
     }
 
-    private fun entitySim(e: Projectile): SimType? {
-        return when (e) {
-            is ThrownEnderpearl -> if (pearl) SimType(0.03, 0.99, 0.0, colorPearl) else null
-            is AbstractArrow -> if (arrow) SimType(0.05, 0.99, 0.0, colorArrow) else null
-            is ThrownPotion -> if (potion) SimType(0.05, 0.99, 0.0, colorPotion) else null
-            is ThrowableItemProjectile -> {
-                val item = runCatching { e.item.item }.getOrNull()
-                when {
-                    snowball && item == Items.SNOWBALL -> SimType(0.03, 0.99, 0.0, colorSnow)
-                    egg && item == Items.EGG -> SimType(0.03, 0.99, 0.0, colorEgg)
-                    otherThrowable -> SimType(0.03, 0.99, 0.0, colorOther)
-                    else -> null
-                }
-            }
-            else -> if (otherThrowable) SimType(0.05, 0.99, 0.0, colorOther) else null
+    private fun entitySim(e: Entity): SimType? {
+        if (e !is Projectile) return null
+        val n = typeName(e)
+        return when {
+            (n.contains("enderpearl") || n.contains("ender_pearl")) && pearl ->
+                SimType(0.03, 0.99, 0.0, colorPearl)
+            (n.contains("arrow") || n.contains("spectral")) && arrow ->
+                SimType(0.05, 0.99, 0.0, colorArrow)
+            n.contains("potion") && potion ->
+                SimType(0.05, 0.99, 0.0, colorPotion)
+            n.contains("snowball") && snowball ->
+                SimType(0.03, 0.99, 0.0, colorSnow)
+            n.contains("egg") && !n.contains("dragon") && egg ->
+                SimType(0.03, 0.99, 0.0, colorEgg)
+            n.contains("trident") && trident ->
+                SimType(0.05, 0.99, 0.0, colorTrident)
+            otherThrowable && (n.contains("experience") || n.contains("throwable")) ->
+                SimType(0.03, 0.99, 0.0, colorOther)
+            otherThrowable && e is Projectile ->
+                SimType(0.05, 0.99, 0.0, colorOther)
+            else -> null
         }
     }
 
-    private data class Point(val x: Double, val y: Double, val z: Double)
-
-    private fun simulate(
-        start: Vec3,
-        vel: Vec3,
-        gravity: Double,
-        drag: Double,
-    ): Pair<List<Point>, Point?> {
+    private fun simulate(start: Vec3, vel: Vec3, gravity: Double, drag: Double): Pair<List<Point>, Point?> {
         val world = mc.level ?: return emptyList<Point>() to null
+        val self = mc.player ?: return emptyList<Point>() to null
         val points = ArrayList<Point>(maxTicks)
         var x = start.x
         var y = start.y
@@ -175,10 +174,11 @@ object ModuleProjectilePredict : ClientModule(
                         Vec3(x, y, z),
                         ClipContext.Block.COLLIDER,
                         ClipContext.Fluid.NONE,
-                        mc.player,
+                        self as Entity,
                     ),
                 )
             }.getOrNull()
+
             if (hit != null && hit.type != HitResult.Type.MISS) {
                 if (hit is BlockHitResult) {
                     land = Point(hit.location.x, hit.location.y, hit.location.z)
@@ -247,15 +247,11 @@ object ModuleProjectilePredict : ClientModule(
         val self = mc.player ?: return@handler
         val world = mc.level ?: return@handler
 
-        // 手持预测
         if (showMode == ShowMode.HELD || showMode == ShowMode.BOTH) {
             if (predictSelf) {
-                val stack = self.mainHandItem
-                val sim = heldSim(stack)
+                val sim = heldSim(self.mainHandItem)
                 if (sim != null && sim.speed > 0.0) {
-                    val eye = self.eyePosition
-                    val vel = lookVelocity(self.yRot, self.xRot, sim.speed)
-                    val (pts, land) = simulate(eye, vel, sim.gravity, sim.drag)
+                    val (pts, land) = simulate(self.eyePosition, lookVelocity(self.yRot, self.xRot, sim.speed), sim.gravity, sim.drag)
                     drawPath(pts, land, sim.color, event)
                 }
             }
@@ -263,30 +259,29 @@ object ModuleProjectilePredict : ClientModule(
                 runCatching {
                     for (p in world.players()) {
                         if (p === self || !p.isAlive) continue
-                        val stack = p.mainHandItem
-                        val sim = heldSim(stack) ?: continue
+                        val sim = heldSim(p.mainHandItem) ?: continue
                         if (sim.speed <= 0.0) continue
-                        // 他人拉弓力度未知，用默认
-                        val eye = p.eyePosition
-                        val vel = lookVelocity(p.yRot, p.xRot, sim.speed)
-                        val (pts, land) = simulate(eye, vel, sim.gravity, sim.drag)
-                        drawPath(pts, land, sim.color.alpha((sim.color.a * 0.7f).toInt()), event)
+                        val (pts, land) = simulate(
+                            p.eyePosition,
+                            lookVelocity(p.yRot, p.xRot, sim.speed),
+                            sim.gravity,
+                            sim.drag,
+                        )
+                        drawPath(pts, land, Color4b(sim.color.r, sim.color.g, sim.color.b, (sim.color.a * 0.7f).toInt()), event)
                     }
                 }
             }
         }
 
-        // 已存在的投掷物
         if (showMode == ShowMode.WORLD || showMode == ShowMode.BOTH) {
             runCatching {
                 for (e in world.entitiesForRendering()) {
                     if (e !is Projectile) continue
-                    if (!predictSelf && e.owner === self) continue
-                    if (!predictOthers && e.owner !== self) continue
+                    val owner = runCatching { e.owner }.getOrNull()
+                    if (!predictSelf && owner === self) continue
+                    if (!predictOthers && owner !== self && owner != null) continue
                     val sim = entitySim(e) ?: continue
-                    val vel = e.deltaMovement
-                    val pos = e.position()
-                    val (pts, land) = simulate(pos, vel, sim.gravity, sim.drag)
+                    val (pts, land) = simulate(e.position(), e.deltaMovement, sim.gravity, sim.drag)
                     drawPath(pts, land, sim.color, event)
                 }
             }
