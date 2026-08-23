@@ -33,6 +33,7 @@ import net.ccbluex.liquidbounce.event.handler
 import net.ccbluex.liquidbounce.event.sequenceHandler
 import net.ccbluex.liquidbounce.event.tickUntil
 import net.ccbluex.liquidbounce.features.module.modules.combat.ModuleAimbot
+import net.ccbluex.liquidbounce.features.module.modules.combat.ModuleHeadAimbot
 import net.ccbluex.liquidbounce.features.module.modules.combat.ModuleAutoClicker
 import net.ccbluex.liquidbounce.features.module.modules.world.automobheal.AutoMobHeal
 import net.ccbluex.liquidbounce.features.module.modules.combat.ModuleAutoLeave
@@ -266,6 +267,7 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModuleArrayList
 import net.ccbluex.liquidbounce.features.module.modules.render.trajectories.ModuleTrajectories
 import net.ccbluex.liquidbounce.features.module.modules.world.ModuleAirPlace
 import net.ccbluex.liquidbounce.features.module.modules.world.ModuleAutoDisable
+import net.ccbluex.liquidbounce.features.module.modules.world.ModuleTellyScaffold
 import net.ccbluex.liquidbounce.features.module.modules.world.ModuleAutoTool
 import net.ccbluex.liquidbounce.features.module.modules.world.ModuleBedDefender
 import net.ccbluex.liquidbounce.features.module.modules.world.ModuleBlockIn
@@ -484,6 +486,7 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
         val builtin = arrayOf(
             // Combat
             ModuleAimbot,
+            ModuleHeadAimbot,
             ModuleAutoArmor,
             ModuleAutoBow,
             ModuleAutoClicker,
@@ -729,6 +732,7 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             // World
             AutoMobHeal,
             ModuleAirPlace,
+            ModuleTellyScaffold,
             ModuleAutoBuild,
             ModuleAutoDisable,
             ModuleAutoFarm,
