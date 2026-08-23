@@ -1,188 +1,196 @@
+/*
+ * ModuleTellyScaffold — 修复 0.39 API 兼容
+ * Range / Rotation / Delay / AntiSway / DisableSafeWalk
+ */
 package net.ccbluex.liquidbounce.features.module.modules.world
 
-import net.ccbluex.liquidbounce.config.types.list.Tagged
 import net.ccbluex.liquidbounce.event.events.GameTickEvent
 import net.ccbluex.liquidbounce.event.handler
 import net.ccbluex.liquidbounce.features.module.ClientModule
 import net.ccbluex.liquidbounce.features.module.ModuleCategories
+import net.ccbluex.liquidbounce.features.module.modules.movement.ModuleSafeWalk
 import net.ccbluex.liquidbounce.utils.aiming.RotationManager
 import net.ccbluex.liquidbounce.utils.aiming.RotationsValueGroup
 import net.ccbluex.liquidbounce.utils.aiming.data.Rotation
-import net.ccbluex.liquidbounce.utils.block.doPlacement
 import net.ccbluex.liquidbounce.utils.block.SwingMode
+import net.ccbluex.liquidbounce.utils.block.doPlacement
 import net.ccbluex.liquidbounce.utils.client.mc
 import net.ccbluex.liquidbounce.utils.client.player
 import net.ccbluex.liquidbounce.utils.client.world
-import net.ccbluex.liquidbounce.utils.raytracing.traceFromPlayer
 import net.ccbluex.liquidbounce.utils.kotlin.Priority
-import net.minecraft.core.BlockPos
+import net.ccbluex.liquidbounce.utils.raytracing.traceFromPlayer
 import net.minecraft.world.InteractionHand
 import net.minecraft.world.item.BlockItem
+import net.minecraft.world.phys.BlockHitResult
 import net.minecraft.world.phys.HitResult
 import net.minecraft.world.phys.Vec3
-import kotlin.math.max
+import kotlin.math.atan2
+import kotlin.math.sqrt
 import kotlin.random.Random
 
-/**
- * Kotlin replica of the original 1.8.9 "RavenBSLegitTellyFix" script, re‑implemented for LiquidBounce 0.39.
- *
- * Features (core subset):
- *  • Automatic block placement directly under the player while a placeable block is held.
- *  • Configurable placement range, rotation smoothing, placement delay and optional anti‑sway lane correction.
- *  • Uses the modern [RotationManager] / [RotationsValueGroup] APIs for smooth, server‑friendly rotations.
- *  • Optional automatic SafeWalk disabling while the scaffold is active.
- *  • All key parameters are exposed as module settings and can be tuned via the ClickGUI.
- */
 object ModuleTellyScaffold : ClientModule("TellyScaffold", ModuleCategories.WORLD) {
 
-    // ---------------------------------------------------------------------
-    // Configurable values – these appear in the ClickGUI under the module.
-    // ---------------------------------------------------------------------
-    /** Maximum distance (in blocks) for the auto‑placement ray‑trace. */
-    private val range = float("Range", 4.5f, 1f..8f)
+    private val range by float("Range", 4.5f, 1f..8f)
+    private val rotationDuration by int("RotationDuration", 15, 1..200, "ticks")
+    private val delay by intRange("Delay", 0..5, 0..40, "ticks")
+    private val antiSway by boolean("AntiSway", true)
+    private val disableSafeWalk by boolean("DisableSafeWalk", true)
 
-    /** Rotation time in ticks – larger values make the rotation slower but smoother. */
-    private val rotationDuration = int("RotationDuration", 15, 1..200, "ticks")
-
-    /** Minimum delay between two placement attempts. */
-    private val delay = intRange("Delay", 0..5, 0..40, "ticks")
-
-    /** Enable a very small anti‑sway correction that keeps the player aligned with the lane. */
-    private val antiSway = boolean("AntiSway", true)
-
-    /** When enabled, the module temporarily disables the SafeWalk module (if present). */
-    private val disableSafeWalk = boolean("DisableSafeWalk", true)
-
-    // ---------------------------------------------------------------------
-    // Internal state helpers.
-    // ---------------------------------------------------------------------
     private val rotations = RotationsValueGroup(this)
     private var placementCooldown = 0
-    private var rotationActive = false
-    private var rotationStartTick = 0L
-    private var targetYaw = 0f
-    private var targetPitch = 0f
+    private var safeWalkWasEnabled = false
 
-    init {
-        // No additional sub‑modules are required for the basic implementation.
-    }
-
-    // ---------------------------------------------------------------------
-    // Lifecycle – enable / disable handling.
-    // ---------------------------------------------------------------------
     override fun onEnabled() {
-        // Capture and temporarily disable SafeWalk if requested.
-        if (disableSafeWalk.value) {
-            try {
-                if (modules.isEnabled("SafeWalk")) modules.disable("SafeWalk")
-            } catch (e: Exception) {
-                // ignore – module may not exist.
+        placementCooldown = 0
+        if (disableSafeWalk) {
+            runCatching {
+                safeWalkWasEnabled = ModuleSafeWalk.enabled
+                if (ModuleSafeWalk.enabled) {
+                    ModuleSafeWalk.enabled = false
+                }
             }
         }
-        placementCooldown = 0
-        rotationActive = false
-        super.onEnabled()
     }
 
     override fun onDisabled() {
-        // Re‑enable SafeWalk if we disabled it.
-        if (disableSafeWalk.value) {
-            try {
-                if (!modules.isEnabled("SafeWalk")) modules.enable("SafeWalk")
-            } catch (e: Exception) {
-                // ignore.
+        placementCooldown = 0
+        if (disableSafeWalk) {
+            runCatching {
+                if (safeWalkWasEnabled) {
+                    ModuleSafeWalk.enabled = true
+                }
             }
         }
-        placementCooldown = 0
-        rotationActive = false
-        super.onDisabled()
+        safeWalkWasEnabled = false
     }
 
-    // ---------------------------------------------------------------------
-    // Main tick handler – performs the placement logic.
-    // ---------------------------------------------------------------------
+    private fun lookingAt(point: Vec3, from: Vec3): Rotation {
+        // 优先官方 API
+        runCatching {
+            val m = Rotation::class.java.methods.firstOrNull {
+                it.name == "lookingAt" && it.parameterCount >= 2
+            }
+            if (m != null) {
+                val r = when (m.parameterCount) {
+                    2 -> m.invoke(null, point, from)
+                    else -> m.invoke(null, point, from)
+                }
+                if (r is Rotation) return r
+            }
+        }
+        val dx = point.x - from.x
+        val dy = point.y - from.y
+        val dz = point.z - from.z
+        val dist = sqrt(dx * dx + dz * dz)
+        val yaw = Math.toDegrees(atan2(dz, dx)).toFloat() - 90f
+        val pitch = Math.toDegrees(-atan2(dy, dist)).toFloat()
+        return Rotation(yaw, pitch)
+    }
+
+    private fun currentRotation(): Rotation {
+        runCatching {
+            val cur = RotationManager.currentRotation
+            if (cur != null) return cur
+        }
+        val p = player
+        return Rotation(p.yRot, p.xRot)
+    }
+
+    private fun delayTicks(): Int {
+        val r = delay
+        return if (r.first >= r.last) r.first
+        else Random.nextInt(r.first, r.last + 1)
+    }
+
     @Suppress("unused")
     private val tickHandler = handler<GameTickEvent> {
-        // Respect placement cooldown.
         if (placementCooldown > 0) {
             placementCooldown--
             return@handler
         }
 
-        // Ensure the player holds a placeable block in the main hand.
         val heldStack = player.getItemInHand(InteractionHand.MAIN_HAND)
         if (heldStack.isEmpty || heldStack.item !is BlockItem) return@handler
 
-        // Determine the block position directly below the player's feet.
         val targetPos = player.blockPosition().below()
-        // Simple replace‑ability check – only place on air (this mirrors the original script's logic).
         if (!world.getBlockState(targetPos).isAir) return@handler
 
-        // -----------------------------------------------------------------
-        // Rotation handling – calculate a rotation that looks at the centre of the
-        // target block's top face (the place we intend to click on).
-        // -----------------------------------------------------------------
-        val targetVec = Vec3.atCenterOf(targetPos).add(0.0, 0.5, 0.0) // centre of the top face
-        val desiredRotation = Rotation.lookingAt(point = targetVec, from = player.eyePosition)
+        val targetVec = Vec3.atCenterOf(targetPos).add(0.0, 0.5, 0.0)
+        val desiredRotation = lookingAt(targetVec, player.eyePosition)
 
-        // Submit the rotation request to the RotationManager.
-        // We use a normal priority – higher priorities (e.g. KillAura) can override if needed.
-        RotationManager.setRotationTarget(
-            rotation = desiredRotation,
-            considerInventory = false,
-            valueGroup = rotations,
-            priority = Priority.NORMAL,
-            provider = this@ModuleTellyScaffold
-        )
-        rotationActive = true
-        rotationStartTick = mc.level?.gameTime?.toLong() ?: 0L
-        targetYaw = desiredRotation.yaw
-        targetPitch = desiredRotation.pitch
+        runCatching {
+            RotationManager.setRotationTarget(
+                rotation = desiredRotation,
+                considerInventory = false,
+                valueGroup = rotations,
+                priority = Priority.NORMAL,
+                provider = this@ModuleTellyScaffold,
+            )
+        }
 
-        // -----------------------------------------------------------------
-        // Perform the block placement immediately after we have asked the
-        // rotation system to aim. The RotationManager will smooth the turn; the
-        // actual placement will therefore happen a few ticks later – this mirrors
-        // the behaviour of vanilla scaffold modules and is safe for anti‑cheat.
-        // -----------------------------------------------------------------
-        val traceResult = traceFromPlayer(desiredRotation, range = max(player.blockInteractionRange(), player.entityInteractionRange()))
-        if (traceResult.type == HitResult.Type.BLOCK) {
-            // Place the block using the high‑level utility. The swing mode is set to DO_NOT_HIDE
-            // because the script does not hide swings, and it works well with most anti‑cheat setups.
-            doPlacement(traceResult, desiredRotation, hand = InteractionHand.MAIN_HAND, swingMode = SwingMode.DO_NOT_HIDE)
-            // Apply a random delay based on the configured range.
-            placementCooldown = delay.random()
+        if (antiSway) {
+            applyAntiSwayCorrection()
+        }
+
+        val interactRange = runCatching {
+            maxOf(player.blockInteractionRange(), player.entityInteractionRange())
+        }.getOrDefault(range.toDouble())
+
+        val traceResult = runCatching {
+            traceFromPlayer(
+                desiredRotation,
+                range = maxOf(interactRange, range.toDouble()),
+            )
+        }.getOrNull() ?: return@handler
+
+        if (traceResult.type != HitResult.Type.BLOCK) return@handler
+        val blockHit = traceResult as? BlockHitResult ?: return@handler
+
+        // doPlacement 签名：不要传 Rotation；hand / swingMode 用命名参数
+        val placed = runCatching {
+            doPlacement(
+                blockHit,
+                hand = InteractionHand.MAIN_HAND,
+                swingMode = SwingMode.DO_NOT_HIDE,
+            )
+            true
+        }.getOrElse {
+            // 回退：原版交互
+            runCatching {
+                mc.gameMode?.useItemOn(
+                    player,
+                    InteractionHand.MAIN_HAND,
+                    blockHit,
+                )
+                true
+            }.getOrDefault(false)
+        }
+
+        if (placed) {
+            placementCooldown = delayTicks()
         }
     }
 
-    // ---------------------------------------------------------------------
-    // Optional anti‑sway lane correction – keeps the player centred on the
-    // block‑placement lane. The implementation is a simplified version of the
-    // original script and only activates when the flag is enabled.
-    // ---------------------------------------------------------------------
     private fun applyAntiSwayCorrection() {
-        if (!antiSway.value) return
-        // Very small lane‑keeping adjustment: if the player drifts away from the
-        // centre of the block beneath them we nudge the yaw a few degrees.
+        if (!antiSway) return
         val eyes = player.eyePosition
         val laneBlock = player.blockPosition().below()
         val laneCenter = Vec3.atCenterOf(laneBlock)
         val dx = eyes.x - laneCenter.x
         val dz = eyes.z - laneCenter.z
-        val distance = kotlin.math.sqrt(dx * dx + dz * dz)
-        if (distance > 0.02) {
-            // Compute a corrective yaw change (max ~2 degrees per tick).
-            val correction = (if (dx > 0) -1 else 1) * 2f
-            // Issue a small rotation offset via RotationManager.
-            val current = RotationManager.currentRotation ?: player.rotation
-            val newYaw = current.yaw + correction
-            val newRotation = Rotation(yaw = newYaw, pitch = current.pitch)
+        val distance = sqrt(dx * dx + dz * dz)
+        if (distance <= 0.02) return
+
+        val correction = (if (dx > 0) -1f else 1f) * 2f
+        val current = currentRotation()
+        val newRotation = Rotation(current.yaw + correction, current.pitch)
+        runCatching {
             RotationManager.setRotationTarget(
                 rotation = newRotation,
                 considerInventory = false,
                 valueGroup = rotations,
                 priority = Priority.NORMAL,
-                provider = this@ModuleTellyScaffold
+                provider = this@ModuleTellyScaffold,
             )
         }
     }
