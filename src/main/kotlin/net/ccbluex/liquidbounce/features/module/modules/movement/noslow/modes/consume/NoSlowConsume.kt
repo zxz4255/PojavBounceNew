@@ -46,7 +46,10 @@ object NoSlowConsume : NoSlowUseActionHandler("Consume") {
             NoSlowSharedGrim2371(it),
             NoSlowConsumeJump(it),
             NoSlowConsumeIntave14(it),
-            NoSlowConsumeRelease(it)
+            NoSlowConsumeRelease(it),
+            // Opal ports
+            NoSlowConsumeGrimJump(it),
+            NoSlowConsumeGrimFast(it),
         )
     }
 
