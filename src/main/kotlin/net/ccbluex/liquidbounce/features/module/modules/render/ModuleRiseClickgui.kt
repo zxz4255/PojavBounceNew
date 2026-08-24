@@ -175,19 +175,51 @@ object ModuleRiseClickgui : ClientModule(
         return obj
     }
 
-    private fun trySet(v: Value<*>, value: Any) {
+    private fun trySet(v: Value<*>, value: Any): Boolean {
+        // 1) 直接 set / setActiveChoice 等
         for (m in v.javaClass.methods) {
             if (m.parameterCount != 1) continue
             val n = m.name
-            if (n != "set" && n != "setByString" && n != "setValue" && n != "setActiveChoice" && n != "setCurrent") continue
+            if (n != "set" && n != "setByString" && n != "setValue" &&
+                n != "setActiveChoice" && n != "setCurrent" && n != "setSelected" &&
+                n != "select" && n != "changeValue"
+            ) continue
             try {
-                if (n == "setByString") m.invoke(v, value.toString()) else m.invoke(v, value)
-                return
-            } catch (_: Exception) {}
+                if (n == "setByString") {
+                    m.invoke(v, choiceLabel(value))
+                } else {
+                    m.invoke(v, value)
+                }
+                return true
+            } catch (_: Exception) {
+            }
         }
+        // 2) setByString(名字)
+        val label = choiceLabel(value)
+        for (m in v.javaClass.methods) {
+            if (m.parameterCount != 1) continue
+            if (!m.name.equals("setByString", true) && !m.name.equals("setAsString", true)) continue
+            try {
+                m.invoke(v, label)
+                return true
+            } catch (_: Exception) {
+            }
+        }
+        // 3) Boolean toggle
         if (value is Boolean) {
-            runCatching { v.javaClass.methods.firstOrNull { it.name == "toggle" && it.parameterCount == 0 }?.invoke(v) }
+            val toggled = runCatching {
+                v.javaClass.methods.firstOrNull { it.name == "toggle" && it.parameterCount == 0 }?.invoke(v)
+                true
+            }.getOrDefault(false)
+            if (toggled) return true
+            runCatching {
+                v.javaClass.methods.firstOrNull {
+                    it.parameterCount == 1 && (it.name == "set" || it.name == "setValue")
+                }?.invoke(v, value)
+                return true
+            }
         }
+        return false
     }
 
     private fun displayName(v: Value<*>): String {
@@ -556,16 +588,27 @@ object ModuleRiseClickgui : ClientModule(
                     y += settingRowH
                     if (enumOpen[v] == true) {
                         val actual = getActual(v)
-                        if (actual is Enum<*>) {
-                            for (c in actual.javaClass.enumConstants ?: emptyArray()) {
-                                if (y + settingRowH > clipTop && y < clipBot) {
-                                    if (over(listX, y, listW, settingRowH) && e.button == 0) {
-                                        trySet(v, c)
-                                        return@handler
-                                    }
-                                }
-                                y += settingRowH
+                        val options: List<Any?> = when {
+                            actual is Enum<*> ->
+                                (actual.javaClass.enumConstants?.toList() ?: emptyList())
+                            else -> {
+                                val names = listOf(
+                                    "getChoices", "choices", "getModes", "modes",
+                                    "getActiveChoices", "getValues", "values", "entries", "options",
+                                )
+                                listFrom(v, names) ?: listFrom(actual, names) ?: emptyList()
                             }
+                        }
+                        for (c in options) {
+                            if (c == null) continue
+                            if (y + settingRowH > clipTop && y < clipBot) {
+                                if (over(listX, y, listW, settingRowH) && e.button == 0) {
+                                    trySet(v, c)
+                                    enumOpen[v] = false
+                                    return@handler
+                                }
+                            }
+                            y += settingRowH
                         }
                     }
                 }
@@ -590,20 +633,61 @@ object ModuleRiseClickgui : ClientModule(
     }
 
     private fun cycleChoice(v: Value<*>): Boolean {
+        // 优先 Value 自带的 next / cycle
+        for (name in listOf("next", "cycle", "selectNext", "increment")) {
+            val ok = runCatching {
+                v.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.equals(name, true) }?.invoke(v)
+                true
+            }.getOrDefault(false)
+            if (ok) {
+                // 确认是否真的有 next 方法
+                if (v.javaClass.methods.any { it.parameterCount == 0 && it.name.equals(name, true) }) return true
+            }
+        }
+
         val actual = getActual(v)
         if (actual is Enum<*>) {
             val constants = actual.javaClass.enumConstants?.toList() ?: return false
             if (constants.isEmpty()) return false
             val idx = constants.indexOf(actual).let { if (it < 0) 0 else it }
-            trySet(v, constants[(idx + 1) % constants.size]!!)
-            return true
+            return trySet(v, constants[(idx + 1) % constants.size]!!)
         }
-        val names = listOf("getChoices", "choices", "getModes", "modes", "getActiveChoices", "getValues", "values", "entries")
+
+        val names = listOf(
+            "getChoices", "choices", "getModes", "modes",
+            "getActiveChoices", "getValues", "values", "entries",
+            "getAllChoices", "getOptions", "options",
+        )
         val choices = listFrom(v, names) ?: listFrom(actual, names)
         if (choices != null && choices.isNotEmpty()) {
-            val idx = choices.indexOf(actual).let { if (it < 0) 0 else it }
-            trySet(v, choices[(idx + 1) % choices.size]!!)
-            return true
+            // 按标签匹配当前项
+            val curLabel = choiceLabel(actual)
+            var idx = choices.indexOfFirst { choiceLabel(it) == curLabel }
+            if (idx < 0) idx = choices.indexOf(actual)
+            if (idx < 0) idx = 0
+            val next = choices[(idx + 1) % choices.size]!!
+            if (trySet(v, next)) return true
+            // 再用字符串设一次
+            return trySet(v, choiceLabel(next))
+        }
+
+        // NamedChoice / toString 列表失败时：尝试 Value 上的 getChoices 字段
+        runCatching {
+            for (f in v.javaClass.declaredFields) {
+                f.isAccessible = true
+                val fv = f.get(v) ?: continue
+                val list = when (fv) {
+                    is Collection<*> -> fv.toList()
+                    is Array<*> -> fv.toList()
+                    else -> continue
+                }
+                if (list.isEmpty()) continue
+                val curLabel = choiceLabel(actual)
+                var idx = list.indexOfFirst { choiceLabel(it) == curLabel }
+                if (idx < 0) idx = 0
+                val next = list[(idx + 1) % list.size]!!
+                if (trySet(v, next) || trySet(v, choiceLabel(next))) return true
+            }
         }
         return false
     }
@@ -637,19 +721,19 @@ object ModuleRiseClickgui : ClientModule(
     private fun handleSettingClick(v: Value<*>, x: Float, w: Float, button: Int) {
         val actual = getActual(v)
         if (button == 1) {
-            // 右键展开枚举列表
-            if (actual is Enum<*> || cycleChoice(v).let { false }) {
-                enumOpen[v] = !(enumOpen[v] ?: false)
-            } else {
-                enumOpen[v] = !(enumOpen[v] ?: false)
-            }
+            // 右键：展开/收起可选列表
+            enumOpen[v] = !(enumOpen[v] ?: false)
             return
         }
         if (button != 0) return
         when {
-            actual is Boolean -> trySet(v, !actual)
-            cycleChoice(v) -> {}
-            actual is Enum<*> -> enumOpen[v] = !(enumOpen[v] ?: false)
+            actual is Boolean -> {
+                if (!trySet(v, !actual)) {
+                    runCatching {
+                        v.javaClass.methods.firstOrNull { it.name == "toggle" && it.parameterCount == 0 }?.invoke(v)
+                    }
+                }
+            }
             actual is Number -> {
                 val range = rangeOf(v)
                 if (range != null) {
@@ -663,11 +747,30 @@ object ModuleRiseClickgui : ClientModule(
                 paletteX = (x + w - 6 * 14f - 8f).coerceAtLeast(4f)
                 paletteY = (mouseY + 8f)
             }
+            // 枚举 / Choice / Mode：左键直接切换下一项
+            actual is Enum<*> || isChoiceLike(v, actual) -> {
+                if (!cycleChoice(v)) {
+                    enumOpen[v] = !(enumOpen[v] ?: false)
+                }
+            }
             else -> {
-                // 尝试当 choice 打开列表
-                enumOpen[v] = !(enumOpen[v] ?: false)
+                // 兜底仍尝试 cycle
+                if (!cycleChoice(v)) {
+                    enumOpen[v] = !(enumOpen[v] ?: false)
+                }
             }
         }
+    }
+
+    private fun isChoiceLike(v: Value<*>, actual: Any?): Boolean {
+        val sn = v.javaClass.simpleName
+        if (sn.contains("Choice", true) || sn.contains("Mode", true) || sn.contains("Select", true)) return true
+        if (actual != null) {
+            val an = actual.javaClass.simpleName
+            if (an.contains("Choice", true) || an.contains("Mode", true) || actual is Enum<*>) return true
+        }
+        val names = listOf("getChoices", "choices", "getModes", "modes")
+        return listFrom(v, names) != null || listFrom(actual, names) != null
     }
 
     @Suppress("unused")
