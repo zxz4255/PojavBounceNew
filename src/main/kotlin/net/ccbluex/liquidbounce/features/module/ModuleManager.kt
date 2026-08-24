@@ -246,6 +246,7 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModulePlayerList
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleNovolineTargetInfo
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleOpalNameTag
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleChestESP
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleOpalTargetInfo
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSmoothCamera
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleStorageESP
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleTNTTimer
@@ -703,6 +704,7 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleSessionInfo,
             ModuleNovolineTargetInfo,
             ModulePlayerList,
+            ModuleOpalTargetInfo,
             ModuleNoBob,
             ModuleNoFov,
             ModuleNoHurtCam,
