@@ -128,8 +128,6 @@ import net.ccbluex.liquidbounce.features.module.modules.movement.ModuleAvoidHaza
 import net.ccbluex.liquidbounce.features.module.modules.movement.ModuleBlockBounce
 import net.ccbluex.liquidbounce.features.module.modules.movement.ModuleBlockWalk
 import net.ccbluex.liquidbounce.features.module.modules.movement.ModuleElytraRecast
-import net.ccbluex.liquidbounce.features.module.modules.movement.ModuleNoSlowConsumeGrimJump
-import net.ccbluex.liquidbounce.features.module.modules.movement.ModuleNoSlowConsumeGrimFast
 import net.ccbluex.liquidbounce.features.module.modules.movement.ModuleEntityControl
 import net.ccbluex.liquidbounce.features.module.modules.movement.ModuleFreeze
 import net.ccbluex.liquidbounce.features.module.modules.movement.ModuleNoClip
@@ -596,8 +594,6 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleElytraFly,
             ModuleFly,
             ModuleFreeze,
-            ModuleNoSlowConsumeGrimJump,
-            ModuleNoSlowConsumeGrimFast,
             ModuleHighJump,
             ModuleInventoryMove,
             ModuleLiquidWalk,
