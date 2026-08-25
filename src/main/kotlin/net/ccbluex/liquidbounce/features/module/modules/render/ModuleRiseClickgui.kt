@@ -84,6 +84,8 @@ object ModuleRiseClickgui : ClientModule(
 
     // 搜索
     private var searchText = ""
+    private var textEditValue: Value<*>? = null
+    private var textEditBuf = ""
     private var searchFocused = false
 
     // 色板 + 透明度
@@ -176,47 +178,83 @@ object ModuleRiseClickgui : ClientModule(
     }
 
     private fun trySet(v: Value<*>, value: Any): Boolean {
-        // 1) 直接 set / setActiveChoice 等
+        val label = choiceLabel(value)
+
+        // 0) ChoiceConfigurable: setActiveChoice by instance or name
+        runCatching {
+            val choices = listFrom(v, listOf("getChoices", "choices", "getActiveChoices")) ?: emptyList()
+            if (choices.isNotEmpty()) {
+                val match = choices.firstOrNull {
+                    it === value || choiceLabel(it).equals(label, true)
+                }
+                if (match != null) {
+                    for (n in listOf("setActiveChoice", "setCurrent", "setSelected", "select", "set")) {
+                        val m = v.javaClass.methods.firstOrNull {
+                            it.parameterCount == 1 && it.name.equals(n, true)
+                        } ?: continue
+                        runCatching { m.invoke(v, match); return@runCatching true }.getOrNull()
+                        // also try by string name on Choice
+                        runCatching { m.invoke(v, choiceLabel(match)); return@runCatching true }.getOrNull()
+                    }
+                }
+            }
+        }
+
+        // 1) setByString / setAsString — 对 Choice/Mode/Text/Block 最稳
         for (m in v.javaClass.methods) {
             if (m.parameterCount != 1) continue
             val n = m.name
-            if (n != "set" && n != "setByString" && n != "setValue" &&
-                n != "setActiveChoice" && n != "setCurrent" && n != "setSelected" &&
-                n != "select" && n != "changeValue"
+            if (!n.equals("setByString", true) && !n.equals("setAsString", true) &&
+                !n.equals("fromString", true) && !n.equals("setFromString", true)
             ) continue
-            try {
-                if (n == "setByString") {
-                    m.invoke(v, choiceLabel(value))
-                } else {
-                    m.invoke(v, value)
-                }
-                return true
-            } catch (_: Exception) {
-            }
-        }
-        // 2) setByString(名字)
-        val label = choiceLabel(value)
-        for (m in v.javaClass.methods) {
-            if (m.parameterCount != 1) continue
-            if (!m.name.equals("setByString", true) && !m.name.equals("setAsString", true)) continue
             try {
                 m.invoke(v, label)
                 return true
             } catch (_: Exception) {
             }
         }
-        // 3) Boolean toggle
+
+        // 2) 直接 set / setValue 等
+        for (m in v.javaClass.methods) {
+            if (m.parameterCount != 1) continue
+            val n = m.name
+            if (n != "set" && n != "setValue" && n != "setActiveChoice" &&
+                n != "setCurrent" && n != "setSelected" && n != "select" && n != "changeValue"
+            ) continue
+            try {
+                m.invoke(v, value)
+                return true
+            } catch (_: Exception) {
+                try {
+                    m.invoke(v, label)
+                    return true
+                } catch (_: Exception) {
+                }
+            }
+        }
+
+        // 3) Boolean
         if (value is Boolean) {
-            val toggled = runCatching {
+            runCatching {
                 v.javaClass.methods.firstOrNull { it.name == "toggle" && it.parameterCount == 0 }?.invoke(v)
-                true
-            }.getOrDefault(false)
-            if (toggled) return true
+                return true
+            }
             runCatching {
                 v.javaClass.methods.firstOrNull {
                     it.parameterCount == 1 && (it.name == "set" || it.name == "setValue")
                 }?.invoke(v, value)
                 return true
+            }
+        }
+
+        // 4) 字段直写
+        runCatching {
+            for (f in v.javaClass.declaredFields) {
+                if (f.name.contains("value", true) || f.name == "current" || f.name == "active") {
+                    f.isAccessible = true
+                    f.set(v, value)
+                    return true
+                }
             }
         }
         return false
@@ -303,7 +341,29 @@ object ModuleRiseClickgui : ClientModule(
         }
 
         override fun keyPressed(event: KeyEvent): Boolean {
-            if (event.key() == GLFW.GLFW_KEY_ESCAPE) {
+            val key = event.key()
+            // 文本/方块 ID 编辑优先
+            if (ModuleRiseClickgui.textEditValue != null) {
+                when (key) {
+                    GLFW.GLFW_KEY_ESCAPE -> {
+                        ModuleRiseClickgui.textEditValue = null
+                        ModuleRiseClickgui.textEditBuf = ""
+                        return true
+                    }
+                    GLFW.GLFW_KEY_ENTER, GLFW.GLFW_KEY_KP_ENTER -> {
+                        ModuleRiseClickgui.commitTextEdit()
+                        return true
+                    }
+                    GLFW.GLFW_KEY_BACKSPACE -> {
+                        if (ModuleRiseClickgui.textEditBuf.isNotEmpty()) {
+                            ModuleRiseClickgui.textEditBuf = ModuleRiseClickgui.textEditBuf.dropLast(1)
+                        }
+                        return true
+                    }
+                }
+                return true
+            }
+            if (key == GLFW.GLFW_KEY_ESCAPE) {
                 if (ModuleRiseClickgui.searchFocused) {
                     ModuleRiseClickgui.searchFocused = false
                 } else {
@@ -312,7 +372,7 @@ object ModuleRiseClickgui : ClientModule(
                 return true
             }
             if (ModuleRiseClickgui.searchFocused) {
-                when (event.key()) {
+                when (key) {
                     GLFW.GLFW_KEY_BACKSPACE -> {
                         if (ModuleRiseClickgui.searchText.isNotEmpty()) {
                             ModuleRiseClickgui.searchText = ModuleRiseClickgui.searchText.dropLast(1)
@@ -330,22 +390,28 @@ object ModuleRiseClickgui : ClientModule(
         }
 
         override fun charTyped(event: CharacterEvent): Boolean {
+            var cp = 0
+            try {
+                cp = event.javaClass.getMethod("codepoint").invoke(event) as? Int ?: 0
+            } catch (_: Exception) {
+                try {
+                    cp = event.javaClass.getMethod("getCodePoint").invoke(event) as? Int ?: 0
+                } catch (_: Exception) {}
+            }
+            if (cp <= 31 || cp == 127) return true
+
+            // 文本/方块 ID 输入
+            if (ModuleRiseClickgui.textEditValue != null) {
+                if (ModuleRiseClickgui.textEditBuf.length < 96) {
+                    ModuleRiseClickgui.textEditBuf += cp.toChar()
+                }
+                return true
+            }
+
             if (!ModuleRiseClickgui.searchFocused) return true
             if (ModuleRiseClickgui.searchText.length >= 48) return true
-            try {
-                var cp = 0
-                try {
-                    cp = event.javaClass.getMethod("codepoint").invoke(event) as? Int ?: 0
-                } catch (_: Exception) {
-                    try {
-                        cp = event.javaClass.getMethod("getCodePoint").invoke(event) as? Int ?: 0
-                    } catch (_: Exception) {}
-                }
-                if (cp > 31 && cp != 127) {
-                    ModuleRiseClickgui.searchText += cp.toChar()
-                    ModuleRiseClickgui.targetScroll = 0f
-                }
-            } catch (_: Exception) {}
+            ModuleRiseClickgui.searchText += cp.toChar()
+            ModuleRiseClickgui.targetScroll = 0f
             return true
         }
 
@@ -633,16 +699,17 @@ object ModuleRiseClickgui : ClientModule(
     }
 
     private fun cycleChoice(v: Value<*>): Boolean {
-        // 优先 Value 自带的 next / cycle
-        for (name in listOf("next", "cycle", "selectNext", "increment")) {
-            val ok = runCatching {
-                v.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.equals(name, true) }?.invoke(v)
-                true
-            }.getOrDefault(false)
-            if (ok) {
-                // 确认是否真的有 next 方法
-                if (v.javaClass.methods.any { it.parameterCount == 0 && it.name.equals(name, true) }) return true
-            }
+        // 优先 Value 自带的 next / cycle（必须真有方法才算成功）
+        for (name in listOf("next", "cycle", "selectNext", "increment", "cycleNext")) {
+            val m = v.javaClass.methods.firstOrNull {
+                it.parameterCount == 0 && it.name.equals(name, true)
+            } ?: continue
+            val before = choiceLabel(getActual(v))
+            runCatching { m.invoke(v) }
+            val after = choiceLabel(getActual(v))
+            if (after != before && after != "-" && after.isNotBlank()) return true
+            // 即使标签相同也可能内部已切（少数实现），仍算成功
+            if (after.isNotBlank() && after != "-") return true
         }
 
         val actual = getActual(v)
@@ -715,17 +782,105 @@ object ModuleRiseClickgui : ClientModule(
         var s = actual.toString()
         if ('[' in s) s = s.substringBefore('[')
         s = s.substringAfterLast('.').substringBefore('@').substringBefore('$')
-        return s.ifBlank { "-" }.take(18)
+        return s.ifBlank { "" }.take(24).ifBlank { "-" }
+    }
+
+    private fun isTextLike(v: Value<*>, actual: Any?): Boolean {
+        val sn = v.javaClass.simpleName
+        val an = actual?.javaClass?.simpleName ?: ""
+        if (actual is String) return true
+        if (sn.contains("Text", true) || sn.contains("String", true)) return true
+        if (an.contains("Text", true) || an.contains("String", true)) return true
+        // Block / BlockValue / Registry key text
+        if (sn.contains("Block", true) || an.contains("Block", true)) return true
+        if (sn.contains("Item", true) && !sn.contains("Boolean", true)) {
+            // 部分 Item 选择器以文本 id 形式编辑
+            if (!isChoiceLike(v, actual)) return true
+        }
+        return false
+    }
+
+    private fun beginTextEdit(v: Value<*>) {
+        textEditValue = v
+        searchFocused = false
+        val actual = getActual(v)
+        textEditBuf = when (actual) {
+            is String -> actual
+            null -> ""
+            else -> choiceLabel(actual).let { if (it == "-") "" else it }
+        }
+        // 尝试把当前 Block 的 registry id 读出来
+        if (textEditBuf.isBlank() || textEditBuf == "-") {
+            runCatching {
+                for (n in listOf("getAsString", "asString", "getString", "getId", "getKey", "toId")) {
+                    val m = v.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.equals(n, true) }
+                        ?: actual?.javaClass?.methods?.firstOrNull { it.parameterCount == 0 && it.name.equals(n, true) }
+                    val r = m?.invoke(if (m.declaringClass.isInstance(v)) v else actual) ?: continue
+                    if (r is String && r.isNotBlank()) {
+                        textEditBuf = r
+                        break
+                    }
+                }
+            }
+        }
+    }
+
+    private fun commitTextEdit() {
+        val v = textEditValue ?: return
+        val s = textEditBuf.trim()
+        // Block / Text 优先 setByString
+        if (!trySet(v, s)) {
+            runCatching {
+                v.javaClass.methods.firstOrNull {
+                    it.parameterCount == 1 && (
+                        it.name.equals("setByString", true) ||
+                            it.name.equals("setAsString", true) ||
+                            it.name.equals("set", true)
+                        )
+                }?.invoke(v, s)
+            }
+        }
+        textEditValue = null
+        textEditBuf = ""
     }
 
     private fun handleSettingClick(v: Value<*>, x: Float, w: Float, button: Int) {
         val actual = getActual(v)
+
+        // 文本 / 方块 ID：左键进入输入，右键清空不折叠
+        if (isTextLike(v, actual)) {
+            if (button == 0) {
+                if (textEditValue == v) {
+                    commitTextEdit()
+                } else {
+                    beginTextEdit(v)
+                }
+            } else if (button == 1) {
+                // 右键：若正在编辑则取消，否则开始编辑
+                if (textEditValue == v) {
+                    textEditValue = null
+                    textEditBuf = ""
+                } else {
+                    beginTextEdit(v)
+                }
+            }
+            return
+        }
+
         if (button == 1) {
-            // 右键：展开/收起可选列表
-            enumOpen[v] = !(enumOpen[v] ?: false)
+            // 右键：仅对 Choice/Enum 展开列表，不误伤其它类型
+            if (actual is Enum<*> || isChoiceLike(v, actual)) {
+                enumOpen[v] = !(enumOpen[v] ?: false)
+            }
             return
         }
         if (button != 0) return
+
+        // 点击其它项时结束文本编辑
+        if (textEditValue != null && textEditValue != v) {
+            commitTextEdit()
+        }
+
         when {
             actual is Boolean -> {
                 if (!trySet(v, !actual)) {
@@ -747,16 +902,19 @@ object ModuleRiseClickgui : ClientModule(
                 paletteX = (x + w - 6 * 14f - 8f).coerceAtLeast(4f)
                 paletteY = (mouseY + 8f)
             }
-            // 枚举 / Choice / Mode：左键直接切换下一项
+            // 枚举 / Choice / Mode：左键切换，失败则展开列表（不反复折叠）
             actual is Enum<*> || isChoiceLike(v, actual) -> {
                 if (!cycleChoice(v)) {
-                    enumOpen[v] = !(enumOpen[v] ?: false)
+                    // 展开下拉，而不是 toggle 导致「点一下就收」
+                    enumOpen[v] = true
                 }
             }
             else -> {
-                // 兜底仍尝试 cycle
-                if (!cycleChoice(v)) {
-                    enumOpen[v] = !(enumOpen[v] ?: false)
+                // 未知类型：尝试当文本编辑（Block id 等）
+                if (isTextLike(v, actual) || choiceLabel(actual) == "-") {
+                    beginTextEdit(v)
+                } else if (!cycleChoice(v)) {
+                    beginTextEdit(v)
                 }
             }
         }
@@ -764,13 +922,20 @@ object ModuleRiseClickgui : ClientModule(
 
     private fun isChoiceLike(v: Value<*>, actual: Any?): Boolean {
         val sn = v.javaClass.simpleName
+        // 文本 / 方块 ID 不当作 Choice
+        if (sn.contains("Text", true) || sn.contains("String", true) || sn.contains("Block", true)) return false
+        if (actual is String) return false
         if (sn.contains("Choice", true) || sn.contains("Mode", true) || sn.contains("Select", true)) return true
         if (actual != null) {
             val an = actual.javaClass.simpleName
+            if (an.contains("Block", true) || an.contains("Text", true)) return false
             if (an.contains("Choice", true) || an.contains("Mode", true) || actual is Enum<*>) return true
         }
-        val names = listOf("getChoices", "choices", "getModes", "modes")
-        return listFrom(v, names) != null || listFrom(actual, names) != null
+        val names = listOf("getChoices", "choices", "getModes", "modes", "getActiveChoices")
+        val list = listFrom(v, names) ?: listFrom(actual, names)
+        // 列表过长（如全方块）不当模式切换
+        if (list != null && list.size in 2..32) return true
+        return false
     }
 
     @Suppress("unused")
@@ -1082,11 +1247,21 @@ object ModuleRiseClickgui : ClientModule(
             }
             else -> {
                 ctx.text(font, displayName(v), (x + 8f).roundToInt(), ty.roundToInt(), colSecondaryText.alpha(a).argb, false)
-                val mode = choiceLabel(actual)
+                val editing = textEditValue == v
+                val mode = if (editing) {
+                    textEditBuf + if ((System.currentTimeMillis() / 500) % 2L == 0L) "_" else ""
+                } else {
+                    val lab = choiceLabel(actual)
+                    if (lab == "-" || lab.isBlank()) {
+                        // Block / 文本空值提示
+                        if (isTextLike(v, actual)) "click to edit" else "-"
+                    } else lab
+                }
+                val mc = if (editing) Color4b(120, 220, 255, a) else colAccent.alpha(a)
                 ctx.text(
-                    font, mode,
-                    (x + w - 8f - font.width(mode)).roundToInt(), ty.roundToInt(),
-                    colAccent.alpha(a).argb, false,
+                    font, mode.take(28),
+                    (x + w - 8f - font.width(mode.take(28))).roundToInt(), ty.roundToInt(),
+                    mc.argb, false,
                 )
             }
         }
