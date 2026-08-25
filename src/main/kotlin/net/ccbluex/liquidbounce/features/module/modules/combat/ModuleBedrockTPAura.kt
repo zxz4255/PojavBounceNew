@@ -466,63 +466,9 @@ object ModuleBedrockTPAura : ClientModule("BedrockTPAura", ModuleCategories.COMB
 
     @Suppress("unused")
     private val renderHandler = handler<WorldRenderEvent> { _ ->
+        // 路径绘制在现代 OpenGL Core / 部分环境无法使用即时模式 GL11，
+        // 为保证编译与运行稳定，此处不调用 GL11 / RenderSystem。
+        // 战斗与寻路逻辑不受影响；需要可视化时可再接 LB WorldRenderEnvironment API。
         if (!renderPath) return@handler
-        if (path.isEmpty() && returnPath.isEmpty()) return@handler
-
-        // 相机：插值玩家眼位置（不访问 private Camera）
-        val pt = 1f
-        val camX = player.xo + (player.x - player.xo) * pt
-        val camY = player.yo + (player.y - player.yo) * pt + player.eyeHeight
-        val camZ = player.zo + (player.z - player.zo) * pt
-
-        fun drawSeg(a: Vec3, b: Vec3, color: Color4b) {
-            val ax = a.x - camX
-            val ay = a.y + 0.05 - camY
-            val az = a.z - camZ
-            val bx = b.x - camX
-            val by = b.y + 0.05 - camY
-            val bz = b.z - camZ
-            try {
-                val gl = org.lwjgl.opengl.GL11
-                val hadDepth = gl.glIsEnabled(gl.GL_DEPTH_TEST)
-                val hadBlend = gl.glIsEnabled(gl.GL_BLEND)
-                gl.glEnable(gl.GL_BLEND)
-                gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
-                gl.glDisable(gl.GL_DEPTH_TEST)
-                gl.glLineWidth(2.0f)
-                gl.glColor4f(
-                    color.r / 255.0f,
-                    color.g / 255.0f,
-                    color.b / 255.0f,
-                    color.a / 255.0f,
-                )
-                gl.glBegin(gl.GL_LINES)
-                gl.glVertex3d(ax, ay, az)
-                gl.glVertex3d(bx, by, bz)
-                gl.glEnd()
-                if (hadDepth) gl.glEnable(gl.GL_DEPTH_TEST) else gl.glDisable(gl.GL_DEPTH_TEST)
-                if (hadBlend) gl.glEnable(gl.GL_BLEND) else gl.glDisable(gl.GL_BLEND)
-                gl.glColor4f(1.0f, 1.0f, 1.0f, 1.0f)
-            } catch (_: Throwable) {
-                // 渲染失败时静默忽略，不影响战斗逻辑
-            }
-        }
-
-        val pts = path
-        for (i in 0 until pts.size - 1) {
-            val col = if (i < pathIndex) doneColor else pathColor
-            drawSeg(pts[i], pts[i + 1], col)
-        }
-        if (renderTarget && pathIndex < pts.size) {
-            val p0 = pts[pathIndex]
-            val s = 0.12
-            val c = Color4b(255, 220, 80, 220)
-            drawSeg(p0.add(-s, 0.0, 0.0), p0.add(s, 0.0, 0.0), c)
-            drawSeg(p0.add(0.0, 0.0, -s), p0.add(0.0, 0.0, s), c)
-        }
-        for (i in 0 until returnPath.size - 1) {
-            if (i < returnIndex) continue
-            drawSeg(returnPath[i], returnPath[i + 1], Color4b(255, 160, 80, 160))
-        }
     }
 }
