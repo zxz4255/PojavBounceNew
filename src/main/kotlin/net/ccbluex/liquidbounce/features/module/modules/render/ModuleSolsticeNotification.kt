@@ -57,6 +57,27 @@ object ModuleSolsticeNotification : ClientModule(
     private val shadowBlur by float("Shadow Blur", 50f, 1f..120f)
     private val shadowDensity by int("Shadow Density", 2, 1..8)
 
+    private val glow by boolean("Glow", true)
+    private val glowRadius by float("Glow Radius", 14f, 2f..48f)
+    private val glowStrength by float("Glow Strength", 0.65f, 0.05f..1.5f)
+    private val glowLayers by int("Glow Layers", 12, 3..24)
+    private val glowSoftness by float("Glow Softness", 1.35f, 0.5f..3f)
+    private val glowSpread by float("Glow Spread", 1.0f, 0.3f..2.5f)
+    private val glowInner by float("Glow Inner", 0.15f, 0f..0.8f)
+    private enum class GlowColorMode(override val tag: String) : Tagged {
+        CUSTOM("Custom"),
+        THEME("Theme"),
+        TYPE("By Type"),
+        GRADIENT("Gradient"),
+    }
+
+    private val glowColorMode by enumChoice("Glow Color Mode", GlowColorMode.CUSTOM)
+    private val glowColor by color("Glow Color", Color4b(0xE9, 0xA8, 0xBC, 255))
+    private val glowColor2 by color("Glow Color 2", Color4b(0x6E, 0xC8, 0xF1, 255))
+    private val glowAlpha by float("Glow Alpha", 1f, 0.1f..1.5f)
+    private val glowPulse by boolean("Glow Pulse", false)
+    private val glowPulseSpeed by float("Glow Pulse Speed", 2.2f, 0.5f..8f)
+
     private val themeA by color("Theme A", Color4b(0xE9, 0xA8, 0xBC, 255))
     private val themeB by color("Theme B", Color4b(0x6E, 0xC8, 0xF1, 255))
     private val themeC by color("Theme C", Color4b(255, 255, 255, 128))
@@ -191,6 +212,62 @@ object ModuleSolsticeNotification : ClientModule(
         }
     }
 
+    /**
+     * Natural outer glow: gaussian-like radial falloff, multi-layer rounded fills.
+     * Tunable radius / strength / softness / spread / inner core / optional pulse.
+     */
+    private fun drawGlow(
+        ctx: net.minecraft.client.gui.GuiGraphicsExtractor,
+        x1: Float, y1: Float, x2: Float, y2: Float,
+        base: Color4b, base2: Color4b, alphaMul: Float, gradient: Boolean,
+    ) {
+        if (!glow) return
+        val layers = glowLayers.coerceIn(3, 24)
+        val maxR = (glowRadius * glowSpread).coerceAtLeast(1.5f)
+        val strength = glowStrength.coerceIn(0.05f, 1.5f)
+        val soft = glowSoftness.coerceIn(0.5f, 3f)
+        val inner = glowInner.coerceIn(0f, 0.8f)
+        val aScale = glowAlpha.coerceIn(0.1f, 1.5f)
+
+        var pulse = 1f
+        if (glowPulse) {
+            val t = (System.currentTimeMillis() % 100000L) / 1000.0
+            pulse = (0.82f + 0.18f * kotlin.math.sin(t * glowPulseSpeed).toFloat())
+        }
+
+        for (i in layers downTo 1) {
+            val u = i / layers.toFloat()
+            val r = maxR * u
+            val gauss = kotlin.math.exp(-(u * u) * (2.8f / soft)).toFloat()
+            val core = 1f + inner * (1f - u)
+            val fall = (gauss * core).coerceIn(0f, 1.6f)
+            val a = (fall * strength * pulse * aScale * 165f * alphaMul)
+                .toInt()
+                .coerceIn(0, 180)
+            if (a < 2) continue
+
+            // layer color: solid base, or lerp base→base2 by radius (outer uses base2)
+            val src = if (gradient) {
+                val s = u // outer = more base2
+                Color4b(
+                    lerp(base.r.toFloat(), base2.r.toFloat(), s).toInt().coerceIn(0, 255),
+                    lerp(base.g.toFloat(), base2.g.toFloat(), s).toInt().coerceIn(0, 255),
+                    lerp(base.b.toFloat(), base2.b.toFloat(), s).toInt().coerceIn(0, 255),
+                    255,
+                )
+            } else base
+
+            val desat = (u * 0.10f).coerceIn(0f, 0.2f)
+            val rC = (src.r + (255 - src.r) * desat).toInt().coerceIn(0, 255)
+            val gC = (src.g + (255 - src.g) * desat).toInt().coerceIn(0, 255)
+            val bC = (src.b + (255 - src.b) * desat).toInt().coerceIn(0, 255)
+            val col = Color4b(rC, gC, bC, a)
+
+            val rad = (cornerRadius + r * 0.55f).coerceAtLeast(cornerRadius)
+            ctx.drawRoundedRect(x1 - r, y1 - r, x2 + r, y2 + r, rad, col)
+        }
+    }
+
     private fun drawHGradient(
         ctx: net.minecraft.client.gui.GuiGraphicsExtractor,
         x1: Float, y1: Float, x2: Float, y2: Float,
@@ -269,6 +346,22 @@ object ModuleSolsticeNotification : ClientModule(
             val cLeft = theme.alpha((220 * aMul).toInt().coerceIn(0, 255))
             val cRight = getThemedColor(boxTop * 2f + boxW * 1.2f)
                 .alpha((200 * aMul).toInt().coerceIn(0, 255))
+            // 外围辉光颜色：Custom / Theme / By Type / Gradient
+            val (g1, g2, gGrad) = when (glowColorMode) {
+                GlowColorMode.CUSTOM -> Triple(glowColor, glowColor2, false)
+                GlowColorMode.THEME -> Triple(theme, getThemedColor(boxTop * 2f + 40f), false)
+                GlowColorMode.TYPE -> Triple(
+                    when (n.type) {
+                        Type.WARNING -> Color4b(255, 204, 0, 255)
+                        Type.ERROR -> Color4b(255, 60, 60, 255)
+                        Type.INFO -> glowColor
+                    },
+                    glowColor2,
+                    false,
+                )
+                GlowColorMode.GRADIENT -> Triple(glowColor, glowColor2, true)
+            }
+            drawGlow(ctx, x, boxTop, x + boxW, boxBottom, g1, g2, aMul, gGrad)
             // 先铺一层不透明主题底，杜绝缝隙透出黑/游戏画面
             ctx.drawRoundedRect(x, boxTop, x + boxW, boxBottom, cornerRadius, cLeft)
             if (colorGradient) {
