@@ -1,5 +1,5 @@
 /*
- * ModuleTPAura — LiquidBounce Nextgen 0.39
+ * ModuleBedrockTPAura — LiquidBounce Nextgen 0.39
  * 强寻路 TP Aura：A* 地面路径、逐步传送防回弹、3D 路径绘制
  */
 package net.ccbluex.liquidbounce.features.module.modules.combat
@@ -10,7 +10,6 @@ import net.ccbluex.liquidbounce.event.events.WorldRenderEvent
 import net.ccbluex.liquidbounce.event.handler
 import net.ccbluex.liquidbounce.features.module.ClientModule
 import net.ccbluex.liquidbounce.features.module.ModuleCategories
-import net.ccbluex.liquidbounce.render.drawLine
 import net.ccbluex.liquidbounce.render.engine.type.Color4b
 import net.ccbluex.liquidbounce.utils.aiming.RotationManager
 import net.ccbluex.liquidbounce.utils.aiming.RotationsValueGroup
@@ -18,8 +17,6 @@ import net.ccbluex.liquidbounce.utils.aiming.data.Rotation
 import net.ccbluex.liquidbounce.utils.client.mc
 import net.ccbluex.liquidbounce.utils.client.player
 import net.ccbluex.liquidbounce.utils.client.world
-import net.ccbluex.liquidbounce.utils.combat.attack
-import net.ccbluex.liquidbounce.utils.entity.boxedDistanceTo
 import net.ccbluex.liquidbounce.utils.kotlin.Priority
 import net.minecraft.core.BlockPos
 import net.minecraft.core.Direction
@@ -326,7 +323,7 @@ object ModuleBedrockTPAura : ClientModule("BedrockTPAura", ModuleCategories.COMB
                 considerInventory = false,
                 valueGroup = rotations,
                 priority = Priority.IMPORTANT_FOR_USAGE_1,
-                provider = this@ModuleTPAura,
+                provider = this@ModuleBedrockTPAura,
             )
         }.onFailure {
             player.yRot = yaw
@@ -341,10 +338,21 @@ object ModuleBedrockTPAura : ClientModule("BedrockTPAura", ModuleCategories.COMB
         if (!throughWalls && !player.hasLineOfSight(entity)) return
         lookAt(entity)
         runCatching {
-            player.attack(entity, keepSprint = keepSprint)
+            // LB 0.39: GameMode.attack 无 keepSprint 命名参数
+            mc.gameMode?.attack(player, entity)
+            if (swing) {
+                player.swing(net.minecraft.world.InteractionHand.MAIN_HAND)
+            }
+            if (!keepSprint) {
+                player.isSprinting = false
+            }
         }.onFailure {
-            runCatching { mc.gameMode?.attack(player, entity) }
-            if (swing) player.swing(player.usedItemHand)
+            runCatching {
+                player.attack(entity)
+            }
+            if (swing) {
+                runCatching { player.swing(net.minecraft.world.InteractionHand.MAIN_HAND) }
+            }
         }
     }
 
@@ -459,8 +467,17 @@ object ModuleBedrockTPAura : ClientModule("BedrockTPAura", ModuleCategories.COMB
     @Suppress("unused")
     private val renderHandler = handler<WorldRenderEvent> { event ->
         if (!renderPath) return@handler
-        val cam = runCatching { mc.gameRenderer.mainCamera.position }.getOrNull()
-            ?: Vec3(player.x, player.y + player.eyeHeight, player.z)
+        // Camera: 不访问 private mainCamera，用插值玩家眼位置
+        val pt = try {
+            event.partialTicks
+        } catch (_: Throwable) {
+            runCatching { event.javaClass.methods.firstOrNull { it.name.contains("partial", true) && it.parameterCount == 0 }?.invoke(event) as? Float }.getOrNull() ?: 1f
+        }
+        val cam = Vec3(
+            player.xo + (player.x - player.xo) * pt,
+            player.yo + (player.y - player.yo) * pt + player.eyeHeight,
+            player.zo + (player.z - player.zo) * pt,
+        )
 
         fun drawSeg(a: Vec3, b: Vec3, color: Color4b) {
             val ax = a.x - cam.x
@@ -469,25 +486,22 @@ object ModuleBedrockTPAura : ClientModule("BedrockTPAura", ModuleCategories.COMB
             val bx = b.x - cam.x
             val by = b.y + 0.05 - cam.y
             val bz = b.z - cam.z
+            // 使用即时 GL 线段（不依赖 WorldRenderEnvironment.drawLine 接收者）
             runCatching {
-                event.matrixStack.pushPose()
-                // LB drawLine 若可用
-                drawLine(
-                    event.matrixStack,
-                    Vec3(ax, ay, az),
-                    Vec3(bx, by, bz),
-                    color,
+                com.mojang.blaze3d.systems.RenderSystem.enableBlend()
+                com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc()
+                com.mojang.blaze3d.systems.RenderSystem.disableDepthTest()
+                org.lwjgl.opengl.GL11.glLineWidth(2f)
+                org.lwjgl.opengl.GL11.glColor4f(
+                    color.r / 255f, color.g / 255f, color.b / 255f, color.a / 255f,
                 )
-                event.matrixStack.popPose()
-            }.onFailure {
-                // fallback GL
-                runCatching {
-                    org.lwjgl.opengl.GL11.glColor4f(color.r / 255f, color.g / 255f, color.b / 255f, color.a / 255f)
-                    org.lwjgl.opengl.GL11.glBegin(org.lwjgl.opengl.GL11.GL_LINES)
-                    org.lwjgl.opengl.GL11.glVertex3d(ax, ay, az)
-                    org.lwjgl.opengl.GL11.glVertex3d(bx, by, bz)
-                    org.lwjgl.opengl.GL11.glEnd()
-                }
+                org.lwjgl.opengl.GL11.glBegin(org.lwjgl.opengl.GL11.GL_LINES)
+                org.lwjgl.opengl.GL11.glVertex3d(ax, ay, az)
+                org.lwjgl.opengl.GL11.glVertex3d(bx, by, bz)
+                org.lwjgl.opengl.GL11.glEnd()
+                com.mojang.blaze3d.systems.RenderSystem.enableDepthTest()
+                com.mojang.blaze3d.systems.RenderSystem.disableBlend()
+                org.lwjgl.opengl.GL11.glColor4f(1f, 1f, 1f, 1f)
             }
         }
 
