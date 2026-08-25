@@ -37,6 +37,7 @@ import net.ccbluex.liquidbounce.features.module.modules.combat.ModuleHeadAimbot
 import net.ccbluex.liquidbounce.features.module.modules.combat.ModuleDisplace
 import net.ccbluex.liquidbounce.features.module.modules.combat.ModuleAutoRodPro
 import net.ccbluex.liquidbounce.features.module.modules.combat.ModuleAutoClicker
+import net.ccbluex.liquidbounce.features.module.modules.combat.ModuleBedrockTPAura
 import net.ccbluex.liquidbounce.features.module.modules.world.automobheal.AutoMobHeal
 import net.ccbluex.liquidbounce.features.module.modules.combat.ModuleAutoLeave
 import net.ccbluex.liquidbounce.features.module.modules.combat.ModuleAutoRod
@@ -489,6 +490,7 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             // Combat
             ModuleAimbot,
             ModuleAutoRodPro,
+            ModuleBedrockTPAura,
             ModuleHeadAimbot,
             ModuleDisplace,
             ModuleAutoArmor,
