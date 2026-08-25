@@ -465,43 +465,46 @@ object ModuleBedrockTPAura : ClientModule("BedrockTPAura", ModuleCategories.COMB
     }
 
     @Suppress("unused")
-    private val renderHandler = handler<WorldRenderEvent> { event ->
+    private val renderHandler = handler<WorldRenderEvent> { _ ->
         if (!renderPath) return@handler
-        // Camera: 不访问 private mainCamera，用插值玩家眼位置
-        val pt = try {
-            event.partialTicks
-        } catch (_: Throwable) {
-            runCatching { event.javaClass.methods.firstOrNull { it.name.contains("partial", true) && it.parameterCount == 0 }?.invoke(event) as? Float }.getOrNull() ?: 1f
-        }
-        val cam = Vec3(
-            player.xo + (player.x - player.xo) * pt,
-            player.yo + (player.y - player.yo) * pt + player.eyeHeight,
-            player.zo + (player.z - player.zo) * pt,
-        )
+        if (path.isEmpty() && returnPath.isEmpty()) return@handler
+
+        // 相机：插值玩家眼位置（不访问 private Camera）
+        val pt = 1f
+        val camX = player.xo + (player.x - player.xo) * pt
+        val camY = player.yo + (player.y - player.yo) * pt + player.eyeHeight
+        val camZ = player.zo + (player.z - player.zo) * pt
 
         fun drawSeg(a: Vec3, b: Vec3, color: Color4b) {
-            val ax = a.x - cam.x
-            val ay = a.y + 0.05 - cam.y
-            val az = a.z - cam.z
-            val bx = b.x - cam.x
-            val by = b.y + 0.05 - cam.y
-            val bz = b.z - cam.z
-            // 使用即时 GL 线段（不依赖 WorldRenderEnvironment.drawLine 接收者）
-            runCatching {
-                com.mojang.blaze3d.systems.RenderSystem.enableBlend()
-                com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc()
-                com.mojang.blaze3d.systems.RenderSystem.disableDepthTest()
-                org.lwjgl.opengl.GL11.glLineWidth(2f)
-                org.lwjgl.opengl.GL11.glColor4f(
-                    color.r / 255f, color.g / 255f, color.b / 255f, color.a / 255f,
+            val ax = a.x - camX
+            val ay = a.y + 0.05 - camY
+            val az = a.z - camZ
+            val bx = b.x - camX
+            val by = b.y + 0.05 - camY
+            val bz = b.z - camZ
+            try {
+                val gl = org.lwjgl.opengl.GL11
+                val hadDepth = gl.glIsEnabled(gl.GL_DEPTH_TEST)
+                val hadBlend = gl.glIsEnabled(gl.GL_BLEND)
+                gl.glEnable(gl.GL_BLEND)
+                gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
+                gl.glDisable(gl.GL_DEPTH_TEST)
+                gl.glLineWidth(2.0f)
+                gl.glColor4f(
+                    color.r / 255.0f,
+                    color.g / 255.0f,
+                    color.b / 255.0f,
+                    color.a / 255.0f,
                 )
-                org.lwjgl.opengl.GL11.glBegin(org.lwjgl.opengl.GL11.GL_LINES)
-                org.lwjgl.opengl.GL11.glVertex3d(ax, ay, az)
-                org.lwjgl.opengl.GL11.glVertex3d(bx, by, bz)
-                org.lwjgl.opengl.GL11.glEnd()
-                com.mojang.blaze3d.systems.RenderSystem.enableDepthTest()
-                com.mojang.blaze3d.systems.RenderSystem.disableBlend()
-                org.lwjgl.opengl.GL11.glColor4f(1f, 1f, 1f, 1f)
+                gl.glBegin(gl.GL_LINES)
+                gl.glVertex3d(ax, ay, az)
+                gl.glVertex3d(bx, by, bz)
+                gl.glEnd()
+                if (hadDepth) gl.glEnable(gl.GL_DEPTH_TEST) else gl.glDisable(gl.GL_DEPTH_TEST)
+                if (hadBlend) gl.glEnable(gl.GL_BLEND) else gl.glDisable(gl.GL_BLEND)
+                gl.glColor4f(1.0f, 1.0f, 1.0f, 1.0f)
+            } catch (_: Throwable) {
+                // 渲染失败时静默忽略，不影响战斗逻辑
             }
         }
 
@@ -511,13 +514,12 @@ object ModuleBedrockTPAura : ClientModule("BedrockTPAura", ModuleCategories.COMB
             drawSeg(pts[i], pts[i + 1], col)
         }
         if (renderTarget && pathIndex < pts.size) {
-            val p = pts[pathIndex]
+            val p0 = pts[pathIndex]
             val s = 0.12
             val c = Color4b(255, 220, 80, 220)
-            drawSeg(p.add(-s, 0.0, 0.0), p.add(s, 0.0, 0.0), c)
-            drawSeg(p.add(0.0, 0.0, -s), p.add(0.0, 0.0, s), c)
+            drawSeg(p0.add(-s, 0.0, 0.0), p0.add(s, 0.0, 0.0), c)
+            drawSeg(p0.add(0.0, 0.0, -s), p0.add(0.0, 0.0, s), c)
         }
-        // 回程路径
         for (i in 0 until returnPath.size - 1) {
             if (i < returnIndex) continue
             drawSeg(returnPath[i], returnPath[i + 1], Color4b(255, 160, 80, 160))
