@@ -40,7 +40,7 @@ object ModuleBedrockTPAura : ClientModule("BedrockTPAura", ModuleCategories.COMB
     private val stepBlocks by float("Step Blocks", 0.85f, 0.25f..2.5f)
     private val stepsPerTick by int("Steps Per Tick", 1, 1..4)
     private val tickDelay by int("Tick Delay", 0, 0..10)
-    private val onlyPlayers by boolean("Only Players", true)
+    private val onlyPlayers by boolean("Only Players", false)
     private val throughWalls by boolean("Through Walls Attack", false)
     private val requireGround by boolean("Path On Ground", true)
     private val allowStepUp by boolean("Allow Step Up", true)
@@ -241,12 +241,33 @@ object ModuleBedrockTPAura : ClientModule("BedrockTPAura", ModuleCategories.COMB
         var best: LivingEntity? = null
         var bestD = targetRange.toDouble()
         val self = player
-        for (e in world.entitiesForRendering()) {
-            if (e !is LivingEntity || e === self || !e.isAlive) continue
-            if (onlyPlayers && e !is Player) continue
-            if (e is Player && (e.isSpectator || e.isCreative)) continue
+        // entitiesForRendering 在部分环境可能不全，再扫一次 allEntities
+        val candidates = LinkedHashSet<LivingEntity>()
+        runCatching {
+            for (e in world.entitiesForRendering()) {
+                if (e is LivingEntity) candidates.add(e)
+            }
+        }
+        runCatching {
+            for (e in world.entitiesForRendering()) { /* keep */ }
+            // ClientLevel 常见：entitiesForRendering；失败则用 getEntities
+            val box = self.boundingBox.inflate(targetRange.toDouble())
+            val list = world.getEntities(self, box) { it is LivingEntity }
+            for (e in list) {
+                if (e is LivingEntity) candidates.add(e)
+            }
+        }
+        for (e in candidates) {
+            if (e === self || !e.isAlive || e.isRemoved) continue
+            if (e.health <= 0f) continue
+            if (onlyPlayers) {
+                if (e !is Player) continue
+            }
+            if (e is Player) {
+                if (e.isSpectator || e.isCreative) continue
+            }
             val d = self.distanceTo(e).toDouble()
-            if (d > bestD) continue
+            if (d > bestD || d < 0.1) continue
             if (fov < 360f) {
                 val yaw = self.yRot
                 val dx = e.x - self.x
@@ -333,26 +354,29 @@ object ModuleBedrockTPAura : ClientModule("BedrockTPAura", ModuleCategories.COMB
 
     private fun tryAttack(entity: LivingEntity) {
         if (!autoAttack) return
+        if (!entity.isAlive || entity.isRemoved) return
         val dist = player.distanceTo(entity)
         if (dist > attackRange) return
-        if (!throughWalls && !player.hasLineOfSight(entity)) return
+        // 近距离放宽视线：TP 后偶发 hasLineOfSight 误判
+        if (!throughWalls && dist > 1.5f && !player.hasLineOfSight(entity)) return
         lookAt(entity)
+        val hand = net.minecraft.world.InteractionHand.MAIN_HAND
+        var ok = false
         runCatching {
-            // LB 0.39: GameMode.attack 无 keepSprint 命名参数
             mc.gameMode?.attack(player, entity)
-            if (swing) {
-                player.swing(net.minecraft.world.InteractionHand.MAIN_HAND)
-            }
-            if (!keepSprint) {
-                player.isSprinting = false
-            }
-        }.onFailure {
+            ok = true
+        }
+        if (!ok) {
             runCatching {
                 player.attack(entity)
+                ok = true
             }
-            if (swing) {
-                runCatching { player.swing(net.minecraft.world.InteractionHand.MAIN_HAND) }
-            }
+        }
+        if (swing) {
+            runCatching { player.swing(hand) }
+        }
+        if (!keepSprint) {
+            player.isSprinting = false
         }
     }
 
@@ -417,7 +441,7 @@ object ModuleBedrockTPAura : ClientModule("BedrockTPAura", ModuleCategories.COMB
         target = t
 
         // 已在攻击距离内：不 TP，直接打
-        if (player.distanceTo(t) <= attackRange && (throughWalls || player.hasLineOfSight(t))) {
+        if (player.distanceTo(t) <= attackRange) {
             tryAttack(t)
             path = emptyList()
             pathIndex = 0
