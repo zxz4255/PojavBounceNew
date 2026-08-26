@@ -26,6 +26,8 @@ import net.minecraft.network.chat.Component
 import org.lwjgl.glfw.GLFW
 import java.util.IdentityHashMap
 import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -91,6 +93,11 @@ object ModuleSolsticeClickgui : ClientModule(
     private val enumOpen = IdentityHashMap<Value<*>, Boolean>()
     private val sliderEase = IdentityHashMap<Value<*>, Float>()
     private val boolScale = IdentityHashMap<Value<*>, Float>()
+    private val groupOpen = IdentityHashMap<Value<*>, Boolean>()
+    private var sliderRectX = 0f
+    private var sliderRectW = 1f
+    private var dualSliderDrag: Value<*>? = null // 拖双端: 负=min 正=max
+    private var dualWhich = 0 // 0=min 1=max
 
     private var sliderDrag: Value<*>? = null
     private var binding: ClientModule? = null
@@ -246,13 +253,19 @@ object ModuleSolsticeClickgui : ClientModule(
     }
 
     private fun choiceLabel(any: Any?): String {
-        if (any == null) return "-"
+        if (any == null) return "None"
         if (any is Boolean) return if (any) "ON" else "OFF"
         if (any is Number) {
+            // 键码 -1 / GLFW_KEY_UNKNOWN
+            if (any.toInt() == -1 || any.toInt() == 0 || any.toInt() == GLFW.GLFW_KEY_UNKNOWN) return "None"
             val d = any.toDouble()
             return if (d == d.toLong().toDouble()) any.toLong().toString() else "%.2f".format(d)
         }
-        if (any is Enum<*>) return any.name
+        if (any is Enum<*>) {
+            val n = any.name
+            if (n.equals("UNKNOWN", true) || n.equals("NONE", true) || n.equals("UNBOUND", true)) return "None"
+            return n
+        }
         runCatching {
             for (n in listOf("getChoiceName", "getName", "getTag", "getDisplayName")) {
                 val m = any.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.equals(n, true) }
@@ -263,8 +276,10 @@ object ModuleSolsticeClickgui : ClientModule(
         }
         var s = any.toString().substringAfterLast('.').substringBefore('@')
         s = s.replace(Regex("""\[[^\]]*\]"""), "").trim()
-        if (s.contains("InputBind", true) || s.contains("KeyBinding", true)) return "None"
-        return s.take(18).ifBlank { "-" }
+        if (s.contains("InputBind", true) || s.contains("KeyBinding", true) ||
+            s.equals("UNKNOWN", true) || s.equals("None", true) || s.contains("unknown", true)
+        ) return "None"
+        return s.take(18).ifBlank { "None" }
     }
 
     private fun listChoices(v: Value<*>): List<Any?> {
@@ -309,30 +324,132 @@ object ModuleSolsticeClickgui : ClientModule(
     }
 
     private fun rangeOf(v: Value<*>): Pair<Float, Float>? {
-        for (n in listOf("getRange", "range")) {
+        // 1) 实际值本身就是区间（部分 intRange 会如此）
+        when (val act = getActual(v)) {
+            is IntRange -> if (act.last > act.first) {
+                // 这是当前选中区间，外层 bounds 另取；先返回外层
+            }
+            is ClosedFloatingPointRange<*> -> { /* 见下 */ }
+        }
+        // 2) getRange / range 字段
+        for (n in listOf("getRange", "range", "getBounds", "bounds")) {
             val m = v.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.equals(n, true) }
-            when (val r = m?.invoke(v)) {
+            when (val r = runCatching { m?.invoke(v) }.getOrNull()) {
                 is ClosedFloatingPointRange<*> -> {
-                    val a = (r.start as? Number)?.toFloat() ?: continue
-                    val b = (r.endInclusive as? Number)?.toFloat() ?: continue
-                    if (b > a) return a to b
+                    val a = (r.start as? Number)?.toFloat()
+                    val b = (r.endInclusive as? Number)?.toFloat()
+                    if (a != null && b != null && b > a) return a to b
                 }
                 is IntRange -> if (r.last > r.first) return r.first.toFloat() to r.last.toFloat()
+                is ClosedRange<*> -> {
+                    val a = (r.start as? Number)?.toFloat()
+                    val b = (r.endInclusive as? Number)?.toFloat()
+                    if (a != null && b != null && b > a) return a to b
+                }
+            }
+        }
+        // 3) 字段扫描
+        runCatching {
+            for (f in v.javaClass.declaredFields) {
+                f.isAccessible = true
+                val r = f.get(v) ?: continue
+                when (r) {
+                    is ClosedFloatingPointRange<*> -> {
+                        val a = (r.start as? Number)?.toFloat() ?: continue
+                        val b = (r.endInclusive as? Number)?.toFloat() ?: continue
+                        if (b > a) return a to b
+                    }
+                    is IntRange -> if (r.last > r.first) return r.first.toFloat() to r.last.toFloat()
+                }
             }
         }
         fun num(names: List<String>): Float? {
             for (n in names) {
                 val m = v.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.equals(n, true) }
-                val r = m?.invoke(v)
+                val r = runCatching { m?.invoke(v) }.getOrNull()
                 if (r is Number) return r.toFloat()
+                runCatching {
+                    val f = v.javaClass.getDeclaredField(n)
+                    f.isAccessible = true
+                    val x = f.get(v)
+                    if (x is Number) return x.toFloat()
+                }
             }
             return null
         }
-        val minV = num(listOf("getMinimum", "getMin", "minimum", "min")) ?: return null
-        val maxV = num(listOf("getMaximum", "getMax", "maximum", "max")) ?: return null
+        val minV = num(listOf("getMinimum", "getMin", "minimum", "min", "from", "getFrom")) ?: return null
+        val maxV = num(listOf("getMaximum", "getMax", "maximum", "max", "to", "getTo")) ?: return null
         if (maxV <= minV) return null
         return minV to maxV
     }
+
+    /** CPS 等双端区间：当前值为 IntRange / ClosedRange */
+    private fun dualRangeValue(v: Value<*>): Pair<Float, Float>? {
+        when (val act = getActual(v)) {
+            is IntRange -> return act.first.toFloat() to act.last.toFloat()
+            is ClosedFloatingPointRange<*> -> {
+                val a = (act.start as? Number)?.toFloat() ?: return null
+                val b = (act.endInclusive as? Number)?.toFloat() ?: return null
+                return a to b
+            }
+            is ClosedRange<*> -> {
+                val a = (act.start as? Number)?.toFloat() ?: return null
+                val b = (act.endInclusive as? Number)?.toFloat() ?: return null
+                return a to b
+            }
+        }
+        // 名称暗示 CPS 且有 range
+        val n = displayName(v).lowercase()
+        if (n.contains("cps") || n.contains("range") || n.contains("delay")) {
+            // 有的实现用两个字段 value/minValue
+            val a = runCatching {
+                v.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.equals("getMinValue", true) }
+                    ?.invoke(v) as? Number
+            }.getOrNull()?.toFloat()
+            val b = runCatching {
+                v.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.equals("getMaxValue", true) }
+                    ?.invoke(v) as? Number
+            }.getOrNull()?.toFloat()
+            if (a != null && b != null && b >= a) return a to b
+        }
+        return null
+    }
+
+    private fun setDualRange(v: Value<*>, minV: Float, maxV: Float) {
+        val lo = min(minV, maxV)
+        val hi = max(minV, maxV)
+        if (trySet(v, lo.toInt()..hi.toInt())) return
+        if (trySet(v, lo..hi)) return
+        runCatching {
+            for (n in listOf("set", "setValue", "setRange")) {
+                for (m in v.javaClass.methods) {
+                    if (m.parameterCount != 1 || !m.name.equals(n, true)) continue
+                    try {
+                        m.invoke(v, lo.toInt()..hi.toInt()); return
+                    } catch (_: Exception) {
+                    }
+                    try {
+                        m.invoke(v, lo..hi); return
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+        }
+    }
+
+    private fun nestedValues(v: Value<*>): List<Value<*>> {
+        for (n in listOf("getInner", "inner", "getValues", "values", "getChildren", "children", "collectValuesRecursively")) {
+            val m = v.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.equals(n, true) } ?: continue
+            val r = runCatching { m.invoke(v) }.getOrNull() ?: continue
+            when (r) {
+                is Collection<*> -> return r.filterIsInstance<Value<*>>()
+                is Array<*> -> return r.filterIsInstance<Value<*>>()
+            }
+        }
+        return emptyList()
+    }
+
+    private fun isGroup(v: Value<*>): Boolean = nestedValues(v).isNotEmpty()
 
     private fun cycleChoice(v: Value<*>): Boolean {
         for (n in listOf("next", "cycle", "selectNext")) {
@@ -465,6 +582,7 @@ object ModuleSolsticeClickgui : ClientModule(
                 dragIdx = -1
                 catPos.forEach { it.dragging = false }
                 sliderDrag = null
+                dualSliderDrag = null
             }
             return
         }
@@ -535,13 +653,38 @@ object ModuleSolsticeClickgui : ClientModule(
     }
 
     private fun clickValue(v: Value<*>, button: Int, colX: Float) {
+        // 分组：左键展开/收起，右键强制收起
+        if (isGroup(v)) {
+            if (button == 0) groupOpen[v] = !(groupOpen[v] ?: false)
+            if (button == 1) groupOpen[v] = false
+            return
+        }
         val actual = getActual(v)
         when {
             actual is Boolean -> if (button == 0) trySet(v, !actual)
-            actual is Number -> {
+            dualRangeValue(v) != null -> {
                 if (button == 0 || button == 2) {
                     sliderDrag = v
-                    applySlider(v, colX, colX + catWidth, button == 2)
+                    dualSliderDrag = v
+                    val bounds = rangeOf(v)
+                    val dual = dualRangeValue(v)
+                    if (bounds != null && dual != null) {
+                        val (bMin, bMax) = bounds
+                        val (cMin, cMax) = dual
+                        val span = sliderRectW.coerceAtLeast(1f)
+                        val t = ((mouseX - sliderRectX) / span).coerceIn(0f, 1f)
+                        val pos = bMin + t * (bMax - bMin)
+                        // 靠近哪端拖哪端
+                        dualWhich = if (abs(pos - cMin) <= abs(pos - cMax)) 0 else 1
+                    }
+                    applySlider(v, sliderRectX, sliderRectX + sliderRectW, button == 2)
+                }
+            }
+            actual is Number || rangeOf(v) != null -> {
+                if (button == 0 || button == 2) {
+                    sliderDrag = v
+                    dualSliderDrag = null
+                    applySlider(v, sliderRectX, sliderRectX + sliderRectW, button == 2)
                 }
             }
             actual is Enum<*> || listChoices(v).isNotEmpty() -> {
@@ -556,13 +699,40 @@ object ModuleSolsticeClickgui : ClientModule(
     }
 
     private fun applySlider(v: Value<*>, x1: Float, x2: Float, mid: Boolean) {
-        val range = rangeOf(v) ?: return
+        // 双端 CPS
+        val dual = dualRangeValue(v)
+        val bounds = rangeOf(v)
+        if (dual != null && bounds != null) {
+            val (bMin, bMax) = bounds
+            val (cMin, cMax) = dual
+            val span = (x2 - x1).coerceAtLeast(1f)
+            val t = ((mouseX - x1) / span).coerceIn(0f, 1f)
+            var nv = bMin + t * (bMax - bMin)
+            if (mid) {
+                val step = midclickRound.coerceAtLeast(0.01f)
+                nv = (nv / step).roundToInt() * step
+            }
+            if (dualWhich == 0) {
+                setDualRange(v, nv.coerceIn(bMin, cMax), cMax)
+            } else {
+                setDualRange(v, cMin, nv.coerceIn(cMin, bMax))
+            }
+            return
+        }
+        val range = bounds ?: return
         val (minV, maxV) = range
-        var nv = ((mouseX - x1) / (x2 - x1).coerceAtLeast(1f) * (maxV - minV) + minV).coerceIn(minV, maxV)
+        if (maxV <= minV) return
+        val span = (x2 - x1).coerceAtLeast(1f)
+        // 使用屏幕坐标比例，避免缩放到顶死
+        var t = ((mouseX - x1) / span).coerceIn(0f, 1f)
+        var nv = minV + t * (maxV - minV)
         if (mid) {
             val step = midclickRound.coerceAtLeast(0.01f)
             nv = (nv / step).roundToInt() * step
         }
+        nv = nv.coerceIn(minV, maxV)
+        // 拖动时同步 ease，避免弹到最大后卡死
+        sliderEase[v] = t * span
         when (val actual = getActual(v)) {
             is Float -> trySet(v, nv)
             is Double -> trySet(v, nv.toDouble())
@@ -600,18 +770,25 @@ object ModuleSolsticeClickgui : ClientModule(
         val strength = panelGlowStrength.coerceIn(0.05f, 1.2f)
         val soft = panelGlowSoft.coerceIn(0.5f, 3f)
         val base = if (panelGlowTheme) themed(x + y) else panelGlowColor
-        for (i in layers downTo 1) {
+        // 自然辉光：只向外扩散，越外越淡，不用实心大块
+        for (i in 1..layers) {
             val u = i / layers.toFloat()
             val expand = maxR * u
-            val gauss = kotlin.math.exp((-(u * u) * (2.6f / soft)).toDouble()).toFloat()
-            val aa = (gauss * strength * 90f * anim).toInt().coerceIn(0, 120)
+            // 高斯衰减，外圈更淡
+            val gauss = kotlin.math.exp((-(u * soft) * (u * soft) * 2.2).toDouble()).toFloat()
+            val aa = (gauss * strength * 55f * anim).toInt().coerceIn(0, 70)
             if (aa < 2) continue
-            ctx.drawRoundedRect(
-                x - expand, y - expand,
-                x + w + expand, y + h + expand,
-                cornerRadius + expand * 0.35f,
-                Color4b(base.r, base.g, base.b, aa),
-            )
+            val rr = (cornerRadius + expand * 0.25f).coerceAtLeast(1f)
+            // 四边条带近似光晕（避免整板糊成一块色）
+            val pad = expand
+            // 上
+            ctx.drawQuad(x - pad * 0.3f, y - pad, x + w + pad * 0.3f, y, Color4b(base.r, base.g, base.b, aa))
+            // 下
+            ctx.drawQuad(x - pad * 0.3f, y + h, x + w + pad * 0.3f, y + h + pad, Color4b(base.r, base.g, base.b, aa))
+            // 左
+            ctx.drawQuad(x - pad, y, x, y + h, Color4b(base.r, base.g, base.b, (aa * 0.85f).toInt()))
+            // 右
+            ctx.drawQuad(x + w, y, x + w + pad, y + h, Color4b(base.r, base.g, base.b, (aa * 0.85f).toInt()))
         }
     }
 
@@ -704,8 +881,7 @@ object ModuleSolsticeClickgui : ClientModule(
             p.y = ((mouseY - dragOy).coerceIn(0f, sh - catHeight) / 2f).roundToInt() * 2f
         }
         sliderDrag?.let {
-            val px = catPos.getOrNull(dragIdx.coerceAtLeast(0))?.x ?: catPos.firstOrNull()?.x ?: return@let
-            applySlider(it, px, px + catWidth, false)
+            applySlider(it, sliderRectX, sliderRectX + sliderRectW, false)
         }
 
         ctx.drawQuad(0f, 0f, sw, sh, Color4b(0, 0, 0, (255 * dimAlpha * anim).toInt().coerceIn(0, 200)))
@@ -829,11 +1005,26 @@ object ModuleSolsticeClickgui : ClientModule(
                         }
                         moduleY += rowH * cAnim
 
+                        // 分组子项：左键打开后显示
+                        if (isGroup(v) && groupOpen[v] == true) {
+                            for (child in nestedValues(v)) {
+                                val cr2 = scaleRect(cx, cy, p.x, p.y + catHeight + moduleY, catWidth, rowH, s)
+                                cr2[0] = panelR[0]
+                                cr2[2] = panelR[2]
+                                if (cr2[1] > cr[1] + cr[3] - 2f) {
+                                    drawSetting(ctx, font, child, cr2[0] + 6f, cr2[1], cr2[2] - 6f, cr2[3], anim * cAnim)
+                                }
+                                moduleY += rowH * cAnim
+                            }
+                        }
+
                         val eOpen = enumOpen[v] == true
                         if (eOpen) {
                             val cur = choiceLabel(getActual(v))
                             for (c in listChoices(v)) {
                                 val er = scaleRect(cx, cy, p.x, p.y + catHeight + moduleY, catWidth, rowH, s)
+                                er[0] = panelR[0]
+                                er[2] = panelR[2]
                                 if (er[1] > cr[1] + cr[3] - 2f) {
                                     ctx.drawQuad(er[0], er[1], er[0] + er[2], er[1] + er[3], a(Color4b(20, 20, 20, 255), anim * cAnim))
                                     val lab = choiceLabel(c)
@@ -854,12 +1045,12 @@ object ModuleSolsticeClickgui : ClientModule(
                 }
             }
 
-            // 整列最底部两角改为圆角（盖住最后一行直角）
-            if (p.extended && moduleY > 0f) {
+            // 分类表最底角默认圆角
+            if (p.extended && modList.isNotEmpty() && moduleY > 0f) {
                 val foot = scaleRect(cx, cy, p.x, p.y + catHeight + moduleY - rowH, catWidth, rowH, s)
                 val r = (cornerRadius * s.coerceAtLeast(0.3f)).coerceAtLeast(2f)
-                // 只重绘底部圆角区域的左右下角
-                val footColor = a(bgModule, anim)
+                val lastMod = modList.last()
+                val footColor = a(if (lastMod.enabled) bgModule else bgModule, anim)
                 drawFooterBottomRound(ctx, panelR[0], foot[1], panelR[2], foot[3], r, footColor)
             }
         }
@@ -884,10 +1075,27 @@ object ModuleSolsticeClickgui : ClientModule(
         x: Float, y: Float, w: Float, h: Float,
         anim: Float,
     ) {
+        // 记录滑条命中区域（屏幕坐标）
+        sliderRectX = x
+        sliderRectW = w
+
         drawSeamlessRow(ctx, x, y, w, h, a(bgSetting, anim))
         val actual = getActual(v)
         val name = displayName(v)
         val ty = (y + (h - 8) / 2f).roundToInt()
+
+        // 分组头
+        if (isGroup(v)) {
+            val open = groupOpen[v] == true
+            ctx.text(font, name, (x + 5f).roundToInt(), ty, a(textMain, anim).argb, false)
+            ctx.text(
+                font, if (open) "v" else ">",
+                (x + w - 12f).roundToInt(), ty,
+                a(textDim, anim).argb, false,
+            )
+            return
+        }
+
         when {
             actual is Boolean -> {
                 boolScale[v] = lerp(boolScale.getOrDefault(v, 0f), if (actual) 1f else 0f, 0.25f)
@@ -900,34 +1108,61 @@ object ModuleSolsticeClickgui : ClientModule(
                     )
                 }
             }
-            actual is Number -> {
+            dualRangeValue(v) != null -> {
+                // CPS 等双端滑条
+                val dual = dualRangeValue(v)!!
+                val bounds = rangeOf(v) ?: (0f to 20f)
+                val (bMin, bMax) = bounds
+                val (cMin, cMax) = dual
+                val span = (bMax - bMin).coerceAtLeast(0.001f)
+                val t0 = ((cMin - bMin) / span).coerceIn(0f, 1f)
+                val t1 = ((cMax - bMin) / span).coerceIn(0f, 1f)
+                ctx.text(font, name, (x + 5f).roundToInt(), (y + 1f).roundToInt(), a(textMain, anim).argb, false)
+                val vs = "${cMin.toInt()}-${cMax.toInt()}"
+                ctx.text(font, vs, (x + w - 5f - font.width(vs)).roundToInt(), (y + 1f).roundToInt(), a(textDim, anim).argb, false)
+                val barY = y + h - 6f
+                ctx.drawQuad(x, barY, x + w, barY + 3f, a(Color4b(50, 50, 50, 255), anim))
+                ctx.drawQuad(x + w * t0, barY, x + w * t1, barY + 3f, a(themed(y), anim))
+                // 两端圆点
+                ctx.drawRoundedRect(x + w * t0 - 3f, barY - 2f, x + w * t0 + 3f, barY + 5f, 3f, a(textMain, anim))
+                ctx.drawRoundedRect(x + w * t1 - 3f, barY - 2f, x + w * t1 + 3f, barY + 5f, 3f, a(textMain, anim))
+            }
+            actual is Number || rangeOf(v) != null -> {
                 ctx.text(font, name, (x + 5f).roundToInt(), (y + 2f).roundToInt(), a(textMain, anim).argb, false)
-                val fv = actual.toFloat()
+                val fv = when (actual) {
+                    is Number -> actual.toFloat()
+                    else -> 0f
+                }
+                val range = rangeOf(v)
                 val vs = if (abs(fv - fv.toInt()) < 1e-4f) fv.toInt().toString() else "%.2f".format(fv)
                 ctx.text(font, vs, (x + w - 5f - font.width(vs)).roundToInt(), (y + 2f).roundToInt(), a(textDim, anim).argb, false)
-                val range = rangeOf(v)
                 if (range != null) {
                     val (minV, maxV) = range
-                    val p = ((fv - minV) / (maxV - minV)).coerceIn(0f, 1f)
+                    val span = (maxV - minV).coerceAtLeast(0.001f)
+                    val p = ((fv - minV) / span).coerceIn(0f, 1f)
                     val target = p * w
-                    sliderEase[v] = lerp(sliderEase.getOrDefault(v, target), target, 0.3f)
-                    val se = sliderEase[v]!!
+                    // 拖动中不 lerp，避免冲到最大后卡住
+                    if (sliderDrag === v) {
+                        sliderEase[v] = target
+                    } else {
+                        sliderEase[v] = lerp(sliderEase.getOrDefault(v, target), target, 0.35f)
+                    }
+                    val se = sliderEase[v]!!.coerceIn(0f, w)
                     val barY = y + h - 5f
+                    ctx.drawQuad(x, barY, x + w, barY + 3f, a(Color4b(50, 50, 50, 255), anim))
                     ctx.drawRoundedRect(x, barY, x + se, barY + 3.5f, 2f, a(themed(y), anim))
                 }
-                // 无 range 的数值：不画滑条，只显示纯数字（已在上方）
             }
             else -> {
-                // Bind / 文本 / 枚举：清理多余 [xxx]
                 ctx.text(font, name, (x + 5f).roundToInt(), ty, a(textMain, anim).argb, false)
                 var mode = choiceLabel(actual)
                 mode = mode.replace(Regex("""\[[^\]]*\]"""), "").trim()
                 if (mode.length > 16) mode = mode.take(14) + ".."
-                if (mode.isBlank() || mode == "-" || mode.contains("InputBind", true) ||
-                    mode.contains("KeyBinding", true) || mode.contains("net.minecraft", true)
-                ) {
-                    mode = "None"
-                }
+                val bad = mode.isBlank() || mode == "-" ||
+                    mode.contains("InputBind", true) || mode.contains("KeyBinding", true) ||
+                    mode.contains("net.minecraft", true) || mode.contains("unknown", true) ||
+                    mode.equals("UNKNOWN", true)
+                if (bad) mode = "None"
                 ctx.text(
                     font, mode,
                     (x + w - 5f - font.width(mode)).roundToInt(), ty,
