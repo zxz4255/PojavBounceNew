@@ -764,35 +764,54 @@ object ModuleSolsticeClickgui : ClientModule(
         x: Float, y: Float, w: Float, h: Float,
         anim: Float,
     ) {
-        if (!panelGlow || anim < 0.01f) return
-        val layers = panelGlowLayers.coerceIn(2, 12)
-        val maxR = panelGlowRadius.coerceAtLeast(1f)
+        if (!panelGlow || anim < 0.01f || w < 2f || h < 2f) return
         val strength = panelGlowStrength.coerceIn(0.05f, 1.2f)
         val soft = panelGlowSoft.coerceIn(0.5f, 3f)
+        val maxR = panelGlowRadius.coerceAtLeast(1f)
         val base = if (panelGlowTheme) themed(x + y) else panelGlowColor
-        // 自然辉光：只向外扩散，越外越淡，不用实心大块
-        for (i in 1..layers) {
-            val u = i / layers.toFloat()
-            val expand = maxR * u
-            // 高斯衰减，外圈更淡
-            val gauss = kotlin.math.exp((-(u * soft) * (u * soft) * 2.2).toDouble()).toFloat()
-            val aa = (gauss * strength * 55f * anim).toInt().coerceIn(0, 70)
+        // 自下而上连续渐变辉光（细条叠加逼近平滑，避免大块分层）
+        val steps = (28 + panelGlowLayers * 2).coerceIn(24, 48)
+        val glowH = h + maxR * 1.2f
+        val bottom = y + h + maxR * 0.35f
+        val top = y - maxR * 0.15f
+        for (i in 0 until steps) {
+            val t0 = i / steps.toFloat()
+            val t1 = (i + 1) / steps.toFloat()
+            // 0=底 1=顶：底部最亮，向上按指数衰减
+            val mid = (t0 + t1) * 0.5f
+            val fall = kotlin.math.exp((-(1f - mid) * (1f - mid) * (2.8f * soft)).toDouble()).toFloat()
+            // 越靠近栏体左右越收一点，边缘更自然
+            val sideInset = maxR * 0.15f * mid
+            val aa = (fall * strength * 70f * anim).toInt().coerceIn(0, 90)
             if (aa < 2) continue
-            val rr = (cornerRadius + expand * 0.25f).coerceAtLeast(1f)
-            // 四边条带近似光晕（避免整板糊成一块色）
-            val pad = expand
-            // 上
-            ctx.drawQuad(x - pad * 0.3f, y - pad, x + w + pad * 0.3f, y, Color4b(base.r, base.g, base.b, aa))
-            // 下
-            ctx.drawQuad(x - pad * 0.3f, y + h, x + w + pad * 0.3f, y + h + pad, Color4b(base.r, base.g, base.b, aa))
-            // 左
-            ctx.drawQuad(x - pad, y, x, y + h, Color4b(base.r, base.g, base.b, (aa * 0.85f).toInt()))
-            // 右
-            ctx.drawQuad(x + w, y, x + w + pad, y + h, Color4b(base.r, base.g, base.b, (aa * 0.85f).toInt()))
+            val y0 = bottom - glowH * t1
+            val y1 = bottom - glowH * t0
+            ctx.drawQuad(
+                x - maxR * 0.25f + sideInset,
+                y0,
+                x + w + maxR * 0.25f - sideInset,
+                y1,
+                Color4b(base.r, base.g, base.b, aa),
+            )
+        }
+        // 底部再补一圈很淡的外扩，增加「托底」感
+        val baseR = cornerRadius.coerceAtLeast(2f)
+        for (j in 1..4) {
+            val u = j / 4f
+            val expand = maxR * 0.35f * u
+            val aa = ((1f - u) * strength * 28f * anim).toInt().coerceIn(0, 40)
+            if (aa < 2) continue
+            ctx.drawRoundedRect(
+                x - expand * 0.5f,
+                y + h - baseR,
+                x + w + expand * 0.5f,
+                y + h + expand,
+                baseR + expand * 0.3f,
+                Color4b(base.r, base.g, base.b, aa),
+            )
         }
     }
 
-    /** 模块列表底部圆角（仅下两角） */
     private fun drawFooterBottomRound(
         ctx: GuiGraphicsExtractor,
         x: Float, y: Float, w: Float, h: Float,
@@ -911,43 +930,81 @@ object ModuleSolsticeClickgui : ClientModule(
             if (p.extended && sd != 0) {
                 val r = scaleRect(cx, cy, p.x, p.y, catWidth, catHeight + modList.size * rowH + 80f, s)
                 if (hover(r[0], r[1], r[2], maxOf(r[3], 40f))) {
-                    p.scrollTarget = (p.scrollTarget + sd * catHeight).coerceAtLeast(0f)
+                    p.scrollTarget = (p.scrollTarget + sd * catHeight)
+                    // 具体上下限在下面按 content 再 clamp
                 }
             }
             p.scroll = lerp(p.scroll, p.scrollTarget, (dt * 10.5f).coerceIn(0f, 1f))
 
-            // 预估整列高度（标题 + 模块 + 展开设置）
-            var estH = catHeight
+            // 内容总高度（不含滚动）
+            var contentH = 0f
             for (mod in modList) {
-                estH += rowH
+                contentH += rowH
                 val ca = modAnim[mod] ?: if (modOpen[mod] == true) 1f else 0f
                 if (ca > 0.01f) {
                     for (v in collectValues(mod)) {
-                        estH += rowH * ca
-                        if (enumOpen[v] == true) estH += listChoices(v).size * rowH * ca
+                        contentH += rowH * ca
+                        if (isGroup(v) && groupOpen[v] == true) {
+                            contentH += nestedValues(v).size * rowH * ca
+                        }
+                        if (enumOpen[v] == true) contentH += listChoices(v).size * rowH * ca
                     }
                 }
             }
-            if (!p.extended) estH = catHeight
+            // 可见列表高度上限（不超出屏幕）
+            val maxListH = (sh - p.y - catHeight - 12f).coerceAtLeast(rowH * 3f)
+            val listH = if (p.extended) min(contentH, maxListH) else 0f
+            val panelH = catHeight + listH
 
-            val panelR = scaleRect(cx, cy, p.x, p.y, catWidth, estH, s)
-            // 整表辉光
+            // 滚动边界
+            val maxScroll = (contentH - listH).coerceAtLeast(0f)
+            p.scrollTarget = p.scrollTarget.coerceIn(0f, maxScroll)
+            p.scroll = p.scroll.coerceIn(0f, maxScroll)
+
+            // 栏体矩形（固定，不随内部滚动变高度错位）
+            val panelR = scaleRect(cx, cy, p.x, p.y, catWidth, panelH, s)
+            val rPanel = (cornerRadius * s.coerceAtLeast(0.35f)).coerceAtLeast(3f)
+
+            // 辉光：贴着栏体圆角外框（位置与栏一致）
             drawPanelGlow(ctx, panelR[0], panelR[1], panelR[2], panelR[3], anim)
 
+            // 整栏圆角底（彻底圆角，含最底角）
+            ctx.drawRoundedRect(
+                panelR[0], panelR[1],
+                panelR[0] + panelR[2], panelR[1] + panelR[3],
+                rPanel, a(bgModule, anim),
+            )
+
+            // 标题栏：上圆角覆盖顶部
             val cr = scaleRect(cx, cy, p.x, p.y, catWidth, catHeight, s)
-            // 标题栏：上圆角、下直角（与模块同宽像素对齐）
             val headerW = panelR[2]
             val headerX = panelR[0]
-            drawHeaderTopRound(ctx, headerX, cr[1], headerW, cr[3], cornerRadius * s.coerceAtLeast(0.3f), a(bgCategory, anim))
+            drawHeaderTopRound(ctx, headerX, cr[1], headerW, cr[3], rPanel, a(bgCategory, anim))
             val catName = categoryLabel(cats[i])
             val tw = font.width(catName)
-            // 文字在标题栏正中（基于缩放后矩形）
             ctx.text(
                 font, catName,
                 (headerX + (headerW - tw) / 2f).roundToInt(),
                 (cr[1] + (cr[3] - 8) / 2f).roundToInt(),
                 a(textMain, anim).argb, false,
             )
+
+            // 列表裁剪区域（标题下沿 → 栏底）
+            val clipTop = cr[1] + cr[3]
+            val clipBot = panelR[1] + panelR[3]
+            val clipLeft = panelR[0]
+            val clipRight = panelR[0] + panelR[2]
+            runCatching {
+                // GuiGraphics / Extractor scissor
+                val m = ctx.javaClass.methods.firstOrNull {
+                    it.name.contains("enableScissor", true) && it.parameterCount in 4..5
+                }
+                if (m != null && m.parameterCount == 4) {
+                    m.invoke(ctx, clipLeft.toInt(), clipTop.toInt(), clipRight.toInt(), clipBot.toInt())
+                } else if (m != null) {
+                    m.invoke(ctx, clipLeft.toInt(), clipTop.toInt(), (clipRight - clipLeft).toInt(), (clipBot - clipTop).toInt())
+                }
+            }
 
             if (!p.extended) continue
 
@@ -963,9 +1020,18 @@ object ModuleSolsticeClickgui : ClientModule(
                 // 强制与标题栏同宽对齐
                 mr[0] = panelR[0]
                 mr[2] = panelR[2]
-                if (mr[1] + mr[3] > cr[1] + cr[3] - 2f) {
-                    // 无缝模块行（消除缩放浮点缝隙）
-                    drawSeamlessRow(ctx, mr[0], mr[1], mr[2], mr[3], a(bgModule, anim))
+                // 是否为列表视觉上的最后一行（内容滚到底）
+                val isLastRow = (moduleY + rowH >= contentH - 0.5f)
+                if (mr[1] + mr[3] > cr[1] + cr[3] - 2f && mr[1] < panelR[1] + panelR[3]) {
+                    // 最后一行：直接画下圆角；其余行直角无缝
+                    if (isLastRow) {
+                        drawFooterBottomRound(
+                            ctx, mr[0], mr[1], mr[2], mr[3] + 1f,
+                            rPanel, a(bgModule, anim),
+                        )
+                    } else {
+                        drawSeamlessRow(ctx, mr[0], mr[1], mr[2], mr[3], a(bgModule, anim))
+                    }
                     if (cScale > 0.01f) {
                         val g1 = themed(moduleY * 2f)
                         val g2 = themed(moduleY * 2f + 40f)
@@ -999,8 +1065,19 @@ object ModuleSolsticeClickgui : ClientModule(
                         val sr = scaleRect(cx, cy, p.x, p.y + catHeight + moduleY, catWidth, rowH, s)
                         sr[0] = panelR[0]
                         sr[2] = panelR[2]
-                        if (sr[1] > cr[1] + cr[3] - 2f) {
-                            drawSetting(ctx, font, v, sr[0], sr[1], sr[2], sr[3], anim * cAnim)
+                        val settingLast = (mod == modList.last() &&
+                            moduleY + rowH * cAnim >= contentH - rowH * 0.5f)
+                        if (sr[1] > cr[1] + cr[3] - 2f && sr[1] < panelR[1] + panelR[3]) {
+                            if (settingLast) {
+                                drawFooterBottomRound(
+                                    ctx, sr[0], sr[1], sr[2], sr[3] + 1f,
+                                    rPanel, a(bgSetting, anim * cAnim),
+                                )
+                                // 再画文字/控件（背景已圆角）
+                                drawSetting(ctx, font, v, sr[0], sr[1], sr[2], sr[3], anim * cAnim, skipBg = true)
+                            } else {
+                                drawSetting(ctx, font, v, sr[0], sr[1], sr[2], sr[3], anim * cAnim)
+                            }
                             if (hover(sr[0], sr[1], sr[2], sr[3])) tooltip = displayName(v)
                         }
                         moduleY += rowH * cAnim
@@ -1045,13 +1122,11 @@ object ModuleSolsticeClickgui : ClientModule(
                 }
             }
 
-            // 分类表最底角默认圆角
-            if (p.extended && modList.isNotEmpty() && moduleY > 0f) {
-                val foot = scaleRect(cx, cy, p.x, p.y + catHeight + moduleY - rowH, catWidth, rowH, s)
-                val r = (cornerRadius * s.coerceAtLeast(0.3f)).coerceAtLeast(2f)
-                val lastMod = modList.last()
-                val footColor = a(if (lastMod.enabled) bgModule else bgModule, anim)
-                drawFooterBottomRound(ctx, panelR[0], foot[1], panelR[2], foot[3], r, footColor)
+            // 关闭裁剪
+            runCatching {
+                ctx.javaClass.methods.firstOrNull {
+                    it.name.contains("disableScissor", true) && it.parameterCount == 0
+                }?.invoke(ctx)
             }
         }
 
@@ -1068,18 +1143,52 @@ object ModuleSolsticeClickgui : ClientModule(
         }
     }
 
+
+    /** 左名右值，防重叠 */
+    private fun drawLabelValue(
+        ctx: GuiGraphicsExtractor,
+        font: Font,
+        name: String,
+        value: String,
+        x: Float, y: Float, w: Float, h: Float,
+        anim: Float,
+        nameColor: Color4b,
+        valueColor: Color4b,
+    ) {
+        val pad = 5f
+        val gap = 8f
+        val maxNameW = (w * 0.58f).toInt().coerceAtLeast(20)
+        var n = name
+        while (n.length > 1 && font.width(n) > maxNameW) n = n.dropLast(1)
+        if (n != name && n.isNotEmpty()) n = n.dropLast(0).let { if (it.length > 1) it.dropLast(1) + ".." else it }
+        // 重新截断
+        n = name
+        while (n.length > 2 && font.width(n) > maxNameW) n = n.dropLast(1)
+        if (n != name) n = n.dropLast(1) + ".."
+        var v = value
+        val maxValW = (w * 0.36f).toInt().coerceAtLeast(12)
+        while (v.length > 1 && font.width(v) > maxValW) v = v.dropLast(1)
+        if (v != value && v.isNotEmpty()) v = v.dropLast(1) + ".."
+        val ty = (y + (h - 8) / 2f).roundToInt()
+        ctx.text(font, n, (x + pad).roundToInt(), ty, a(nameColor, anim).argb, false)
+        ctx.text(font, v, (x + w - pad - font.width(v)).roundToInt(), ty, a(valueColor, anim).argb, false)
+    }
+
     private fun drawSetting(
         ctx: GuiGraphicsExtractor,
         font: Font,
         v: Value<*>,
         x: Float, y: Float, w: Float, h: Float,
         anim: Float,
+        skipBg: Boolean = false,
     ) {
         // 记录滑条命中区域（屏幕坐标）
         sliderRectX = x
         sliderRectW = w
 
-        drawSeamlessRow(ctx, x, y, w, h, a(bgSetting, anim))
+        if (!skipBg) {
+            drawSeamlessRow(ctx, x, y, w, h, a(bgSetting, anim))
+        }
         val actual = getActual(v)
         val name = displayName(v)
         val ty = (y + (h - 8) / 2f).roundToInt()
@@ -1087,26 +1196,15 @@ object ModuleSolsticeClickgui : ClientModule(
         // 分组头
         if (isGroup(v)) {
             val open = groupOpen[v] == true
-            ctx.text(font, name, (x + 5f).roundToInt(), ty, a(textMain, anim).argb, false)
-            ctx.text(
-                font, if (open) "v" else ">",
-                (x + w - 12f).roundToInt(), ty,
-                a(textDim, anim).argb, false,
-            )
+            drawLabelValue(ctx, font, name, if (open) "v" else ">", x, y, w, h, anim, textMain, textDim)
             return
         }
 
         when {
             actual is Boolean -> {
                 boolScale[v] = lerp(boolScale.getOrDefault(v, 0f), if (actual) 1f else 0f, 0.25f)
-                ctx.text(font, name, (x + 5f).roundToInt(), ty, a(textMain, anim).argb, false)
-                if (boolScale[v]!! > 0.01f) {
-                    ctx.text(
-                        font, "OK",
-                        (x + w - 20f).roundToInt(), ty,
-                        a(themed(y), anim * boolScale[v]!!).argb, false,
-                    )
-                }
+                val mark = if (boolScale[v]!! > 0.5f) "ON" else "OFF"
+                drawLabelValue(ctx, font, name, mark, x, y, w, h, anim, textMain, if (actual) themed(y) else textDim)
             }
             dualRangeValue(v) != null -> {
                 // CPS 等双端滑条
@@ -1117,9 +1215,8 @@ object ModuleSolsticeClickgui : ClientModule(
                 val span = (bMax - bMin).coerceAtLeast(0.001f)
                 val t0 = ((cMin - bMin) / span).coerceIn(0f, 1f)
                 val t1 = ((cMax - bMin) / span).coerceIn(0f, 1f)
-                ctx.text(font, name, (x + 5f).roundToInt(), (y + 1f).roundToInt(), a(textMain, anim).argb, false)
                 val vs = "${cMin.toInt()}-${cMax.toInt()}"
-                ctx.text(font, vs, (x + w - 5f - font.width(vs)).roundToInt(), (y + 1f).roundToInt(), a(textDim, anim).argb, false)
+                drawLabelValue(ctx, font, name, vs, x, y, w, h - 8f, anim, textMain, textDim)
                 val barY = y + h - 6f
                 ctx.drawQuad(x, barY, x + w, barY + 3f, a(Color4b(50, 50, 50, 255), anim))
                 ctx.drawQuad(x + w * t0, barY, x + w * t1, barY + 3f, a(themed(y), anim))
@@ -1128,14 +1225,13 @@ object ModuleSolsticeClickgui : ClientModule(
                 ctx.drawRoundedRect(x + w * t1 - 3f, barY - 2f, x + w * t1 + 3f, barY + 5f, 3f, a(textMain, anim))
             }
             actual is Number || rangeOf(v) != null -> {
-                ctx.text(font, name, (x + 5f).roundToInt(), (y + 2f).roundToInt(), a(textMain, anim).argb, false)
                 val fv = when (actual) {
                     is Number -> actual.toFloat()
                     else -> 0f
                 }
                 val range = rangeOf(v)
                 val vs = if (abs(fv - fv.toInt()) < 1e-4f) fv.toInt().toString() else "%.2f".format(fv)
-                ctx.text(font, vs, (x + w - 5f - font.width(vs)).roundToInt(), (y + 2f).roundToInt(), a(textDim, anim).argb, false)
+                drawLabelValue(ctx, font, name, vs, x, y, w, h - 6f, anim, textMain, textDim)
                 if (range != null) {
                     val (minV, maxV) = range
                     val span = (maxV - minV).coerceAtLeast(0.001f)
@@ -1154,20 +1250,14 @@ object ModuleSolsticeClickgui : ClientModule(
                 }
             }
             else -> {
-                ctx.text(font, name, (x + 5f).roundToInt(), ty, a(textMain, anim).argb, false)
                 var mode = choiceLabel(actual)
                 mode = mode.replace(Regex("""\[[^\]]*\]"""), "").trim()
-                if (mode.length > 16) mode = mode.take(14) + ".."
                 val bad = mode.isBlank() || mode == "-" ||
                     mode.contains("InputBind", true) || mode.contains("KeyBinding", true) ||
                     mode.contains("net.minecraft", true) || mode.contains("unknown", true) ||
                     mode.equals("UNKNOWN", true)
                 if (bad) mode = "None"
-                ctx.text(
-                    font, mode,
-                    (x + w - 5f - font.width(mode)).roundToInt(), ty,
-                    a(themed(y), anim).argb, false,
-                )
+                drawLabelValue(ctx, font, name, mode, x, y, w, h, anim, textMain, themed(y))
             }
         }
     }
