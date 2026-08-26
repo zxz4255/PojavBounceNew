@@ -45,10 +45,10 @@ object ModuleSolsticeClickgui : ClientModule(
     private val dimAlpha by float("Dim Alpha", 0.38f, 0f..0.8f)
     private val bottomGlow by boolean("Bottom Glow", true)
     private val bottomGlowStrength by float("Bottom Glow Strength", 0.4f, 0f..1f)
-    private val catWidth by float("Category Width", 200f, 140f..280f)
-    private val catHeight by float("Category Height", 30f, 22f..44f)
-    private val catGap by float("Category Gap", 40f, 16f..80f)
-    private val rowH by float("Row Height", 30f, 22f..40f)
+    private val catWidth by float("Category Width", 180f, 100f..320f)
+    private val catHeight by float("Category Height", 28f, 18f..48f)
+    private val catGap by float("Category Gap", 28f, 8f..80f)
+    private val rowH by float("Row Height", 26f, 16f..44f)
     private val cornerRadius by float("Corner Radius", 10f, 0f..18f)
     private val midclickRound by float("Midclick Rounding", 1f, 0.01f..1f)
     private val themeA by color("Theme A", Color4b(0x6E, 0xC8, 0xF1, 255))
@@ -538,6 +538,36 @@ object ModuleSolsticeClickgui : ClientModule(
         dragIdx = -1
     }
 
+
+    /** 仅顶部圆角、底部直角的标题栏 */
+    private fun drawHeaderTopRound(
+        ctx: GuiGraphicsExtractor,
+        x: Float, y: Float, w: Float, h: Float,
+        radius: Float, color: Color4b,
+    ) {
+        val r = radius.coerceIn(0f, minOf(h / 2f, w / 2f))
+        // 先画四角圆角
+        ctx.drawRoundedRect(x, y, x + w, y + h, r, color)
+        // 用直角矩形盖住下半圆角，只留上圆角
+        if (r > 0.5f) {
+            ctx.drawQuad(x, y + h - r, x + w, y + h, color)
+        }
+    }
+
+    /** 模块行：略加 1px 高度消除 scale 浮点缝隙 */
+    private fun drawSeamlessRow(
+        ctx: GuiGraphicsExtractor,
+        x: Float, y: Float, w: Float, h: Float,
+        color: Color4b,
+    ) {
+        // floor 对齐 + 向下多画 1px 与下一行重叠，避免缝
+        val x0 = kotlin.math.floor(x.toDouble()).toFloat()
+        val y0 = kotlin.math.floor(y.toDouble()).toFloat()
+        val x1 = kotlin.math.ceil((x + w).toDouble()).toFloat()
+        val y1 = kotlin.math.ceil((y + h).toDouble()).toFloat() + 1f
+        ctx.drawQuad(x0, y0, x1, y1, color)
+    }
+
     private fun scaleRect(cx: Float, cy: Float, x: Float, y: Float, w: Float, h: Float, s: Float): FloatArray {
         val x1 = cx + (x - cx) * s
         val y1 = cy + (y - cy) * s
@@ -620,7 +650,8 @@ object ModuleSolsticeClickgui : ClientModule(
             p.scroll = lerp(p.scroll, p.scrollTarget, (dt * 10.5f).coerceIn(0f, 1f))
 
             val cr = scaleRect(cx, cy, p.x, p.y, catWidth, catHeight, s)
-            ctx.drawRoundedRect(cr[0], cr[1], cr[0] + cr[2], cr[1] + cr[3], cornerRadius, a(bgCategory, anim))
+            // 标题栏：上圆角、下直角
+            drawHeaderTopRound(ctx, cr[0], cr[1], cr[2], cr[3], cornerRadius, a(bgCategory, anim))
             val catName = cats[i].toString().substringAfterLast('.').substringAfter('$')
             val tw = font.width(catName)
             ctx.text(
@@ -642,7 +673,8 @@ object ModuleSolsticeClickgui : ClientModule(
 
                 val mr = scaleRect(cx, cy, p.x, p.y + catHeight + moduleY, catWidth, rowH, s)
                 if (mr[1] + mr[3] > cr[1] + cr[3] - 2f) {
-                    ctx.drawRoundedRect(mr[0], mr[1], mr[0] + mr[2], mr[1] + mr[3], 0f, a(bgModule, anim))
+                    // 无缝模块行（消除缩放浮点缝隙）
+                    drawSeamlessRow(ctx, mr[0], mr[1], mr[2], mr[3], a(bgModule, anim))
                     if (cScale > 0.01f) {
                         val g1 = themed(moduleY * 2f)
                         val g2 = themed(moduleY * 2f + 40f)
@@ -656,7 +688,7 @@ object ModuleSolsticeClickgui : ClientModule(
                             )
                             val sx = mr[0] + mr[2] * t0
                             val ex = mr[0] + mr[2] * ((seg + 1) / 8f)
-                            ctx.drawQuad(sx, mr[1], ex, mr[1] + mr[3], col)
+                            ctx.drawQuad(sx, mr[1], ex, mr[1] + mr[3] + 1f, col)
                         }
                     }
                     val nc = if (mod.enabled) textMain else textDim
@@ -726,7 +758,7 @@ object ModuleSolsticeClickgui : ClientModule(
         x: Float, y: Float, w: Float, h: Float,
         anim: Float,
     ) {
-        ctx.drawQuad(x, y, x + w, y + h, a(bgSetting, anim))
+        drawSeamlessRow(ctx, x, y, w, h, a(bgSetting, anim))
         val actual = getActual(v)
         val name = displayName(v)
         val ty = (y + (h - 8) / 2f).roundToInt()
