@@ -157,6 +157,60 @@ object ModuleAutoEatGapple : ClientModule(
     }
 
     /** 背包槽 → 副手（window click 反射，兼容不同映射名） */
+
+    /** 兼容不同映射名的物品栏点击 */
+    private fun invClick(syncId: Int, slot: Int, button: Int, clickTypeName: String): Boolean {
+        val gm = mc.gameMode ?: return false
+        val clickType = runCatching {
+            val cls = Class.forName("net.minecraft.world.inventory.ClickType")
+            cls.enumConstants?.firstOrNull {
+                (it as Enum<*>).name.equals(clickTypeName, true)
+            }
+        }.getOrNull() ?: return false
+
+        // MultiPlayerGameMode: handleInventoryMouseClick / clickSlot / method_2906 等
+        for (m in gm.javaClass.methods) {
+            if (m.parameterCount != 5) continue
+            val n = m.name
+            if (!n.contains("Inventory", true) && !n.contains("click", true) &&
+                n != "handleInventoryMouseClick" && n != "clickSlot"
+            ) continue
+            try {
+                m.isAccessible = true
+                m.invoke(gm, syncId, slot, button, clickType, player)
+                return true
+            } catch (_: Exception) {
+            }
+        }
+        // 再试：参数顺序可能不同
+        for (m in gm.javaClass.methods) {
+            if (m.parameterCount != 5) continue
+            try {
+                m.isAccessible = true
+                m.invoke(gm, syncId, slot, button, clickType, player)
+                return true
+            } catch (_: Exception) {
+            }
+        }
+        return false
+    }
+
+    private fun hasScreen(): Boolean {
+        return runCatching {
+            val f = mc.javaClass.getDeclaredField("screen")
+            f.isAccessible = true
+            f.get(mc) != null
+        }.getOrElse {
+            runCatching {
+                mc.javaClass.methods.firstOrNull {
+                    it.parameterCount == 0 && (
+                        it.name == "getScreen" || it.name.equals("currentScreen", true)
+                    )
+                }?.invoke(mc) != null
+            }.getOrDefault(false)
+        }
+    }
+
     private fun moveToOffhand(invSlot: Int): Boolean {
         val handler = player.containerMenu ?: return false
         val syncId = handler.containerId
@@ -166,29 +220,14 @@ object ModuleAutoEatGapple : ClientModule(
             invSlot in 9..35 -> invSlot
             else -> return false
         }
-        return runCatching {
-            mc.gameMode?.handleInventoryMouseClick(
-                syncId,
-                clickSlot,
-                40, // offhand swap button in some versions; fallback below
-                net.minecraft.world.inventory.ClickType.SWAP,
-                player,
-            )
-            true
-        }.getOrElse {
-            // 兼容：PICKUP 两次交换
-            runCatching {
-                val gm = mc.gameMode ?: return@runCatching false
-                val type = net.minecraft.world.inventory.ClickType.PICKUP
-                gm.handleInventoryMouseClick(syncId, clickSlot, 0, type, player)
-                gm.handleInventoryMouseClick(syncId, 45, 0, type, player)
-                true
-            }.getOrDefault(false)
-        }
+        // button 40 = offhand in SWAP on many versions; else PICKUP to slot 45
+        if (invClick(syncId, clickSlot, 40, "SWAP")) return true
+        if (invClick(syncId, clickSlot, 0, "PICKUP") && invClick(syncId, 45, 0, "PICKUP")) return true
+        return false
     }
 
     private fun shouldEat(): Boolean {
-        if (requireNoScreen && mc.screen != null) return false
+        if (requireNoScreen && hasScreen()) return false
         if (player.isUsingItem && !eating) return false
         if (onlyWhenHurt) {
             if (player.health + player.absorptionAmount > healthThreshold) return false
@@ -301,18 +340,9 @@ object ModuleAutoEatGapple : ClientModule(
         val syncId = handler.containerId
         val fromClick = if (from in 0..8) 36 + from else from
         val toClick = 36 + toHotbar
-        runCatching {
-            val gm = mc.gameMode ?: return
-            val type = net.minecraft.world.inventory.ClickType.SWAP
-            // button = hotbar index for SWAP
-            gm.handleInventoryMouseClick(syncId, fromClick, toHotbar, type, player)
-        }.onFailure {
-            runCatching {
-                val gm = mc.gameMode ?: return@runCatching
-                val pickup = net.minecraft.world.inventory.ClickType.PICKUP
-                gm.handleInventoryMouseClick(syncId, fromClick, 0, pickup, player)
-                gm.handleInventoryMouseClick(syncId, toClick, 0, pickup, player)
-            }
+        if (!invClick(syncId, fromClick, toHotbar, "SWAP")) {
+            invClick(syncId, fromClick, 0, "PICKUP")
+            invClick(syncId, toClick, 0, "PICKUP")
         }
     }
 
