@@ -25,6 +25,7 @@ import net.minecraft.client.input.MouseButtonEvent
 import net.minecraft.network.chat.Component
 import org.lwjgl.glfw.GLFW
 import java.util.IdentityHashMap
+import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -59,6 +60,15 @@ object ModuleSolsticeClickgui : ClientModule(
     private val bgSetting by color("Setting BG", Color4b(30, 30, 30, 255))
     private val textMain by color("Text", Color4b(255, 255, 255, 255))
     private val textDim by color("Text Dim", Color4b(180, 180, 180, 255))
+
+    // 分类表四周辉光
+    private val panelGlow by boolean("Panel Glow", true)
+    private val panelGlowRadius by float("Glow Radius", 8f, 2f..24f)
+    private val panelGlowLayers by int("Glow Layers", 5, 2..12)
+    private val panelGlowStrength by float("Glow Strength", 0.55f, 0.05f..1.2f)
+    private val panelGlowSoft by float("Glow Softness", 1.4f, 0.5f..3f)
+    private val panelGlowColor by color("Glow Color", Color4b(110, 180, 255, 255))
+    private val panelGlowTheme by boolean("Glow Use Theme", true)
 
     private class CatPos(
         var x: Float = 0f,
@@ -134,6 +144,33 @@ object ModuleSolsticeClickgui : ClientModule(
 
     private fun a(c: Color4b, mul: Float) = c.alpha((c.a * mul).toInt().coerceIn(0, 255))
 
+    private fun categoryLabel(cat: ModuleCategory): String {
+        // 优先可读名 Combat / Movement ...
+        runCatching {
+            for (n in listOf("getReadableName", "readableName", "getDisplayName", "getName", "name")) {
+                val m = cat.javaClass.methods.firstOrNull {
+                    it.parameterCount == 0 && it.name.equals(n, true)
+                } ?: continue
+                val r = m.invoke(cat) ?: continue
+                if (r is String && r.isNotBlank() && !r.contains('@') && r.length < 24) {
+                    return r.replaceFirstChar { it.uppercase() }
+                }
+            }
+        }
+        val s = cat.toString()
+            .substringAfterLast('.')
+            .substringAfterLast('$')
+            .substringBefore('@')
+            .trim()
+        // ModuleCategories.COMBAT → Combat
+        return s.replace('_', ' ')
+            .lowercase()
+            .split(' ')
+            .joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
+            .ifBlank { "Misc" }
+    }
+
+
     private fun hover(x: Float, y: Float, w: Float, h: Float) =
         mouseX >= x && mouseY >= y && mouseX < x + w && mouseY < y + h
 
@@ -196,7 +233,16 @@ object ModuleSolsticeClickgui : ClientModule(
             v.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.equals("getName", true) }
                 ?.invoke(v) as? String
         }.getOrNull()
-        return (raw ?: v.name).substringBefore('[').take(22)
+        var s = (raw ?: v.name).trim()
+        // 去掉 [xxx] / (xxx) / 多余英文后缀
+        s = s.replace(Regex("""\[[^\]]*\]"""), "")
+        s = s.replace(Regex("""\([^)]*\)"""), "")
+        s = s.substringBefore(" - ").substringBefore(" | ")
+        // bind / keybind 统一短名
+        val lower = s.lowercase()
+        if (lower.contains("bind") || lower == "key" || lower.endsWith("keybind")) s = "Bind"
+        s = s.trim().trimEnd('.', '-', ':')
+        return s.take(20).ifBlank { "Setting" }
     }
 
     private fun choiceLabel(any: Any?): String {
@@ -215,7 +261,10 @@ object ModuleSolsticeClickgui : ClientModule(
                 if (r is String && r.isNotBlank()) return r.substringAfterLast('.').take(18)
             }
         }
-        return any.toString().substringAfterLast('.').substringBefore('@').take(18).ifBlank { "-" }
+        var s = any.toString().substringAfterLast('.').substringBefore('@')
+        s = s.replace(Regex("""\[[^\]]*\]"""), "").trim()
+        if (s.contains("InputBind", true) || s.contains("KeyBinding", true)) return "None"
+        return s.take(18).ifBlank { "-" }
     }
 
     private fun listChoices(v: Value<*>): List<Any?> {
@@ -539,6 +588,47 @@ object ModuleSolsticeClickgui : ClientModule(
     }
 
 
+
+    private fun drawPanelGlow(
+        ctx: GuiGraphicsExtractor,
+        x: Float, y: Float, w: Float, h: Float,
+        anim: Float,
+    ) {
+        if (!panelGlow || anim < 0.01f) return
+        val layers = panelGlowLayers.coerceIn(2, 12)
+        val maxR = panelGlowRadius.coerceAtLeast(1f)
+        val strength = panelGlowStrength.coerceIn(0.05f, 1.2f)
+        val soft = panelGlowSoft.coerceIn(0.5f, 3f)
+        val base = if (panelGlowTheme) themed(x + y) else panelGlowColor
+        for (i in layers downTo 1) {
+            val u = i / layers.toFloat()
+            val expand = maxR * u
+            val gauss = kotlin.math.exp((-(u * u) * (2.6f / soft)).toDouble()).toFloat()
+            val aa = (gauss * strength * 90f * anim).toInt().coerceIn(0, 120)
+            if (aa < 2) continue
+            ctx.drawRoundedRect(
+                x - expand, y - expand,
+                x + w + expand, y + h + expand,
+                cornerRadius + expand * 0.35f,
+                Color4b(base.r, base.g, base.b, aa),
+            )
+        }
+    }
+
+    /** 模块列表底部圆角（仅下两角） */
+    private fun drawFooterBottomRound(
+        ctx: GuiGraphicsExtractor,
+        x: Float, y: Float, w: Float, h: Float,
+        radius: Float, color: Color4b,
+    ) {
+        val r = radius.coerceIn(0f, minOf(h / 2f, w / 2f))
+        ctx.drawRoundedRect(x, y, x + w, y + h, r, color)
+        // 盖住上半圆角 → 只留下圆角
+        if (r > 0.5f) {
+            ctx.drawQuad(x, y, x + w, y + r, color)
+        }
+    }
+
     /** 仅顶部圆角、底部直角的标题栏 */
     private fun drawHeaderTopRound(
         ctx: GuiGraphicsExtractor,
@@ -569,11 +659,12 @@ object ModuleSolsticeClickgui : ClientModule(
     }
 
     private fun scaleRect(cx: Float, cy: Float, x: Float, y: Float, w: Float, h: Float, s: Float): FloatArray {
-        val x1 = cx + (x - cx) * s
-        val y1 = cy + (y - cy) * s
-        val x2 = cx + (x + w - cx) * s
-        val y2 = cy + (y + h - cy) * s
-        return floatArrayOf(x1, y1, x2 - x1, y2 - y1)
+        // 统一缩放后像素对齐，避免标题栏/模块错位与缝隙
+        val x1 = kotlin.math.floor((cx + (x - cx) * s).toDouble()).toFloat()
+        val y1 = kotlin.math.floor((cy + (y - cy) * s).toDouble()).toFloat()
+        val x2 = kotlin.math.floor((cx + (x + w - cx) * s).toDouble()).toFloat()
+        val y2 = kotlin.math.floor((cy + (y + h - cy) * s).toDouble()).toFloat()
+        return floatArrayOf(x1, y1, (x2 - x1).coerceAtLeast(1f), (y2 - y1).coerceAtLeast(1f))
     }
 
     @Suppress("unused")
@@ -649,14 +740,35 @@ object ModuleSolsticeClickgui : ClientModule(
             }
             p.scroll = lerp(p.scroll, p.scrollTarget, (dt * 10.5f).coerceIn(0f, 1f))
 
+            // 预估整列高度（标题 + 模块 + 展开设置）
+            var estH = catHeight
+            for (mod in modList) {
+                estH += rowH
+                val ca = modAnim[mod] ?: if (modOpen[mod] == true) 1f else 0f
+                if (ca > 0.01f) {
+                    for (v in collectValues(mod)) {
+                        estH += rowH * ca
+                        if (enumOpen[v] == true) estH += listChoices(v).size * rowH * ca
+                    }
+                }
+            }
+            if (!p.extended) estH = catHeight
+
+            val panelR = scaleRect(cx, cy, p.x, p.y, catWidth, estH, s)
+            // 整表辉光
+            drawPanelGlow(ctx, panelR[0], panelR[1], panelR[2], panelR[3], anim)
+
             val cr = scaleRect(cx, cy, p.x, p.y, catWidth, catHeight, s)
-            // 标题栏：上圆角、下直角
-            drawHeaderTopRound(ctx, cr[0], cr[1], cr[2], cr[3], cornerRadius, a(bgCategory, anim))
-            val catName = cats[i].toString().substringAfterLast('.').substringAfter('$')
+            // 标题栏：上圆角、下直角（与模块同宽像素对齐）
+            val headerW = panelR[2]
+            val headerX = panelR[0]
+            drawHeaderTopRound(ctx, headerX, cr[1], headerW, cr[3], cornerRadius * s.coerceAtLeast(0.3f), a(bgCategory, anim))
+            val catName = categoryLabel(cats[i])
             val tw = font.width(catName)
+            // 文字在标题栏正中（基于缩放后矩形）
             ctx.text(
                 font, catName,
-                (cr[0] + (cr[2] - tw) / 2f).roundToInt(),
+                (headerX + (headerW - tw) / 2f).roundToInt(),
                 (cr[1] + (cr[3] - 8) / 2f).roundToInt(),
                 a(textMain, anim).argb, false,
             )
@@ -672,6 +784,9 @@ object ModuleSolsticeClickgui : ClientModule(
                 val cScale = modScale[mod]!!
 
                 val mr = scaleRect(cx, cy, p.x, p.y + catHeight + moduleY, catWidth, rowH, s)
+                // 强制与标题栏同宽对齐
+                mr[0] = panelR[0]
+                mr[2] = panelR[2]
                 if (mr[1] + mr[3] > cr[1] + cr[3] - 2f) {
                     // 无缝模块行（消除缩放浮点缝隙）
                     drawSeamlessRow(ctx, mr[0], mr[1], mr[2], mr[3], a(bgModule, anim))
@@ -706,6 +821,8 @@ object ModuleSolsticeClickgui : ClientModule(
                 if (cAnim > 0.001f) {
                     for (v in collectValues(mod)) {
                         val sr = scaleRect(cx, cy, p.x, p.y + catHeight + moduleY, catWidth, rowH, s)
+                        sr[0] = panelR[0]
+                        sr[2] = panelR[2]
                         if (sr[1] > cr[1] + cr[3] - 2f) {
                             drawSetting(ctx, font, v, sr[0], sr[1], sr[2], sr[3], anim * cAnim)
                             if (hover(sr[0], sr[1], sr[2], sr[3])) tooltip = displayName(v)
@@ -735,6 +852,15 @@ object ModuleSolsticeClickgui : ClientModule(
                         }
                     }
                 }
+            }
+
+            // 整列最底部两角改为圆角（盖住最后一行直角）
+            if (p.extended && moduleY > 0f) {
+                val foot = scaleRect(cx, cy, p.x, p.y + catHeight + moduleY - rowH, catWidth, rowH, s)
+                val r = (cornerRadius * s.coerceAtLeast(0.3f)).coerceAtLeast(2f)
+                // 只重绘底部圆角区域的左右下角
+                val footColor = a(bgModule, anim)
+                drawFooterBottomRound(ctx, panelR[0], foot[1], panelR[2], foot[3], r, footColor)
             }
         }
 
@@ -777,7 +903,7 @@ object ModuleSolsticeClickgui : ClientModule(
             actual is Number -> {
                 ctx.text(font, name, (x + 5f).roundToInt(), (y + 2f).roundToInt(), a(textMain, anim).argb, false)
                 val fv = actual.toFloat()
-                val vs = if (fv == fv.toInt().toFloat()) fv.toInt().toString() else "%.2f".format(fv)
+                val vs = if (abs(fv - fv.toInt()) < 1e-4f) fv.toInt().toString() else "%.2f".format(fv)
                 ctx.text(font, vs, (x + w - 5f - font.width(vs)).roundToInt(), (y + 2f).roundToInt(), a(textDim, anim).argb, false)
                 val range = rangeOf(v)
                 if (range != null) {
@@ -789,10 +915,19 @@ object ModuleSolsticeClickgui : ClientModule(
                     val barY = y + h - 5f
                     ctx.drawRoundedRect(x, barY, x + se, barY + 3.5f, 2f, a(themed(y), anim))
                 }
+                // 无 range 的数值：不画滑条，只显示纯数字（已在上方）
             }
             else -> {
+                // Bind / 文本 / 枚举：清理多余 [xxx]
                 ctx.text(font, name, (x + 5f).roundToInt(), ty, a(textMain, anim).argb, false)
-                val mode = choiceLabel(actual)
+                var mode = choiceLabel(actual)
+                mode = mode.replace(Regex("""\[[^\]]*\]"""), "").trim()
+                if (mode.length > 16) mode = mode.take(14) + ".."
+                if (mode.isBlank() || mode == "-" || mode.contains("InputBind", true) ||
+                    mode.contains("KeyBinding", true) || mode.contains("net.minecraft", true)
+                ) {
+                    mode = "None"
+                }
                 ctx.text(
                     font, mode,
                     (x + w - 5f - font.width(mode)).roundToInt(), ty,
