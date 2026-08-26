@@ -144,17 +144,15 @@ object ModuleSolsticeClickgui : ClientModule(
         (mc.mouseHandler.ypos() * mc.window.guiScaledHeight / mc.window.height).toFloat()
 
     private fun allModules(): List<ClientModule> {
-        val list: List<ClientModule> = runCatching {
-            ModuleManager.getModules()
-        }.getOrElse {
-            runCatching {
-                val f = ModuleManager.javaClass.getDeclaredField("modules")
-                f.isAccessible = true
-                @Suppress("UNCHECKED_CAST")
-                (f.get(ModuleManager) as? Collection<*>)?.filterIsInstance<ClientModule>() ?: emptyList()
-            }.getOrDefault(emptyList())
-        }
-        return list
+        val fromMgr = runCatching {
+            ModuleManager.getModules().toList()
+        }.getOrNull()
+        if (fromMgr != null) return fromMgr
+        return runCatching {
+            val f = ModuleManager.javaClass.getDeclaredField("modules")
+            f.isAccessible = true
+            (f.get(ModuleManager) as? Collection<*>)?.filterIsInstance<ClientModule>() ?: emptyList()
+        }.getOrDefault(emptyList())
     }
 
     private fun allCategories(): List<ModuleCategory> {
@@ -303,13 +301,14 @@ object ModuleSolsticeClickgui : ClientModule(
 
     private fun modDesc(mod: ClientModule): String {
         return runCatching {
-            val d = mod.description
-            when (d) {
-                is String -> d
-                is java.util.function.Supplier<*> -> d.get()?.toString() ?: mod.name
-                else -> d?.toString() ?: mod.name
+            val d: Any? = mod.description
+            // LB: description 多为 Supplier<String?>
+            if (d is java.util.function.Supplier<*>) {
+                d.get()?.toString()?.ifBlank { mod.name } ?: mod.name
+            } else {
+                d?.toString()?.ifBlank { mod.name } ?: mod.name
             }
-        }.getOrDefault(mod.name).ifBlank { mod.name }
+        }.getOrDefault(mod.name)
     }
 
     private fun initPositions(sw: Float) {
