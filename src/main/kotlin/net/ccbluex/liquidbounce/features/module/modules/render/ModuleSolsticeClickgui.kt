@@ -769,44 +769,48 @@ object ModuleSolsticeClickgui : ClientModule(
         val soft = panelGlowSoft.coerceIn(0.5f, 3f)
         val maxR = panelGlowRadius.coerceAtLeast(1f)
         val base = if (panelGlowTheme) themed(x + y) else panelGlowColor
-        // 自下而上连续渐变辉光（细条叠加逼近平滑，避免大块分层）
-        val steps = (28 + panelGlowLayers * 2).coerceIn(24, 48)
-        val glowH = h + maxR * 1.2f
-        val bottom = y + h + maxR * 0.35f
-        val top = y - maxR * 0.15f
+        // 严格：底强 → 顶弱，且不画到标题栏上方（避免多出长方形阴影）
+        val steps = (32 + panelGlowLayers * 2).coerceIn(28, 52)
+        val bottom = y + h
+        // 只在栏体高度内向上延伸，最多略微超出底边，绝不超过标题顶
+        val glowTop = y + 1f
+        val glowH = (bottom - glowTop).coerceAtLeast(4f)
         for (i in 0 until steps) {
             val t0 = i / steps.toFloat()
             val t1 = (i + 1) / steps.toFloat()
-            // 0=底 1=顶：底部最亮，向上按指数衰减
+            // t=0 在底部，t=1 在顶部
             val mid = (t0 + t1) * 0.5f
-            val fall = kotlin.math.exp((-(1f - mid) * (1f - mid) * (2.8f * soft)).toDouble()).toFloat()
-            // 越靠近栏体左右越收一点，边缘更自然
-            val sideInset = maxR * 0.15f * mid
-            val aa = (fall * strength * 70f * anim).toInt().coerceIn(0, 90)
+            // 底部 mid≈0 → fall≈1；顶部 mid≈1 → fall≈0
+            val fall = kotlin.math.exp((-(mid) * (mid) * (3.2f * soft)).toDouble()).toFloat()
+            val aa = (fall * strength * 75f * anim).toInt().coerceIn(0, 95)
             if (aa < 2) continue
             val y0 = bottom - glowH * t1
             val y1 = bottom - glowH * t0
+            // 不画到 y 以上
+            if (y1 <= glowTop) continue
+            val drawY0 = max(y0, glowTop)
+            val sideInset = maxR * 0.12f * mid
             ctx.drawQuad(
-                x - maxR * 0.25f + sideInset,
-                y0,
-                x + w + maxR * 0.25f - sideInset,
+                x - maxR * 0.2f + sideInset,
+                drawY0,
+                x + w + maxR * 0.2f - sideInset,
                 y1,
                 Color4b(base.r, base.g, base.b, aa),
             )
         }
-        // 底部再补一圈很淡的外扩，增加「托底」感
+        // 仅底部外扩一圈淡光（圆角），不向上冒出标题
         val baseR = cornerRadius.coerceAtLeast(2f)
-        for (j in 1..4) {
-            val u = j / 4f
-            val expand = maxR * 0.35f * u
-            val aa = ((1f - u) * strength * 28f * anim).toInt().coerceIn(0, 40)
+        for (j in 1..3) {
+            val u = j / 3f
+            val expand = maxR * 0.4f * u
+            val aa = ((1f - u) * strength * 32f * anim).toInt().coerceIn(0, 45)
             if (aa < 2) continue
             ctx.drawRoundedRect(
-                x - expand * 0.5f,
-                y + h - baseR,
-                x + w + expand * 0.5f,
-                y + h + expand,
-                baseR + expand * 0.3f,
+                x - expand * 0.4f,
+                bottom - baseR * 0.5f,
+                x + w + expand * 0.4f,
+                bottom + expand,
+                baseR + expand * 0.25f,
                 Color4b(base.r, base.g, base.b, aa),
             )
         }
@@ -980,7 +984,12 @@ object ModuleSolsticeClickgui : ClientModule(
             val headerW = panelR[2]
             val headerX = panelR[0]
             drawHeaderTopRound(ctx, headerX, cr[1], headerW, cr[3], rPanel, a(bgCategory, anim))
-            val catName = categoryLabel(cats[i])
+            var catName = categoryLabel(cats[i])
+            val titlePad = max(8f, headerW * 0.1f)
+            val maxTitleW = (headerW - titlePad * 2f).toInt().coerceAtLeast(10)
+            while (catName.length > 2 && font.width(catName) > maxTitleW) {
+                catName = catName.dropLast(1)
+            }
             val tw = font.width(catName)
             ctx.text(
                 font, catName,
@@ -1049,9 +1058,17 @@ object ModuleSolsticeClickgui : ClientModule(
                         }
                     }
                     val nc = if (mod.enabled) textMain else textDim
-                    val nw = font.width(mod.name)
+                    // 长名缩小显示区域，两侧留白，避免贴边
+                    val pad = max(6f, mr[2] * 0.08f)
+                    val maxW = (mr[2] - pad * 2f).toInt().coerceAtLeast(12)
+                    var show = mod.name
+                    while (show.length > 2 && font.width(show) > maxW) {
+                        show = show.dropLast(1)
+                    }
+                    if (show != mod.name && show.length >= 2) show = show.dropLast(1) + ".."
+                    val nw = font.width(show)
                     ctx.text(
-                        font, mod.name,
+                        font, show,
                         (mr[0] + (mr[2] - nw) / 2f).roundToInt(),
                         (mr[1] + (mr[3] - 8) / 2f).roundToInt(),
                         a(nc, anim).argb, false,
