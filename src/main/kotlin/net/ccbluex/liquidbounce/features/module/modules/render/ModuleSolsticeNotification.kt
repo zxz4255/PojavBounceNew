@@ -6,7 +6,7 @@
  *
  *  原版要点:
  *   - Style: Solaris
- *   - 右下角堆叠，x = lerp(屏外, 目标, currentDuration)
+ *   - 右下角堆叠；关闭时向东南方斜向下移出
  *   - currentDuration = lerp(cur, timeUp?0:1, dt*5)
  *   - 进度条 percentDone，左侧主题色 / 可选渐变，右侧半透明黑
  *   - getThemedColor(y*2)；Warning 黄 / Error 红；alpha 0.7
@@ -331,9 +331,14 @@ object ModuleSolsticeNotification : ClientModule(
 
             val beginX = screenW - boxW - rightMargin
             val endX = screenW + boxW
-            val x = lerp(endX, beginX, n.currentDuration)
-            val boxTop = y - boxH
-            val boxBottom = y - 10f
+            val t = n.currentDuration
+            // 出现：从右侧滑入；关闭：向东南方斜向下移出
+            val xBase = lerp(endX, beginX, t)
+            val exit = if (n.isTimeUp) (1f - t) else 0f
+            val x = xBase + exit * (boxW * 0.55f + 36f)
+            val yShift = exit * (boxH + 52f)
+            val boxTop = y - boxH + yShift
+            val boxBottom = y - 10f + yShift
 
             var theme = getThemedColor(boxTop * 2f)
             when (n.type) {
