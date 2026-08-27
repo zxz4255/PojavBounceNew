@@ -362,45 +362,45 @@ object ModuleSolsticeNotification : ClientModule(
                 GlowColorMode.GRADIENT -> Triple(glowColor, glowColor2, true)
             }
             drawGlow(ctx, x, boxTop, x + boxW, boxBottom, g1, g2, aMul, gGrad)
-            // 先铺一层不透明主题底，杜绝缝隙透出黑/游戏画面
-            ctx.drawRoundedRect(x, boxTop, x + boxW, boxBottom, cornerRadius, cLeft)
-            if (colorGradient) {
-                // 分段渐变叠在主题底上，段间轻微重叠，无黑条
-                val segs = 20
-                val segW = boxW / segs
-                for (i in 0 until segs) {
-                    val t0 = i / (segs - 1).toFloat().coerceAtLeast(1f)
-                    val s = t0 * t0 * (3f - 2f * t0)
-                    val col = Color4b(
-                        lerp(cLeft.r.toFloat(), cRight.r.toFloat(), s).toInt().coerceIn(0, 255),
-                        lerp(cLeft.g.toFloat(), cRight.g.toFloat(), s).toInt().coerceIn(0, 255),
-                        lerp(cLeft.b.toFloat(), cRight.b.toFloat(), s).toInt().coerceIn(0, 255),
-                        (235 * aMul).toInt().coerceIn(0, 255),
-                    )
-                    val sx = x + segW * i - 0.5f
-                    val ex = x + segW * (i + 1) + 0.5f
-                    ctx.drawQuad(
-                        sx.coerceAtLeast(x),
-                        boxTop,
-                        ex.coerceAtMost(x + boxW),
-                        boxBottom,
-                        col,
-                    )
-                }
-            }
 
-            // 底部细进度（剩余时间），主题色连续条
+            // 整卡即大进度条：未覆盖区域纯黑，已覆盖用主题色（去掉底部小进度条）
             val remain = (1f - percentDone).coerceIn(0f, 1f)
-            val barH = (3f * (fontSize / 11f)).coerceIn(2f, 5f)
-            val barY1 = boxBottom - barH - 1f
-            val barY2 = boxBottom - 1f
-            val barPad = 4f
-            val barLeft = x + barPad
-            val barRight = x + boxW - barPad
-            val barW = (barRight - barLeft) * remain
-            if (barW > 0.5f) {
-                val barCol = Color4b(255, 255, 255, (200 * aMul).toInt().coerceIn(0, 255))
-                ctx.drawQuad(barLeft, barY1, barLeft + barW, barY2, barCol)
+            val blackBg = Color4b(0, 0, 0, (240 * aMul).toInt().coerceIn(0, 255))
+            ctx.drawRoundedRect(x, boxTop, x + boxW, boxBottom, cornerRadius, blackBg)
+
+            val fillW = boxW * remain
+            if (fillW > 0.5f) {
+                if (colorGradient) {
+                    val segs = 24
+                    val segW = fillW / segs
+                    for (i in 0 until segs) {
+                        val t0 = if (segs <= 1) 0f else i / (segs - 1).toFloat()
+                        val s = t0 * t0 * (3f - 2f * t0)
+                        val col = Color4b(
+                            lerp(cLeft.r.toFloat(), cRight.r.toFloat(), s).toInt().coerceIn(0, 255),
+                            lerp(cLeft.g.toFloat(), cRight.g.toFloat(), s).toInt().coerceIn(0, 255),
+                            lerp(cLeft.b.toFloat(), cRight.b.toFloat(), s).toInt().coerceIn(0, 255),
+                            (245 * aMul).toInt().coerceIn(0, 255),
+                        )
+                        val sx = x + segW * i
+                        val ex = (x + segW * (i + 1)).coerceAtMost(x + fillW)
+                        if (ex > sx) {
+                            ctx.drawQuad(sx, boxTop, ex, boxBottom, col)
+                        }
+                    }
+                    // 左端圆角补全，避免进度条左角直角
+                    if (remain > 0.98f) {
+                        ctx.drawRoundedRect(x, boxTop, x + boxW, boxBottom, cornerRadius, cLeft.alpha((245 * aMul).toInt().coerceIn(0, 255)))
+                    }
+                } else {
+                    // 纯色大进度：左填充
+                    val fillCol = cLeft.alpha((245 * aMul).toInt().coerceIn(0, 255))
+                    if (remain >= 0.99f) {
+                        ctx.drawRoundedRect(x, boxTop, x + boxW, boxBottom, cornerRadius, fillCol)
+                    } else {
+                        ctx.drawQuad(x, boxTop, x + fillW, boxBottom, fillCol)
+                    }
+                }
             }
 
             drawScaledText(ctx, n.message, x + 10f, boxTop + 10f * (fontSize / 11f), Color4b.WHITE)
