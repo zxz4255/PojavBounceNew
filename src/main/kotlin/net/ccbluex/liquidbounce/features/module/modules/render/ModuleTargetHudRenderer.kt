@@ -1,6 +1,13 @@
 /*
  * ModuleTargetHudRenderer —— 还原 TargetHudRenderer.java (Lite + New 近似)
  * 原生 Overlay，无 Web / 无 Skia
+ *
+ * 头像修复（对齐 ModuleTargetInfo）：
+ *  - 旧版按 Mojang 官方 9/11 参数签名反射查找 blit，但本 fork 的
+ *    GuiGraphicsExtractor.blit 是 8 参数 (id, x0, y0, x1, y1, u, v, uw, vh)，
+ *    反射必然匹配失败，头像分支从未执行，只剩首字母色块。
+ *  - 现改为与 ModuleTargetInfo 完全一致：headTexture() 解析贴图 +
+ *    直接 blit(id, x, y, x+size, y+size, 8/64, 16/64, 8/64, 16/64)。
  */
 package net.ccbluex.liquidbounce.features.module.modules.render
 
@@ -22,6 +29,10 @@ import net.minecraft.client.player.AbstractClientPlayer
 import net.minecraft.resources.Identifier
 import net.minecraft.util.Mth
 import net.minecraft.world.entity.LivingEntity
+import net.minecraft.world.entity.monster.Creeper
+import net.minecraft.world.entity.monster.piglin.Piglin
+import net.minecraft.world.entity.monster.skeleton.Skeleton
+import net.minecraft.world.entity.monster.zombie.Zombie
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
@@ -93,156 +104,39 @@ object ModuleTargetHudRenderer : ClientModule(
         return null
     }
 
+    /* ============ 头像（与 ModuleTargetInfo 完全一致的贴图来源 + blit UV） ============ */
 
-
-
-    /* ===================== 头像（正确 64x64 皮肤 UV） ===================== */
-
-    private fun resolveSkinTexture(player: AbstractClientPlayer): Identifier? {
-        // 全程反射，避免 skin.texture() 在部分映射中不存在
-        runCatching {
-            val skin = player.javaClass.methods.firstOrNull {
-                it.parameterCount == 0 && (it.name == "getSkin" || it.name == "skin")
-            }?.invoke(player) ?: return@runCatching
-            // PlayerSkin.texture() / texture / body().texturePath()
-            for (m in skin.javaClass.methods) {
-                if (m.parameterCount != 0) continue
-                val n = m.name.lowercase()
-                if (n == "texture" || n == "gettexture" || n.contains("texturepath") || n.contains("texturelocation")) {
-                    val r = runCatching { m.invoke(skin) }.getOrNull()
-                    when (r) {
-                        is Identifier -> return r
-                        is String -> return Identifier.parse(r)
-                    }
-                }
-            }
-            // body layer
-            val body = skin.javaClass.methods.firstOrNull {
-                it.parameterCount == 0 && it.name.equals("body", true)
-            }?.invoke(skin)
-            if (body != null) {
-                for (m in body.javaClass.methods) {
-                    if (m.parameterCount != 0) continue
-                    if (!m.name.lowercase().contains("texture")) continue
-                    val r = runCatching { m.invoke(body) }.getOrNull()
-                    when (r) {
-                        is Identifier -> return r
-                        is String -> return Identifier.parse(r)
-                    }
-                }
-            }
-            for (f in skin.javaClass.declaredFields) {
-                f.isAccessible = true
-                val v = f.get(skin)
-                if (v is Identifier) return v
-            }
-        }
-        runCatching {
-            player.javaClass.methods.firstOrNull {
-                it.parameterCount == 0 && (
-                    it.name.equals("getSkinTextureLocation", true)
-                        || it.name.equals("getSkinLocation", true)
-                        || it.name == "locationSkin"
-                    )
-            }?.invoke(player) as? Identifier
-        }.getOrNull()?.let { return it }
-        return Identifier.withDefaultNamespace("textures/entity/player/wide/steve.png")
+    private fun headTexture(entity: LivingEntity): Identifier? = when (entity) {
+        is AbstractClientPlayer -> entity.skin.body().texturePath()
+        is Skeleton -> Identifier.withDefaultNamespace("textures/entity/skeleton/skeleton.png")
+        is Zombie -> Identifier.withDefaultNamespace("textures/entity/zombie/zombie.png")
+        is Creeper -> Identifier.withDefaultNamespace("textures/entity/creeper/creeper.png")
+        is Piglin -> Identifier.withDefaultNamespace("textures/entity/piglin/piglin.png")
+        else -> null
     }
 
-    private fun GuiGraphicsExtractor.nativeGui(): Any {
-        return runCatching {
-            javaClass.methods.firstOrNull {
-                it.parameterCount == 0 && it.returnType.name.contains("GuiGraphics")
-            }?.invoke(this)
-        }.getOrNull() ?: this
-    }
-
-    private fun tryBlitHat(g: Any, texture: Identifier, x: Int, y: Int, size: Int) {
-        for (m in g.javaClass.methods) {
-            if (!m.name.equals("blit", true)) continue
-            try {
-                when (m.parameterCount) {
-                    11 -> { m.invoke(g, texture, x, y, size, size, 40f, 8f, 8, 8, 64, 64); return }
-                    9 -> { m.invoke(g, texture, x, y, 40f, 8f, size, size, 64, 64); return }
-                }
-            } catch (_: Throwable) {}
-        }
-    }
-
-    private fun GuiGraphicsExtractor.blitSkinFace(texture: Identifier, x: Int, y: Int, size: Int): Boolean {
-        val g = nativeGui()
-        for (m in g.javaClass.methods) {
-            if (!m.name.equals("blit", true)) continue
-            try {
-                when (m.parameterCount) {
-                    11 -> {
-                        m.invoke(g, texture, x, y, size, size, 8f, 8f, 8, 8, 64, 64)
-                        tryBlitHat(g, texture, x, y, size)
-                        return true
-                    }
-                    9 -> {
-                        m.invoke(g, texture, x, y, 8f, 8f, size, size, 64, 64)
-                        tryBlitHat(g, texture, x, y, size)
-                        return true
-                    }
-                }
-            } catch (_: Throwable) {}
-        }
-        runCatching {
-            val m = javaClass.methods.firstOrNull { it.name.equals("blit", true) && it.parameterCount >= 9 } ?: return@runCatching
-            when (m.parameterCount) {
-                11 -> m.invoke(this, texture, x, y, size, size, 8f, 8f, 8, 8, 64, 64)
-                9 -> m.invoke(this, texture, x, y, 8f, 8f, size, size, 64, 64)
-                else -> return@runCatching
-            }
-            return true
-        }
-        return false
-    }
-
-    private fun tryPlayerFaceRenderer(g: Any, player: AbstractClientPlayer, x: Int, y: Int, size: Int): Boolean {
-        return runCatching {
-            val cls = Class.forName("net.minecraft.client.gui.components.PlayerFaceRenderer")
-            val skin = runCatching { player.skin }.getOrNull()
-            val tex = resolveSkinTexture(player)
-            for (m in cls.methods) {
-                if (!m.name.equals("draw", true) && !m.name.equals("render", true)) continue
-                if (!java.lang.reflect.Modifier.isStatic(m.modifiers)) continue
-                val pts = m.parameterTypes
-                try {
-                    when (m.parameterCount) {
-                        5 -> {
-                            if (skin != null && pts[1].isInstance(skin)) {
-                                m.invoke(null, g, skin, x, y, size); return@runCatching true
-                            }
-                            if (tex != null && Identifier::class.java.isAssignableFrom(pts[1])) {
-                                m.invoke(null, g, tex, x, y, size); return@runCatching true
-                            }
-                        }
-                        6 -> {
-                            if (skin != null) { m.invoke(null, g, skin, x, y, size, true); return@runCatching true }
-                            if (tex != null) { m.invoke(null, g, tex, x, y, size, true); return@runCatching true }
-                        }
-                        7 -> {
-                            if (skin != null) { m.invoke(null, g, skin, x, y, size, true, true); return@runCatching true }
-                        }
-                    }
-                } catch (_: Throwable) {}
-            }
-            false
-        }.getOrDefault(false)
-    }
-
+    /**
+     * 头像绘制：直接调用 GuiGraphicsExtractor.blit(id, x0, y0, x1, y1, u, v, uw, vh)，
+     * UV 与 ModuleTargetInfo 完全一致 (8/64, 16/64, 8/64, 16/64)。
+     * 不再使用任何反射 —— 旧反射在本 fork 上找不到 blit 方法，头像永远画不出来。
+     */
     private fun GuiGraphicsExtractor.drawEntityFace(entity: LivingEntity, x: Float, y: Float, size: Float) {
-        val xi = x.roundToInt()
-        val yi = y.roundToInt()
-        val si = size.roundToInt().coerceAtLeast(8)
-        val g = nativeGui()
-        if (entity is AbstractClientPlayer) {
-            if (tryPlayerFaceRenderer(g, entity, xi, yi, si)) return
-            val tex = resolveSkinTexture(entity)
-            if (tex != null && blitSkinFace(tex, xi, yi, si)) return
+        val texture = headTexture(entity)
+        if (texture != null) {
+            val xi = x.roundToInt()
+            val yi = y.roundToInt()
+            val si = size.roundToInt().coerceAtLeast(1)
+            blit(
+                texture,
+                xi, yi, xi + si, yi + si,
+                8f / 64f, 16f / 64f, 8f / 64f, 16f / 64f,
+            )
+            if (hurtFlash && entity.hurtTime > 0 && entity.hurtDuration > 0) {
+                fill(xi, yi, xi + si, yi + si, (0x80 shl 24) or 0x00FF0000)
+            }
+            return
         }
+        // 其余生物：首字母色块回退
         drawFaceFallback(entity, x, y, size)
     }
 
