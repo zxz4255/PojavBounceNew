@@ -4,6 +4,10 @@
  *  - 字体对齐修复
  *  - 去掉渐变条里多余的矩形块
  *  - 可调背景色 / 边框
+ *  - 头像修复（对齐 ModuleTargetInfo）：
+ *    旧 UV 为 (8/64, 8/64, 8/64, 8/64) 且套在 runCatching 里，
+ *    与能正常显示的 ModuleTargetInfo 的 UV (8/64, 16/64, 8/64, 16/64) 不一致；
+ *    现改为与参照完全一致的 headTexture + blit 调用，去掉反射与异常吞噬。
  * ============================================================================
  */
 package net.ccbluex.liquidbounce.features.module.modules.render
@@ -27,6 +31,10 @@ import net.minecraft.client.gui.screens.ChatScreen
 import net.minecraft.client.player.AbstractClientPlayer
 import net.minecraft.resources.Identifier
 import net.minecraft.world.entity.LivingEntity
+import net.minecraft.world.entity.monster.Creeper
+import net.minecraft.world.entity.monster.piglin.Piglin
+import net.minecraft.world.entity.monster.skeleton.Skeleton
+import net.minecraft.world.entity.monster.zombie.Zombie
 import java.text.DecimalFormat
 import kotlin.math.PI
 import kotlin.math.pow
@@ -179,53 +187,22 @@ object ModuleSolsticeModernTargetInfo : ClientModule(
     private fun textW(font: Font, text: String, scale: Float): Float = font.width(text) * scale
 
     /**
-     * 解析头部贴图：玩家皮肤（多 API 回退）+ 常见生物 + 渲染器反射。
+     * 贴图来源与 ModuleTargetInfo 完全一致：
+     * 玩家皮肤 + 常见生物固定贴图，其余返回 null 走色块回退。
      */
-    /**
-     * 玩家：标准 64×64 皮肤脸部 UV。
-     * 生物：不用皮肤 UV（会乱码），用实体渲染器贴图 + 对应 UV，失败则色块+首字。
-     */
-    private fun headTexture(entity: LivingEntity): Identifier? {
-        if (entity is AbstractClientPlayer) {
-            runCatching { entity.skin.body().texturePath() }.getOrNull()?.let { return it }
-            runCatching {
-                val skin = entity.skin
-                for (m in skin.javaClass.methods) {
-                    if (m.parameterCount != 0) continue
-                    val n = m.name.lowercase()
-                    if (n.contains("texture") || n == "body") {
-                        val r = m.invoke(skin) ?: continue
-                        if (r is Identifier) return r
-                        val tp = r.javaClass.methods.firstOrNull {
-                            it.parameterCount == 0 && it.name.lowercase().contains("texture")
-                        }?.invoke(r)
-                        if (tp is Identifier) return tp
-                    }
-                }
-                null
-            }.getOrNull()?.let { return it }
-            return Identifier.withDefaultNamespace("textures/entity/player/wide/steve.png")
-        }
-        runCatching {
-            val renderer = mc.entityRenderDispatcher.getRenderer(entity) ?: return@runCatching null
-            for (m in renderer.javaClass.methods) {
-                val n = m.name.lowercase()
-                if (!n.contains("texture")) continue
-                if (m.parameterCount == 1) {
-                    val r = m.invoke(renderer, entity)
-                    if (r is Identifier) return r
-                }
-                if (m.parameterCount == 0) {
-                    val r = m.invoke(renderer)
-                    if (r is Identifier) return r
-                }
-            }
-            null
-        }.getOrNull()?.let { return it }
-        return null
+    private fun headTexture(entity: LivingEntity): Identifier? = when (entity) {
+        is AbstractClientPlayer -> entity.skin.body().texturePath()
+        is Skeleton -> Identifier.withDefaultNamespace("textures/entity/skeleton/skeleton.png")
+        is Zombie -> Identifier.withDefaultNamespace("textures/entity/zombie/zombie.png")
+        is Creeper -> Identifier.withDefaultNamespace("textures/entity/creeper/creeper.png")
+        is Piglin -> Identifier.withDefaultNamespace("textures/entity/piglin/piglin.png")
+        else -> null
     }
 
-    /** 本 fork blit(texture, x0,y0,x1,y1, u,v,uw,vh) 均为 0..1 纹理坐标 */
+    /**
+     * 头像绘制：与 ModuleTargetInfo 完全一致的 UV (8/64, 16/64, 8/64, 16/64)。
+     * 旧版 UV (8/64, 8/64, 8/64, 8/64) 与参照不一致，且 runCatching 会吞掉异常。
+     */
     private fun GuiGraphicsExtractor.drawEntityHead(
         entity: LivingEntity,
         x: Float,
@@ -238,29 +215,16 @@ object ModuleSolsticeModernTargetInfo : ClientModule(
         val y1 = (y + size).roundToInt()
         if (x1 <= x0 || y1 <= y0) return
 
-        if (entity is AbstractClientPlayer) {
-            val texture = headTexture(entity) ?: return
-            // 标准皮肤脸：u=8/64,v=8/64, 宽高 8/64
-            runCatching {
-                blit(texture, x0, y0, x1, y1, 8f / 64f, 8f / 64f, 8f / 64f, 8f / 64f)
-            }
-            // 帽子层
-            runCatching {
-                blit(texture, x0, y0, x1, y1, 40f / 64f, 8f / 64f, 8f / 64f, 8f / 64f)
-            }
+        val texture = headTexture(entity)
+        if (texture != null) {
+            blit(
+                texture,
+                x0, y0, x1, y1,
+                8f / 64f, 16f / 64f, 8f / 64f, 16f / 64f,
+            )
             return
         }
 
-        // 生物：多数贴图不是 64 皮肤布局，强行用皮肤 UV 会花屏/乱码
-        // 尝试整张贴图中心区域小块；失败则色块 + 首字母
-        val texture = headTexture(entity)
-        if (texture != null) {
-            val ok = runCatching {
-                // 通用：取贴图左上偏中一块（很多实体头在左上）
-                blit(texture, x0, y0, x1, y1, 0f, 0f, 8f / 64f, 8f / 64f)
-            }.isSuccess
-            if (ok) return
-        }
         // 回退：主题色圆角块 + 名字首字
         val key = entity.type.descriptionId.hashCode()
         val r = 80 + (key and 0x7F)
@@ -414,7 +378,7 @@ object ModuleSolsticeModernTargetInfo : ClientModule(
                 )
             }
 
-            // 头像阴影 + 皮肤正面（含帽子）
+            // 头像阴影 + 皮肤正面（与 ModuleTargetInfo 一致的 UV）
             ctx.drawDropShadow(headX, headY, headSize, radius * s * 0.5f)
             ctx.drawEntityHead(target, headX, headY, headSize)
             if (hurtTime > 0f) {
