@@ -2,6 +2,14 @@
  * ModuleEpsilonTargetHud —— 还原 Epsilon TargetHUD.java
  * 原生 OverlayRender + GuiGraphicsExtractor，无 Web
  * 血条延迟动画 / 受伤头像缩放 / 玩家皮肤 UV / 装备栏
+ *
+ * 头像修复（对齐 ModuleTargetInfo）：
+ *  - 旧版按 Mojang 官方 9/11 参数签名反射查找 blit，但本 fork 的
+ *    GuiGraphicsExtractor.blit 是 8 参数 (id, x0, y0, x1, y1, u, v, uw, vh)，
+ *    反射必然匹配失败，玩家头像永远走不到 blit 分支。
+ *  - 现改为与 ModuleTargetInfo 完全一致：headTexture() 解析贴图 +
+ *    直接 blit(id, x, y, x+size, y+size, 8/64, 16/64, 8/64, 16/64)。
+ *  - 生物（僵尸/骷髅/苦力怕/猪灵）也改为固定贴图 blit，失败才回退色块。
  */
 package net.ccbluex.liquidbounce.features.module.modules.render
 
@@ -22,6 +30,10 @@ import net.minecraft.client.player.AbstractClientPlayer
 import net.minecraft.resources.Identifier
 import net.minecraft.world.entity.EquipmentSlot
 import net.minecraft.world.entity.LivingEntity
+import net.minecraft.world.entity.monster.Creeper
+import net.minecraft.world.entity.monster.piglin.Piglin
+import net.minecraft.world.entity.monster.skeleton.Skeleton
+import net.minecraft.world.entity.monster.zombie.Zombie
 import net.minecraft.world.item.ItemStack
 import java.util.Locale
 import kotlin.math.max
@@ -199,224 +211,40 @@ object ModuleEpsilonTargetHud : ClientModule(
         return lerp(delayedHealth, currentHealth, speed)
     }
 
+    /* ============ 头像（与 ModuleTargetInfo 完全一致的贴图来源 + blit UV） ============ */
 
-
-    /* ===================== 头像（参考 Overlay GuiGraphics，正确皮肤 UV） ===================== */
-
-    private fun resolveSkinTexture(player: AbstractClientPlayer): Identifier? {
-        // 全程反射，避免 skin.texture() 在部分映射中不存在
-        runCatching {
-            val skin = player.javaClass.methods.firstOrNull {
-                it.parameterCount == 0 && (it.name == "getSkin" || it.name == "skin")
-            }?.invoke(player) ?: return@runCatching
-            // PlayerSkin.texture() / texture / body().texturePath()
-            for (m in skin.javaClass.methods) {
-                if (m.parameterCount != 0) continue
-                val n = m.name.lowercase()
-                if (n == "texture" || n == "gettexture" || n.contains("texturepath") || n.contains("texturelocation")) {
-                    val r = runCatching { m.invoke(skin) }.getOrNull()
-                    when (r) {
-                        is Identifier -> return r
-                        is String -> return Identifier.parse(r)
-                    }
-                }
-            }
-            // body layer
-            val body = skin.javaClass.methods.firstOrNull {
-                it.parameterCount == 0 && it.name.equals("body", true)
-            }?.invoke(skin)
-            if (body != null) {
-                for (m in body.javaClass.methods) {
-                    if (m.parameterCount != 0) continue
-                    if (!m.name.lowercase().contains("texture")) continue
-                    val r = runCatching { m.invoke(body) }.getOrNull()
-                    when (r) {
-                        is Identifier -> return r
-                        is String -> return Identifier.parse(r)
-                    }
-                }
-            }
-            for (f in skin.javaClass.declaredFields) {
-                f.isAccessible = true
-                val v = f.get(skin)
-                if (v is Identifier) return v
-            }
-        }
-        runCatching {
-            player.javaClass.methods.firstOrNull {
-                it.parameterCount == 0 && (
-                    it.name.equals("getSkinTextureLocation", true)
-                        || it.name.equals("getSkinLocation", true)
-                        || it.name == "locationSkin"
-                    )
-            }?.invoke(player) as? Identifier
-        }.getOrNull()?.let { return it }
-        return Identifier.withDefaultNamespace("textures/entity/player/wide/steve.png")
-    }
-
-    private fun GuiGraphicsExtractor.nativeGui(): Any {
-        return runCatching {
-            javaClass.methods.firstOrNull {
-                it.parameterCount == 0 && it.returnType.name.contains("GuiGraphics")
-            }?.invoke(this)
-        }.getOrNull() ?: this
+    private fun headTexture(entity: LivingEntity): Identifier? = when (entity) {
+        is AbstractClientPlayer -> entity.skin.body().texturePath()
+        is Skeleton -> Identifier.withDefaultNamespace("textures/entity/skeleton/skeleton.png")
+        is Zombie -> Identifier.withDefaultNamespace("textures/entity/zombie/zombie.png")
+        is Creeper -> Identifier.withDefaultNamespace("textures/entity/creeper/creeper.png")
+        is Piglin -> Identifier.withDefaultNamespace("textures/entity/piglin/piglin.png")
+        else -> null
     }
 
     /**
-     * 在 64×64 皮肤上取脸部 8×8（及帽子层 40,8），用 GuiGraphics.blit 放大到 size。
-     * 禁止把 8/64 当像素宽高 —— 那是花屏乱线的根因。
+     * 头像绘制：直接调用 GuiGraphicsExtractor.blit(id, x0, y0, x1, y1, u, v, uw, vh)，
+     * UV 与 ModuleTargetInfo 完全一致 (8/64, 16/64, 8/64, 16/64)。
+     * 不再使用任何反射 —— 旧反射在本 fork 上找不到 blit 方法，头像永远画不出来。
      */
-    private fun GuiGraphicsExtractor.blitSkinFace(texture: Identifier, x: Int, y: Int, size: Int): Boolean {
-        val g = nativeGui()
-        // 候选 blit 签名（1.20–1.21 Mojang 映射）
-        data class Try(val args: Array<Any?>)
-        val tries = listOf(
-            // (id, x, y, w, h, u, v, regionW, regionH, texW, texH)
-            Try(arrayOf(texture, x, y, size, size, 8f, 8f, 8, 8, 64, 64)),
-            Try(arrayOf(texture, x, y, size, size, 8, 8, 8, 8, 64, 64)),
-            // (id, x, y, u, v, w, h, texW, texH)
-            Try(arrayOf(texture, x, y, 8f, 8f, size, size, 64, 64)),
-            Try(arrayOf(texture, x, y, 8f, 8f, 8, 8, 64, 64)),
-            // pipeline 版: (RenderPipeline, id, ...)
-        )
-        val methods = g.javaClass.methods.filter {
-            it.name.equals("blit", true) && it.parameterCount in 9..12
-        }
-        for (m in methods) {
-            for (t in tries) {
-                if (t.args.size != m.parameterCount) continue
-                try {
-                    m.invoke(g, *t.args)
-                    // 帽子层
-                    tryBlitHat(g, texture, x, y, size)
-                    return true
-                } catch (_: Throwable) {
-                }
-            }
-            // 按参数类型自动拼
-            try {
-                val args = Array<Any?>(m.parameterCount) { null }
-                var filled = true
-                var stage = 0
-                for (i in 0 until m.parameterCount) {
-                    val pt = m.parameterTypes[i]
-                    when {
-                        Identifier::class.java.isAssignableFrom(pt) -> args[i] = texture
-                        pt == Int::class.javaPrimitiveType || pt == Integer::class.java -> {
-                            args[i] = when (stage++) {
-                                0 -> x; 1 -> y; 2 -> size; 3 -> size
-                                4 -> 8; 5 -> 8; 6 -> 8; 7 -> 8
-                                8 -> 64; 9 -> 64
-                                else -> 0
-                            }
-                        }
-                        pt == Float::class.javaPrimitiveType || pt == java.lang.Float::class.java -> {
-                            args[i] = when (stage) {
-                                0, 1 -> 8f // u/v if floats early — but ints usually first for x,y
-                                else -> 8f
-                            }.also { /* keep stage */ }
-                            // better map by index for float-heavy signatures
-                        }
-                        else -> { filled = false }
-                    }
-                }
-                // 更稳：只对完全匹配 Identifier + 全 int 的 11 参数
-                if (m.parameterCount == 11 && m.parameterTypes[0] == Identifier::class.java) {
-                    m.invoke(g, texture, x, y, size, size, 8f, 8f, 8, 8, 64, 64)
-                    tryBlitHat(g, texture, x, y, size)
-                    return true
-                }
-            } catch (_: Throwable) {
-            }
-        }
-        // GuiGraphicsExtractor 自身 blit
-        runCatching {
-            val m = javaClass.methods.firstOrNull {
-                it.name.equals("blit", true) && it.parameterCount >= 9
-            } ?: return@runCatching
-            when (m.parameterCount) {
-                11 -> m.invoke(this, texture, x, y, size, size, 8f, 8f, 8, 8, 64, 64)
-                9 -> m.invoke(this, texture, x, y, 8f, 8f, size, size, 64, 64)
-                else -> return@runCatching
-            }
-            return true
-        }
-        return false
-    }
-
-    private fun tryBlitHat(g: Any, texture: Identifier, x: Int, y: Int, size: Int) {
-        for (m in g.javaClass.methods) {
-            if (!m.name.equals("blit", true)) continue
-            try {
-                when (m.parameterCount) {
-                    11 -> {
-                        m.invoke(g, texture, x, y, size, size, 40f, 8f, 8, 8, 64, 64)
-                        return
-                    }
-                    9 -> {
-                        m.invoke(g, texture, x, y, 40f, 8f, size, size, 64, 64)
-                        return
-                    }
-                }
-            } catch (_: Throwable) {
-            }
-        }
-    }
-
-    private fun tryPlayerFaceRenderer(g: Any, player: AbstractClientPlayer, x: Int, y: Int, size: Int): Boolean {
-        return runCatching {
-            val cls = Class.forName("net.minecraft.client.gui.components.PlayerFaceRenderer")
-            val skin = runCatching { player.skin }.getOrNull()
-            val tex = resolveSkinTexture(player)
-            for (m in cls.methods) {
-                if (!m.name.equals("draw", true) && !m.name.equals("render", true)) continue
-                if (!java.lang.reflect.Modifier.isStatic(m.modifiers)) continue
-                val pts = m.parameterTypes
-                try {
-                    when (m.parameterCount) {
-                        5 -> {
-                            // (GuiGraphics, PlayerSkin|Identifier, x, y, size)
-                            if (skin != null && pts[1].isInstance(skin)) {
-                                m.invoke(null, g, skin, x, y, size); return@runCatching true
-                            }
-                            if (tex != null && Identifier::class.java.isAssignableFrom(pts[1])) {
-                                m.invoke(null, g, tex, x, y, size); return@runCatching true
-                            }
-                        }
-                        6 -> {
-                            if (skin != null) {
-                                m.invoke(null, g, skin, x, y, size, true); return@runCatching true
-                            }
-                            if (tex != null) {
-                                m.invoke(null, g, tex, x, y, size, true); return@runCatching true
-                            }
-                        }
-                        7 -> {
-                            if (skin != null) {
-                                m.invoke(null, g, skin, x, y, size, true, true); return@runCatching true
-                            }
-                        }
-                    }
-                } catch (_: Throwable) {
-                }
-            }
-            false
-        }.getOrDefault(false)
-    }
-
     private fun GuiGraphicsExtractor.drawEntityFace(entity: LivingEntity, x: Float, y: Float, size: Float) {
-        val xi = x.roundToInt()
-        val yi = y.roundToInt()
-        val si = size.roundToInt().coerceAtLeast(8)
-        val g = nativeGui()
-
-        if (entity is AbstractClientPlayer) {
-            if (tryPlayerFaceRenderer(g, entity, xi, yi, si)) return
-            val tex = resolveSkinTexture(entity)
-            if (tex != null && blitSkinFace(tex, xi, yi, si)) return
+        val texture = headTexture(entity)
+        if (texture != null) {
+            val xi = x.roundToInt()
+            val yi = y.roundToInt()
+            val si = size.roundToInt().coerceAtLeast(1)
+            blit(
+                texture,
+                xi, yi, xi + si, yi + si,
+                8f / 64f, 16f / 64f, 8f / 64f, 16f / 64f,
+            )
+            // 受伤红罩（对应 ModuleTargetInfo 的 damageTint）
+            if (entity.hurtTime > 0 && entity.hurtDuration > 0) {
+                fill(xi, yi, xi + si, yi + si, (0x80 shl 24) or 0x00FF0000)
+            }
+            return
         }
-
-        // 生物 / 失败：首字母色块（不再用错误 UV blit）
+        // 其余生物：首字母色块回退
         drawFaceFallback(entity, x, y, size)
     }
 
@@ -606,7 +434,6 @@ object ModuleEpsilonTargetHud : ClientModule(
         val sBarR = barR * anim
         val sOutline = barOutlineWidth * panelScale * anim
         val sTextScale = textScale * anim
-        val sHeadR = headSize * 0.23f * anim
         val sPadX = lerp(centerX, baseX + pad, anim)
         val sBarY = lerp(centerY, barY, anim)
         val sBarW = barW * anim
@@ -629,7 +456,6 @@ object ModuleEpsilonTargetHud : ClientModule(
         val finalHeadSize = sHeadSize * headDamageScale
         val finalHeadX = sHeadX + (sHeadSize - finalHeadSize) / 2f
         val finalHeadY = sHeadY + (sHeadSize - finalHeadSize) / 2f
-        val headTint = withAlpha(tintDamage(Color4b(255, 255, 255, 255), damageProgress), anim)
 
         // 模糊近似：多层半透明 + 阴影
         if (blurStrength > 0.5f) {
@@ -663,13 +489,8 @@ object ModuleEpsilonTargetHud : ClientModule(
             ctx.drawOutlineRect(sPadX, sBarY, sBarW, sBarH, sBarR, sOutline, withAlpha(barOutlineColor, anim))
         }
 
-        // 头像
-        if (target is AbstractClientPlayer) {
-            ctx.drawEntityFace(target, finalHeadX, finalHeadY, finalHeadSize)
-        } else {
-            val gray = withAlpha(tintDamage(Color4b(80, 80, 80, 200), damageProgress), anim)
-            ctx.drawRoundedRect(finalHeadX, finalHeadY, finalHeadX + finalHeadSize, finalHeadY + finalHeadSize, sHeadR * headDamageScale, gray)
-        }
+        // 头像（与 ModuleTargetInfo 相同：玩家皮肤 / 常见生物贴图 / 其余色块回退）
+        ctx.drawEntityFace(target, finalHeadX, finalHeadY, finalHeadSize)
 
         // 文字
         val name = try {
