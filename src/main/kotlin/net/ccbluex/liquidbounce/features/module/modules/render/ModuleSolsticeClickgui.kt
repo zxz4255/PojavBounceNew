@@ -769,32 +769,31 @@ object ModuleSolsticeClickgui : ClientModule(
         val soft = panelGlowSoft.coerceIn(0.5f, 3f)
         val maxR = panelGlowRadius.coerceAtLeast(1f)
         val base = if (panelGlowTheme) themed(x + y) else panelGlowColor
-        // 严格：底强 → 顶弱，且不画到标题栏上方（避免多出长方形阴影）
-        val steps = (32 + panelGlowLayers * 2).coerceIn(28, 52)
+        // GUI 坐标 y 向下增大：底部 y+h 最亮，向上（y 减小）变弱
+        val steps = (36 + panelGlowLayers * 2).coerceIn(30, 56)
         val bottom = y + h
-        // 只在栏体高度内向上延伸，最多略微超出底边，绝不超过标题顶
         val glowTop = y + 1f
         val glowH = (bottom - glowTop).coerceAtLeast(4f)
         for (i in 0 until steps) {
+            // i=0 → 贴底；i→steps → 靠顶
             val t0 = i / steps.toFloat()
             val t1 = (i + 1) / steps.toFloat()
-            // t=0 在底部，t=1 在顶部
-            val mid = (t0 + t1) * 0.5f
-            // 底部 mid≈0 → fall≈1；顶部 mid≈1 → fall≈0
-            val fall = kotlin.math.exp((-(mid) * (mid) * (3.2f * soft)).toDouble()).toFloat()
-            val aa = (fall * strength * 75f * anim).toInt().coerceIn(0, 95)
+            val mid = (t0 + t1) * 0.5f // 0 底 → 1 顶
+            // 强→弱：用 (1-mid)^power，绝不用反的
+            val fall = (1f - mid).toDouble().pow((1.1f + soft * 0.6f).toDouble()).toFloat()
+            val aa = (fall * strength * 80f * anim).toInt().coerceIn(0, 100)
             if (aa < 2) continue
-            val y0 = bottom - glowH * t1
-            val y1 = bottom - glowH * t0
-            // 不画到 y 以上
-            if (y1 <= glowTop) continue
-            val drawY0 = max(y0, glowTop)
-            val sideInset = maxR * 0.12f * mid
+            // 段的屏幕 y：越靠近 bottom 越大
+            val yBottom = bottom - glowH * t0
+            val yTop = bottom - glowH * t1
+            if (yBottom <= glowTop) continue
+            val drawTop = max(yTop, glowTop)
+            val sideInset = maxR * 0.1f * mid
             ctx.drawQuad(
                 x - maxR * 0.2f + sideInset,
-                drawY0,
+                drawTop,
                 x + w + maxR * 0.2f - sideInset,
-                y1,
+                yBottom,
                 Color4b(base.r, base.g, base.b, aa),
             )
         }
@@ -910,13 +909,19 @@ object ModuleSolsticeClickgui : ClientModule(
         ctx.drawQuad(0f, 0f, sw, sh, Color4b(0, 0, 0, (255 * dimAlpha * anim).toInt().coerceIn(0, 200)))
 
         if (bottomGlow) {
+            // 屏幕底部最强，向上变弱
             val firstH = lerp(sh, sh - sh / 3f, s)
             val col = themed(0f)
-            for (i in 0 until 12) {
-                val t0 = i / 12f
+            for (i in 0 until 16) {
+                val t0 = i / 16f
+                val t1 = (i + 1) / 16f
+                // t=0 在 firstH（上），t=1 在 sh（底）
                 val y0 = lerp(firstH, sh, t0)
-                val y1 = lerp(firstH, sh, (i + 1) / 12f)
-                val aa = (bottomGlowStrength * anim * (1f - t0) * 180f).toInt().coerceIn(0, 180)
+                val y1 = lerp(firstH, sh, t1)
+                val mid = (t0 + t1) * 0.5f
+                val fall = mid // 越靠下越亮
+                val aa = (bottomGlowStrength * anim * fall * 180f).toInt().coerceIn(0, 180)
+                if (aa < 2) continue
                 ctx.drawQuad(0f, y0, sw, y1, Color4b(col.r, col.g, col.b, aa))
             }
         }
@@ -972,18 +977,28 @@ object ModuleSolsticeClickgui : ClientModule(
             // 辉光：贴着栏体圆角外框（位置与栏一致）
             drawPanelGlow(ctx, panelR[0], panelR[1], panelR[2], panelR[3], anim)
 
-            // 整栏圆角底（彻底圆角，含最底角）
-            ctx.drawRoundedRect(
-                panelR[0], panelR[1],
-                panelR[0] + panelR[2], panelR[1] + panelR[3],
-                rPanel, a(bgModule, anim),
-            )
-
-            // 标题栏：上圆角覆盖顶部
-            val cr = scaleRect(cx, cy, p.x, p.y, catWidth, catHeight, s)
             val headerW = panelR[2]
             val headerX = panelR[0]
-            drawHeaderTopRound(ctx, headerX, cr[1], headerW, cr[3], rPanel, a(bgCategory, anim))
+            val cr = scaleRect(cx, cy, p.x, p.y, catWidth, catHeight, s)
+
+            if (!p.extended) {
+                // 收起：整块四角圆角（无截断）
+                ctx.drawRoundedRect(
+                    panelR[0], panelR[1],
+                    panelR[0] + panelR[2], panelR[1] + panelR[3],
+                    rPanel, a(bgCategory, anim),
+                )
+            } else {
+                // 展开：整栏四角圆角底板（底角由底板负责，不被裁切）
+                ctx.drawRoundedRect(
+                    panelR[0], panelR[1],
+                    panelR[0] + panelR[2], panelR[1] + panelR[3],
+                    rPanel, a(bgModule, anim),
+                )
+                // 标题只保留上圆角
+                drawHeaderTopRound(ctx, headerX, cr[1], headerW, cr[3], rPanel, a(bgCategory, anim))
+            }
+
             var catName = categoryLabel(cats[i])
             val titlePad = max(8f, headerW * 0.1f)
             val maxTitleW = (headerW - titlePad * 2f).toInt().coerceAtLeast(10)
@@ -998,24 +1013,29 @@ object ModuleSolsticeClickgui : ClientModule(
                 a(textMain, anim).argb, false,
             )
 
-            // 列表裁剪区域（标题下沿 → 栏底）
+            if (!p.extended) continue
+
+            // 裁剪：底边内缩圆角半径，避免把底角裁成直角
             val clipTop = cr[1] + cr[3]
-            val clipBot = panelR[1] + panelR[3]
+            val clipBot = panelR[1] + panelR[3] - rPanel
             val clipLeft = panelR[0]
             val clipRight = panelR[0] + panelR[2]
-            runCatching {
-                // GuiGraphics / Extractor scissor
-                val m = ctx.javaClass.methods.firstOrNull {
-                    it.name.contains("enableScissor", true) && it.parameterCount in 4..5
-                }
-                if (m != null && m.parameterCount == 4) {
-                    m.invoke(ctx, clipLeft.toInt(), clipTop.toInt(), clipRight.toInt(), clipBot.toInt())
-                } else if (m != null) {
-                    m.invoke(ctx, clipLeft.toInt(), clipTop.toInt(), (clipRight - clipLeft).toInt(), (clipBot - clipTop).toInt())
+            if (clipBot > clipTop + 2f) {
+                runCatching {
+                    val m = ctx.javaClass.methods.firstOrNull {
+                        it.name.contains("enableScissor", true) && it.parameterCount in 4..5
+                    }
+                    if (m != null && m.parameterCount == 4) {
+                        m.invoke(ctx, clipLeft.toInt(), clipTop.toInt(), clipRight.toInt(), clipBot.toInt())
+                    } else if (m != null) {
+                        m.invoke(
+                            ctx,
+                            clipLeft.toInt(), clipTop.toInt(),
+                            (clipRight - clipLeft).toInt(), (clipBot - clipTop).toInt(),
+                        )
+                    }
                 }
             }
-
-            if (!p.extended) continue
 
             var moduleY = -p.scroll
             for (mod in modList) {
@@ -1030,17 +1050,11 @@ object ModuleSolsticeClickgui : ClientModule(
                 mr[0] = panelR[0]
                 mr[2] = panelR[2]
                 // 是否为列表视觉上的最后一行（内容滚到底）
-                val isLastRow = (moduleY + rowH >= contentH - 0.5f)
-                if (mr[1] + mr[3] > cr[1] + cr[3] - 2f && mr[1] < panelR[1] + panelR[3]) {
-                    // 最后一行：直接画下圆角；其余行直角无缝
-                    if (isLastRow) {
-                        drawFooterBottomRound(
-                            ctx, mr[0], mr[1], mr[2], mr[3] + 1f,
-                            rPanel, a(bgModule, anim),
-                        )
-                    } else {
-                        drawSeamlessRow(ctx, mr[0], mr[1], mr[2], mr[3], a(bgModule, anim))
-                    }
+                val listBot = panelR[1] + panelR[3] - rPanel
+                // 行底不得画进圆角保护区，避免直角盖住底角
+                if (mr[1] + mr[3] > cr[1] + cr[3] - 2f && mr[1] < listBot) {
+                    val rowHDraw = min(mr[3] + 1f, (listBot - mr[1]).coerceAtLeast(1f))
+                    drawSeamlessRow(ctx, mr[0], mr[1], mr[2], rowHDraw, a(bgModule, anim))
                     if (cScale > 0.01f) {
                         val g1 = themed(moduleY * 2f)
                         val g2 = themed(moduleY * 2f + 40f)
@@ -1082,19 +1096,9 @@ object ModuleSolsticeClickgui : ClientModule(
                         val sr = scaleRect(cx, cy, p.x, p.y + catHeight + moduleY, catWidth, rowH, s)
                         sr[0] = panelR[0]
                         sr[2] = panelR[2]
-                        val settingLast = (mod == modList.last() &&
-                            moduleY + rowH * cAnim >= contentH - rowH * 0.5f)
-                        if (sr[1] > cr[1] + cr[3] - 2f && sr[1] < panelR[1] + panelR[3]) {
-                            if (settingLast) {
-                                drawFooterBottomRound(
-                                    ctx, sr[0], sr[1], sr[2], sr[3] + 1f,
-                                    rPanel, a(bgSetting, anim * cAnim),
-                                )
-                                // 再画文字/控件（背景已圆角）
-                                drawSetting(ctx, font, v, sr[0], sr[1], sr[2], sr[3], anim * cAnim, skipBg = true)
-                            } else {
-                                drawSetting(ctx, font, v, sr[0], sr[1], sr[2], sr[3], anim * cAnim)
-                            }
+                        val listBotS = panelR[1] + panelR[3] - rPanel
+                        if (sr[1] > cr[1] + cr[3] - 2f && sr[1] < listBotS) {
+                            drawSetting(ctx, font, v, sr[0], sr[1], sr[2], sr[3], anim * cAnim)
                             if (hover(sr[0], sr[1], sr[2], sr[3])) tooltip = displayName(v)
                         }
                         moduleY += rowH * cAnim
@@ -1144,6 +1148,23 @@ object ModuleSolsticeClickgui : ClientModule(
                 ctx.javaClass.methods.firstOrNull {
                     it.name.contains("disableScissor", true) && it.parameterCount == 0
                 }?.invoke(ctx)
+            }
+            // 底角：在裁剪外重新画「只含下圆角」的底边条，保证不被行背景截断
+            if (panelR[3] > cr[3] + rPanel) {
+                val footY = panelR[1] + panelR[3] - rPanel - 1f
+                val footH = rPanel + 2f
+                // 先用模块底色铺圆角底
+                ctx.drawRoundedRect(
+                    panelR[0], footY,
+                    panelR[0] + panelR[2], panelR[1] + panelR[3],
+                    rPanel, a(bgModule, anim),
+                )
+                // 顶部接缝用直角填平，只留下半圆角
+                ctx.drawQuad(
+                    panelR[0], footY,
+                    panelR[0] + panelR[2], footY + rPanel,
+                    a(bgModule, anim),
+                )
             }
         }
 
