@@ -963,7 +963,9 @@ object ModuleSolsticeClickgui : ClientModule(
             // 可见列表高度上限（不超出屏幕）
             val maxListH = (sh - p.y - catHeight - 12f).coerceAtLeast(rowH * 3f)
             val listH = if (p.extended) min(contentH, maxListH) else 0f
-            val panelH = catHeight + listH
+            // 底部留出圆角区，避免文字/黑条压住底角
+            val bottomPad = if (p.extended) cornerRadius.coerceAtLeast(6f) else 0f
+            val panelH = catHeight + listH + bottomPad
 
             // 滚动边界
             val maxScroll = (contentH - listH).coerceAtLeast(0f)
@@ -1143,28 +1145,11 @@ object ModuleSolsticeClickgui : ClientModule(
                 }
             }
 
-            // 关闭裁剪
+            // 关闭裁剪（不再在底部盖黑条，圆角区已是空白 padding）
             runCatching {
                 ctx.javaClass.methods.firstOrNull {
                     it.name.contains("disableScissor", true) && it.parameterCount == 0
                 }?.invoke(ctx)
-            }
-            // 底角：在裁剪外重新画「只含下圆角」的底边条，保证不被行背景截断
-            if (panelR[3] > cr[3] + rPanel) {
-                val footY = panelR[1] + panelR[3] - rPanel - 1f
-                val footH = rPanel + 2f
-                // 先用模块底色铺圆角底
-                ctx.drawRoundedRect(
-                    panelR[0], footY,
-                    panelR[0] + panelR[2], panelR[1] + panelR[3],
-                    rPanel, a(bgModule, anim),
-                )
-                // 顶部接缝用直角填平，只留下半圆角
-                ctx.drawQuad(
-                    panelR[0], footY,
-                    panelR[0] + panelR[2], footY + rPanel,
-                    a(bgModule, anim),
-                )
             }
         }
 
