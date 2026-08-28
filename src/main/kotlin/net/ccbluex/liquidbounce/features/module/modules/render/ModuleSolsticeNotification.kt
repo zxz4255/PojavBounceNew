@@ -91,8 +91,13 @@ object ModuleSolsticeNotification : ClientModule(
         val duration: Float = 3f,
     ) {
         var timeShown = 0f
-        var currentDuration = 0f
+        /** 0→1 入场，关闭时 1→0（仅水平滑出，不带动其他通知乱跳） */
+        var slide = 0f
         var isTimeUp = false
+        /** 堆叠目标 Y（底部基准坐标，每条独立平滑） */
+        var targetY = 0f
+        var animY = 0f
+        var initedY = false
     }
 
     private val notifications = ArrayList<Notification>()
@@ -304,24 +309,49 @@ object ModuleSolsticeNotification : ClientModule(
         } else 0.016f
         lastFrameNs = nowNs
 
-        notifications.removeAll { it.isTimeUp && it.timeShown > it.duration + 3f }
+        // 超时标记
+        for (n in notifications) {
+            n.timeShown += dt
+            if (n.timeShown >= n.duration) n.isTimeUp = true
+        }
+        // 完全滑出后再移除
+        notifications.removeAll { it.isTimeUp && it.slide <= 0.01f && it.timeShown > it.duration }
 
         val screenW = ctx.guiWidth().toFloat()
         val screenH = ctx.guiHeight().toFloat()
-        var y = screenH - bottomMargin
-        var shown = 0
 
+        // 1) 更新 slide：入场→1，关闭只减自己的 slide（水平退出）
         for (n in notifications) {
-            if (limitNotifications && shown >= maxNotifications) break
+            val targetSlide = if (n.isTimeUp) 0f else 1f
+            n.slide = lerp(n.slide, targetSlide, dt * animSpeed).coerceIn(0f, 1f)
+        }
 
-            n.timeShown += dt
-            n.isTimeUp = n.timeShown >= n.duration
-            n.currentDuration = lerp(
-                n.currentDuration,
-                if (n.isTimeUp) 0f else 1f,
-                dt * animSpeed,
-            ).coerceIn(0f, 1f)
-            if (n.currentDuration < 0.01f && n.isTimeUp) continue
+        // 2) 只对仍可见的通知算堆叠目标（slide>0.05），从下往上
+        val visible = notifications.filter { it.slide > 0.05f }
+        var stackY = screenH - bottomMargin
+        for (n in visible) {
+            val tH = textH()
+            val tW = textW(n.message)
+            val boxH = tH + 30f * (fontSize / 11f)
+            val gap = 8f
+            n.targetY = stackY
+            if (!n.initedY) {
+                n.animY = stackY
+                n.initedY = true
+            }
+            stackY -= (boxH - 10f + gap)
+        }
+
+        // 3) 平滑 Y，互不影响关闭动画
+        for (n in notifications) {
+            if (!n.initedY) continue
+            n.animY = lerp(n.animY, n.targetY, (dt * animSpeed * 1.2f).coerceIn(0f, 1f))
+        }
+
+        var shown = 0
+        for (n in notifications) {
+            if (n.slide <= 0.01f) continue
+            if (limitNotifications && shown >= maxNotifications) break
 
             val percentDone = Mth.clamp(n.timeShown / n.duration.coerceAtLeast(0.01f), 0f, 1f)
             val tH = textH()
@@ -330,15 +360,13 @@ object ModuleSolsticeNotification : ClientModule(
             val boxH = tH + 30f * (fontSize / 11f)
 
             val beginX = screenW - boxW - rightMargin
-            val endX = screenW + boxW
-            val t = n.currentDuration
-            // 出现：从右侧滑入；关闭：向东南方斜向下移出
-            val xBase = lerp(endX, beginX, t)
-            val exit = if (n.isTimeUp) (1f - t) else 0f
-            val x = xBase + exit * (boxW * 0.55f + 36f)
-            val yShift = exit * (boxH + 52f)
-            val boxTop = y - boxH + yShift
-            val boxBottom = y - 10f + yShift
+            val endX = screenW + 8f
+            // 入场：从右滑入；关闭：向右下（东南）滑出
+            val x = lerp(endX, beginX, n.slide)
+            val exitDown = (1f - n.slide) * (boxH + 36f)
+            val y = n.animY + exitDown
+            val boxTop = y - boxH
+            val boxBottom = y - 10f
 
             var theme = getThemedColor(boxTop * 2f)
             when (n.type) {
@@ -346,12 +374,10 @@ object ModuleSolsticeNotification : ClientModule(
                 Type.ERROR -> theme = Color4b(255, 0, 0, 255)
                 Type.INFO -> Unit
             }
-            // 主题渐变背景：无黑色阴影/黑底层
-            val aMul = n.currentDuration
+            val aMul = n.slide
             val cLeft = theme.alpha((220 * aMul).toInt().coerceIn(0, 255))
             val cRight = getThemedColor(boxTop * 2f + boxW * 1.2f)
                 .alpha((200 * aMul).toInt().coerceIn(0, 255))
-            // 外围辉光颜色：Custom / Theme / By Type / Gradient
             val (g1, g2, gGrad) = when (glowColorMode) {
                 GlowColorMode.CUSTOM -> Triple(glowColor, glowColor2, false)
                 GlowColorMode.THEME -> Triple(theme, getThemedColor(boxTop * 2f + 40f), false)
@@ -368,7 +394,7 @@ object ModuleSolsticeNotification : ClientModule(
             }
             drawGlow(ctx, x, boxTop, x + boxW, boxBottom, g1, g2, aMul, gGrad)
 
-            // 整卡即大进度条：未覆盖区域纯黑，已覆盖用主题色（去掉底部小进度条）
+            // 整卡大进度条：未覆盖纯黑
             val remain = (1f - percentDone).coerceIn(0f, 1f)
             val blackBg = Color4b(0, 0, 0, (240 * aMul).toInt().coerceIn(0, 255))
             ctx.drawRoundedRect(x, boxTop, x + boxW, boxBottom, cornerRadius, blackBg)
@@ -389,16 +415,15 @@ object ModuleSolsticeNotification : ClientModule(
                         )
                         val sx = x + segW * i
                         val ex = (x + segW * (i + 1)).coerceAtMost(x + fillW)
-                        if (ex > sx) {
-                            ctx.drawQuad(sx, boxTop, ex, boxBottom, col)
-                        }
+                        if (ex > sx) ctx.drawQuad(sx, boxTop, ex, boxBottom, col)
                     }
-                    // 左端圆角补全，避免进度条左角直角
                     if (remain > 0.98f) {
-                        ctx.drawRoundedRect(x, boxTop, x + boxW, boxBottom, cornerRadius, cLeft.alpha((245 * aMul).toInt().coerceIn(0, 255)))
+                        ctx.drawRoundedRect(
+                            x, boxTop, x + boxW, boxBottom, cornerRadius,
+                            cLeft.alpha((245 * aMul).toInt().coerceIn(0, 255)),
+                        )
                     }
                 } else {
-                    // 纯色大进度：左填充
                     val fillCol = cLeft.alpha((245 * aMul).toInt().coerceIn(0, 255))
                     if (remain >= 0.99f) {
                         ctx.drawRoundedRect(x, boxTop, x + boxW, boxBottom, cornerRadius, fillCol)
@@ -409,8 +434,6 @@ object ModuleSolsticeNotification : ClientModule(
             }
 
             drawScaledText(ctx, n.message, x + 10f, boxTop + 10f * (fontSize / 11f), Color4b.WHITE)
-
-            y = boxTop
             if (!n.isTimeUp) shown++
         }
     }
