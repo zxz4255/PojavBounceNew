@@ -46,6 +46,9 @@ object ModuleSolsticeNotification : ClientModule(
     private val showOnToggle by boolean("Show On Toggle", true)
     private val showOnJoin by boolean("Show On Join", true)
     private val colorGradient by boolean("Color Gradient", true)
+    /** 进度条彩虹填充（仅影响进度条颜色） */
+    private val rainbow by boolean("Rainbow", false)
+    private val rainbowSpeed by float("Rainbow Speed", 0.6f, 0.1f..3f)
     private val limitNotifications by boolean("Limit Notifications", false)
     private val maxNotifications by int("Max Notifications", 6, 1..25)
     private val fontSize by float("Font Size", 11f, 8f..20f)
@@ -165,6 +168,27 @@ object ModuleSolsticeNotification : ClientModule(
     }
 
     private fun lerp(a: Float, b: Float, t: Float) = a + t * (b - a)
+
+    private fun rainbowColor(h: Float, alpha: Int = 255): Color4b {
+        val hh = ((h % 1f) + 1f) % 1f
+        val i = (hh * 6f).toInt()
+        val f = hh * 6f - i
+        val q = 1f - f
+        val (rf, gf, bf) = when (i % 6) {
+            0 -> Triple(1f, f, 0f)
+            1 -> Triple(q, 1f, 0f)
+            2 -> Triple(0f, 1f, f)
+            3 -> Triple(0f, q, 1f)
+            4 -> Triple(f, 0f, 1f)
+            else -> Triple(1f, 0f, q)
+        }
+        return Color4b(
+            (rf * 255).toInt().coerceIn(0, 255),
+            (gf * 255).toInt().coerceIn(0, 255),
+            (bf * 255).toInt().coerceIn(0, 255),
+            alpha.coerceIn(0, 255),
+        )
+    }
 
     private fun getThemedColor(index: Float, ms: Long = 0L): Color4b {
         val colors = listOf(themeA, themeB, themeC)
@@ -394,14 +418,27 @@ object ModuleSolsticeNotification : ClientModule(
             }
             drawGlow(ctx, x, boxTop, x + boxW, boxBottom, g1, g2, aMul, gGrad)
 
-            // 整卡大进度条：未覆盖纯黑
+            // 整卡大进度条：从左到右（左侧彩色剩余，右侧已过为黑）
             val remain = (1f - percentDone).coerceIn(0f, 1f)
             val blackBg = Color4b(0, 0, 0, (240 * aMul).toInt().coerceIn(0, 255))
             ctx.drawRoundedRect(x, boxTop, x + boxW, boxBottom, cornerRadius, blackBg)
 
             val fillW = boxW * remain
-            if (fillW > 0.5f) {
-                if (colorGradient) {
+            if (remain > 0.01f) {
+                if (rainbow) {
+                    // 进度条 Rainbow：沿填充宽度扫彩虹
+                    val segs = 28
+                    val segW = fillW / segs
+                    val now = System.currentTimeMillis() / 1000.0
+                    for (i in 0 until segs) {
+                        val t0 = i / segs.toFloat()
+                        val h = ((now * rainbowSpeed + t0 + boxTop * 0.001) % 1.0).toFloat()
+                        val col = rainbowColor(h, (245 * aMul).toInt().coerceIn(0, 255))
+                        val sx = x + segW * i
+                        val ex = (x + segW * (i + 1)).coerceAtMost(x + fillW)
+                        if (ex > sx) ctx.drawQuad(sx, boxTop, ex, boxBottom, col)
+                    }
+                } else if (colorGradient) {
                     val segs = 24
                     val segW = fillW / segs
                     for (i in 0 until segs) {
