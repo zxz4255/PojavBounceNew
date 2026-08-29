@@ -566,8 +566,9 @@ object ModuleSolsticeClickgui : ClientModule(
 
     private val PICKER_SB_ROWS = 2.6f
 
-    /** 返回内容总高; emit 只接收可见行 (listH 为当前可见列表高度, 行高已含动画系数 f) */
-    private inline fun walkSettings(
+    /** 返回内容总高; emit 只接收可见行 (listH 为当前可见列表高度, 行高已含动画系数 f)
+     *  注意: 不可 inline, walkValues 是递归函数 */
+    private fun walkSettings(
         mods: List<ClientModule>,
         f: Float,
         listH: Float,
@@ -587,7 +588,7 @@ object ModuleSolsticeClickgui : ClientModule(
         return y
     }
 
-    private inline fun walkValues(
+    private fun walkValues(
         values: List<Value<*>>,
         f: Float,
         indent: Int,
@@ -991,7 +992,7 @@ object ModuleSolsticeClickgui : ClientModule(
                 when (button) {
                     0 -> if (chevron && hasKids) {
                         groupOpen[v] = !(groupOpen[v] ?: false)
-                    } else if (!g.disableActivation) {
+                    } else {
                         g.enabled = !g.enabled
                     }
                     1 -> if (hasKids) {
@@ -1060,8 +1061,9 @@ object ModuleSolsticeClickgui : ClientModule(
                 (v as MultiChoiceListValue<Any>).toggle(choice)
             }
             Kind.MODE -> runCatching {
+                // Mode 实现了 Tagged 且 tag == name, 用 Tagged 分支跨版本兼容
+                // (旧版 Mode 是 ModeValueGroup 的嵌套类, 新版是顶层类)
                 val name = when (choice) {
-                    is ModeValueGroup.Mode -> choice.name
                     is Tagged -> choice.tag
                     else -> choice.toString()
                 }
@@ -1634,7 +1636,8 @@ object ModuleSolsticeClickgui : ClientModule(
         if (hover(x, y, w, h) && bindMod == null && keyListen == null && textEditValue == null &&
             sliderDrag == null && colorDrag == null
         ) {
-            val d = runCatching { v.description.get()?.string }.getOrNull()
+            // description 是 Supplier<String?>, get() 直接返回字符串(非 Component)
+            val d = runCatching { v.description.get() }.getOrNull()
             if (!d.isNullOrBlank() && !d.startsWith("liquidbounce.")) {
                 tooltip = "$name: $d"
             }
