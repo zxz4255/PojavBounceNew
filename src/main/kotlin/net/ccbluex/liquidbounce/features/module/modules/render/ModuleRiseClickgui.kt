@@ -681,7 +681,7 @@ object ModuleRiseClickgui : ClientModule(
             val list = raw.toList()
             val byCat = IdentityHashMap<ModuleCategory, MutableList<ClientModule>>()
             for (m in list) byCat.getOrPut(m.category) { ArrayList() }.add(m)
-            for (k in byCat.keys.toList()) byCat[k] = byCat[k].orEmpty().sortedBy { it.name }
+            for (k in byCat.keys.toList()) byCat[k]?.sortBy { it.name }
             modsByCat = byCat
             allMods = list
             modChildren.clear()
@@ -759,26 +759,27 @@ object ModuleRiseClickgui : ClientModule(
 
         if (sliderDrag == v) applySlider(v)
 
-        val pct = if (dual) {
+        val pctL: Float
+        val pctR: Float
+        if (dual) {
             val c = dualOf(v)
-            Pair(
-                ((c.first - b.first) / (b.second - b.first)).coerceIn(0f, 1f),
-                ((c.second - b.first) / (b.second - b.first)).coerceIn(0f, 1f),
-            )
+            pctL = ((c.first - b.first) / (b.second - b.first)).coerceIn(0f, 1f)
+            pctR = ((c.second - b.first) / (b.second - b.first)).coerceIn(0f, 1f)
         } else {
-            ((numOf(v) - b.first) / (b.second - b.first)).coerceIn(0f, 1f)
+            pctL = ((numOf(v) - b.first) / (b.second - b.first)).coerceIn(0f, 1f)
+            pctR = pctL
         }
 
         // renderPercentage 平滑 (Rise 速度 30/ms)
         val cur = sliderEase.getOrPut(v) {
-            if (dual) floatArrayOf(pct.first, pct.second) else floatArrayOf(pct)
+            if (dual) floatArrayOf(pctL, pctR) else floatArrayOf(pctL)
         }
         val k = (1f - 0.9f.pow(frameDt * 1000f)).coerceIn(0f, 1f)
         if (dual) {
-            cur[0] += (pct.first - cur[0]) * k
-            cur[1] += (pct.second - cur[1]) * k
+            cur[0] += (pctL - cur[0]) * k
+            cur[1] += (pctR - cur[1]) * k
         } else {
-            cur[0] += (pct - cur[0]) * k
+            cur[0] += (pctL - cur[0]) * k
         }
 
         // 轨道
@@ -1237,7 +1238,7 @@ object ModuleRiseClickgui : ClientModule(
         drawRoundedRectLeft(ctx, px, py, px + sidebarW + slide, py + windowH, cornerRadius, bgC)
 
         // 右缘渐变阴影 (30px)
-        val shadowA = (min(sideShadow.value, op / 7.0) * uiAlpha).toInt().coerceIn(0, 255)
+        val shadowA = (min(sideShadow.value, (op / 7f).toDouble()).toFloat() * uiAlpha).toInt().coerceIn(0, 255)
         if (shadowA > 1) {
             val gw = 30f
             val strips = 10
@@ -1259,7 +1260,7 @@ object ModuleRiseClickgui : ClientModule(
             catSize, A(accentAt(py).alpha((op).toInt().coerceIn(0, 255))))
 
         // 分类 (Rise: offset 29.5 起, 步进 19.5, y=py+offset+16)
-        var offset = 10.0
+        var offset = 10f
         val selectedNow = !searchMode || !searchEnabled
         for (i in cats.indices) {
             offset += catSpacing
@@ -1278,10 +1279,10 @@ object ModuleRiseClickgui : ClientModule(
             if (a > 0.5f) {
                 ctx.drawRoundedRect(
                     cx, cy - 5.5f, cx + wpx + 8f, cy + 9.5f, 5f,
-                    accentAt(cy).darker(selDarken).alpha((min(a, op.toDouble()) * uiAlpha).toInt().coerceIn(0, 255)),
+                    accentAt(cy).darker(selDarken).alpha((min(a, op.toDouble()).toFloat() * uiAlpha).toInt().coerceIn(0, 255)),
                 )
             }
-            val txtA = (min(if (i == selectedCat && selectedNow) 255.0 else 200.0, op.toDouble()) * uiAlpha).toInt()
+            val txtA = (min(if (i == selectedCat && selectedNow) 255.0 else 200.0, op.toDouble()).toFloat() * uiAlpha).toInt()
             drawStr(
                 ctx, font, label,
                 cx + (a / 80f).toFloat() + 3f, cy, catSize,
