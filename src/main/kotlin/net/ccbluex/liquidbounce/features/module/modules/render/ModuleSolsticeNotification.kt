@@ -17,6 +17,9 @@
  *   - 进度条动画改为「从左到右」：填充随 percentDone 由左侧向右推进
  *   - 进度条新增独立 Rainbow 模式：连续色谱按位置采样，视觉无分段拼接
  *   - 卡片四角统一圆角（与原版一致）
+ *   - 模块开/关时播放音频：liquidbounce:enable / liquidbounce:disable
+ *     （对应源码 assets/liquidbounce/sounds/enable.ogg 与 disable.ogg，
+ *       并需在 assets/liquidbounce/sounds.json 中注册同名事件）
  * ============================================================================
  */
 package net.ccbluex.liquidbounce.features.module.modules.render
@@ -34,6 +37,9 @@ import net.ccbluex.liquidbounce.render.drawRoundedRect
 import net.ccbluex.liquidbounce.render.engine.type.Color4b
 import net.ccbluex.liquidbounce.render.withPush
 import net.ccbluex.liquidbounce.utils.client.mc
+import net.minecraft.client.resources.sounds.SimpleSoundInstance
+import net.minecraft.resources.Identifier
+import net.minecraft.sounds.SoundEvent
 import net.minecraft.util.Mth
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -50,6 +56,8 @@ object ModuleSolsticeNotification : ClientModule(
     private val style by enumChoice("Style", Style.SOLARIS)
     private val showOnToggle by boolean("Show On Toggle", true)
     private val showOnJoin by boolean("Show On Join", true)
+    private val soundOnToggle by boolean("Sound On Toggle", true)
+    private val soundVolume by float("Sound Volume", 0.6f, 0f..1f)
     private val colorGradient by boolean("Color Gradient", true)
     private val progressRainbow by boolean("Progress Rainbow", false)
     private val limitNotifications by boolean("Limit Notifications", false)
@@ -109,6 +117,19 @@ object ModuleSolsticeNotification : ClientModule(
     private val notifications = ArrayList<Notification>()
     private var lastFrameNs = 0L
 
+    /** 开/关提示音：事件名对应 sounds.json 中的 "enable" / "disable"，文件位于 assets/liquidbounce/sounds/ 下 */
+    private val enableSoundEvent = SoundEvent.createVariableRangeEvent(Identifier.fromNamespaceAndPath("liquidbounce", "enable"))
+    private val disableSoundEvent = SoundEvent.createVariableRangeEvent(Identifier.fromNamespaceAndPath("liquidbounce", "disable"))
+
+    /** UI 音效播放（跟随主音量），音频引擎未就绪时静默忽略 */
+    private fun playToggleSound(enabled: Boolean) {
+        if (!soundOnToggle || soundVolume <= 0f) return
+        val event = if (enabled) enableSoundEvent else disableSoundEvent
+        runCatching {
+            mc.soundManager.play(SimpleSoundInstance.forUI(event, 1f, soundVolume))
+        }
+    }
+
     fun add(message: String, type: Type = Type.INFO, duration: Float = defaultDuration) {
         notifications.add(Notification(message, type, duration))
     }
@@ -127,13 +148,15 @@ object ModuleSolsticeNotification : ClientModule(
         add("Connecting to $address...", Type.INFO, 6f)
     }
 
-    /** 监听模块开关 → 真正弹出通知（否则模块「无用」） */
+    /** 监听模块开关 → 播放开/关提示音（独立于通知显示） */
     @Suppress("unused")
     private val toggleHandler = handler<ModuleToggleEvent> { e ->
-        if (!enabled || !showOnToggle) return@handler
+        if (!enabled) return@handler
         if (e.hidden) return@handler
         // 避免自己开关刷屏
         if (e.moduleName.equals(name, true) || e.moduleName.contains("Notification", true)) return@handler
+        playToggleSound(e.enabled)
+        if (!showOnToggle) return@handler
         notifyToggle(e.moduleName, e.enabled)
     }
 
