@@ -43,6 +43,7 @@ import net.minecraft.sounds.SoundEvent
 import net.minecraft.util.Mth
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 object ModuleSolsticeNotification : ClientModule(
     "SolsticeNotification",
@@ -230,16 +231,16 @@ object ModuleSolsticeNotification : ClientModule(
     /**
      * 绘制「左侧圆角 + 右侧上下直角」的卡片形状。
      *
-     * 精确分块平铺：主体矩形 + 左侧中段 + 左上/左下四分之一圆(圆心扇形三角)。
-     * 各块互不重叠，因此半透明颜色也不会出现「叠加变深」的接缝
-     * （直接用圆角矩形再盖一层矩形会在右半边产生双重混合的色差带）。
+     * 精确分块平铺：主体矩形 + 左侧中段 + 左上/左下四分之一圆(竖向列切片)。
+     * 仅使用 drawQuad, 各块互不重叠，因此半透明颜色也不会出现
+     * 「叠加变深」的接缝（圆角矩形+补矩形会在重叠区双重混合产生色差带）。
      *
-     * @param arcSteps 四分之一圆的扇形细分数(越小越省, 辉光等模糊层可用小值)
+     * @param sliceW 圆角列切片宽度(像素, 越小越圆)
      */
     private fun drawCardShape(
         ctx: net.minecraft.client.gui.GuiGraphicsExtractor,
         x1: Float, y1: Float, x2: Float, y2: Float,
-        radius: Float, color: Color4b, arcSteps: Int = 10,
+        radius: Float, color: Color4b, sliceW: Float = 1.5f,
     ) {
         val w = x2 - x1
         val h = y2 - y1
@@ -253,23 +254,21 @@ object ModuleSolsticeNotification : ClientModule(
         ctx.drawQuad(x1 + rad, y1, x2, y2, color)
         // 左侧中段（两个圆角之间的直条）
         ctx.drawQuad(x1, y1 + rad, x1 + rad, y2 - rad, color)
-        // 左上 / 左下 四分之一圆：扇形三角精确覆盖
+        // 左上 / 左下 四分之一圆：竖向列切片逐列逼近圆弧
         val cx = x1 + rad
         val cyT = y1 + rad
         val cyB = y2 - rad
-        val n = arcSteps.coerceIn(3, 24)
-        for (i in 0 until n) {
-            val a0 = (kotlin.math.PI * 0.5f) * (i.toFloat() / n)
-            val a1 = (kotlin.math.PI * 0.5f) * ((i + 1).toFloat() / n)
-            // x 向左扫(负 sin): a=0 → (cx, y1), a=π/2 → (x1, y1+rad)
-            val sx0 = cx - rad * kotlin.math.sin(a0)
-            val sx1 = cx - rad * kotlin.math.sin(a1)
-            val c0 = rad * kotlin.math.cos(a0)
-            val c1 = rad * kotlin.math.cos(a1)
-            // 上圆角
-            ctx.drawTriangle(cx, cyT, sx0, cyT - c0, sx1, cyT - c1, color, null, false)
-            // 下圆角: 关于卡片水平中线镜像
-            ctx.drawTriangle(cx, cyB, sx0, cyB + c0, sx1, cyB + c1, color, null, false)
+        val step = sliceW.coerceIn(0.75f, 4f)
+        var sx = x1
+        while (sx < cx - 0.01f) {
+            val ex = (sx + step).coerceAtMost(cx)
+            // 列中心到圆心的水平距离 → 该列圆弧高度
+            val dx = cx - (sx + ex) * 0.5f
+            val dy = sqrt(rad * rad - dx * dx).coerceAtLeast(0f)
+            // 上圆角: 自 y1 向下 dy; 下圆角: 镜像
+            ctx.drawQuad(sx, cyT - dy, ex, cyT, color)
+            ctx.drawQuad(sx, cyB, ex, cyB + dy, color)
+            sx = ex
         }
     }
 
