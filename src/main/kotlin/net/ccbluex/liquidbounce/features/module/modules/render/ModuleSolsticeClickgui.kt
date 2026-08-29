@@ -94,6 +94,10 @@ object ModuleSolsticeClickgui : ClientModule(
     private val sliderEase = IdentityHashMap<Value<*>, Float>()
     private val boolScale = IdentityHashMap<Value<*>, Float>()
     private val groupOpen = IdentityHashMap<Value<*>, Boolean>()
+    private val colorOpen = IdentityHashMap<Value<*>, Boolean>()
+    private var textEditValue: Value<*>? = null
+    private var textBuffer = ""
+    private var colorDragChannel = -1
     private var sliderRectX = 0f
     private var sliderRectW = 1f
     private var dualSliderDrag: Value<*>? = null // 拖双端: 负=min 正=max
@@ -205,7 +209,7 @@ object ModuleSolsticeClickgui : ClientModule(
 
     private fun modulesIn(cat: ModuleCategory): List<ClientModule> {
         return allModules()
-            .filter { it.category == cat && it !== this@ModuleSolsticeClickgui }
+            .filter { it.category == cat }
             .sortedBy { it.name }
     }
 
@@ -252,46 +256,109 @@ object ModuleSolsticeClickgui : ClientModule(
         return s.take(20).ifBlank { "Setting" }
     }
 
+    private fun formatNumber(n: Number): String {
+        val d = n.toDouble()
+        if (!d.isFinite()) return "0"
+        // 避免科学计数法 0.00E+0
+        if (kotlin.math.abs(d - d.toLong()) < 1e-6 && kotlin.math.abs(d) < 1e12) {
+            return d.toLong().toString()
+        }
+        val s = java.lang.String.format(java.util.Locale.US, "%.4f", d)
+        return s.trimEnd('0').trimEnd('.').ifBlank { "0" }
+    }
+
     private fun choiceLabel(any: Any?): String {
-        if (any == null) return "None"
+        if (any == null) return "-"
         if (any is Boolean) return if (any) "ON" else "OFF"
         if (any is Number) {
-            // 键码 -1 / GLFW_KEY_UNKNOWN
-            if (any.toInt() == -1 || any.toInt() == 0 || any.toInt() == GLFW.GLFW_KEY_UNKNOWN) return "None"
-            val d = any.toDouble()
-            return if (d == d.toLong().toDouble()) any.toLong().toString() else "%.2f".format(d)
+            // 仅把明显键码未知值显示 None；普通数值（含 scale=0）正常显示
+            if (any is Int && (any == -1 || any == GLFW.GLFW_KEY_UNKNOWN)) return "None"
+            return formatNumber(any)
         }
         if (any is Enum<*>) {
             val n = any.name
-            if (n.equals("UNKNOWN", true) || n.equals("NONE", true) || n.equals("UNBOUND", true)) return "None"
-            return n
+            if (n.equals("UNKNOWN", true) || n.equals("UNBOUND", true)) return "None"
+            return n.lowercase().replaceFirstChar { it.uppercase() }
         }
+        // Choice / Tagged / Mode 对象
         runCatching {
-            for (n in listOf("getChoiceName", "getName", "getTag", "getDisplayName")) {
-                val m = any.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.equals(n, true) }
-                    ?: continue
-                val r = m.invoke(any)
-                if (r is String && r.isNotBlank()) return r.substringAfterLast('.').take(18)
+            for (n in listOf(
+                "getChoiceName", "getName", "getTag", "getDisplayName",
+                "getActiveName", "choiceName", "tag", "name",
+            )) {
+                val m = any.javaClass.methods.firstOrNull {
+                    it.parameterCount == 0 && it.name.equals(n, true)
+                } ?: continue
+                val r = m.invoke(any) ?: continue
+                when (r) {
+                    is String -> if (r.isNotBlank() && r != "-" && !r.contains("@")) {
+                        return r.substringAfterLast('.').substringBefore('@').take(20)
+                    }
+                    is Enum<*> -> return r.name
+                }
+            }
+            // 字段 tag / name
+            for (fn in listOf("tag", "name", "choiceName")) {
+                val f = any.javaClass.declaredFields.firstOrNull { it.name.equals(fn, true) } ?: continue
+                f.isAccessible = true
+                val r = f.get(any)
+                if (r is String && r.isNotBlank() && r != "-") return r.take(20)
             }
         }
-        var s = any.toString().substringAfterLast('.').substringBefore('@')
+        var s = any.toString()
+        s = s.substringAfterLast('$').substringAfterLast('.').substringBefore('@')
         s = s.replace(Regex("""\[[^\]]*\]"""), "").trim()
         if (s.contains("InputBind", true) || s.contains("KeyBinding", true) ||
-            s.equals("UNKNOWN", true) || s.equals("None", true) || s.contains("unknown", true)
+            s.equals("UNKNOWN", true) || s.contains("unknown", true)
         ) return "None"
-        return s.take(18).ifBlank { "None" }
+        if (s.isBlank() || s == "-" || s.equals("null", true)) {
+            // 再试 class simpleName
+            val sn = any.javaClass.simpleName
+            if (sn.isNotBlank() && sn != "Choice" && sn.length < 24) return sn
+            return "Mode"
+        }
+        return s.take(20)
     }
 
-    private fun listChoices(v: Value<*>): List<Any?> {
+    private fun listChoices    private fun listChoices(v: Value<*>): List<Any?> {
         val actual = getActual(v)
         if (actual is Enum<*>) {
             return actual.javaClass.enumConstants?.toList() ?: emptyList()
         }
-        for (n in listOf("getChoices", "choices", "getModes", "modes", "getActiveChoices", "entries")) {
-            val m = v.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.equals(n, true) } ?: continue
-            when (val r = m.invoke(v)) {
-                is Collection<*> -> return r.toList()
-                is Array<*> -> return r.toList()
+        // Value 自身
+        for (n in listOf(
+            "getChoices", "choices", "getModes", "modes", "getActiveChoices",
+            "entries", "getValues", "values", "getChoicesList",
+        )) {
+            val m = v.javaClass.methods.firstOrNull {
+                it.parameterCount == 0 && it.name.equals(n, true)
+            } ?: continue
+            when (val r = runCatching { m.invoke(v) }.getOrNull()) {
+                is Collection<*> -> if (r.isNotEmpty()) return r.toList()
+                is Array<*> -> if (r.isNotEmpty()) return r.toList()
+            }
+        }
+        // 字段 choices
+        runCatching {
+            for (fn in listOf("choices", "modes", "values", "entries")) {
+                val f = v.javaClass.declaredFields.firstOrNull { it.name.equals(fn, true) } ?: continue
+                f.isAccessible = true
+                when (val r = f.get(v)) {
+                    is Collection<*> -> if (r.isNotEmpty()) return r.toList()
+                    is Array<*> -> if (r.isNotEmpty()) return r.toList()
+                }
+            }
+        }
+        // actual 若是 Choice 容器
+        if (actual != null) {
+            for (n in listOf("getChoices", "choices", "entries", "values")) {
+                val m = actual.javaClass.methods.firstOrNull {
+                    it.parameterCount == 0 && it.name.equals(n, true)
+                } ?: continue
+                when (val r = runCatching { m.invoke(actual) }.getOrNull()) {
+                    is Collection<*> -> if (r.isNotEmpty()) return r.toList()
+                    is Array<*> -> if (r.isNotEmpty()) return r.toList()
+                }
             }
         }
         return emptyList()
@@ -324,14 +391,7 @@ object ModuleSolsticeClickgui : ClientModule(
     }
 
     private fun rangeOf(v: Value<*>): Pair<Float, Float>? {
-        // 1) 实际值本身就是区间（部分 intRange 会如此）
-        when (val act = getActual(v)) {
-            is IntRange -> if (act.last > act.first) {
-                // 这是当前选中区间，外层 bounds 另取；先返回外层
-            }
-            is ClosedFloatingPointRange<*> -> { /* 见下 */ }
-        }
-        // 2) getRange / range 字段
+        // 1) getRange / range
         for (n in listOf("getRange", "range", "getBounds", "bounds")) {
             val m = v.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.equals(n, true) }
             when (val r = runCatching { m?.invoke(v) }.getOrNull()) {
@@ -348,12 +408,11 @@ object ModuleSolsticeClickgui : ClientModule(
                 }
             }
         }
-        // 3) 字段扫描
+        // 2) 字段
         runCatching {
             for (f in v.javaClass.declaredFields) {
                 f.isAccessible = true
-                val r = f.get(v) ?: continue
-                when (r) {
+                when (val r = f.get(v) ?: continue) {
                     is ClosedFloatingPointRange<*> -> {
                         val a = (r.start as? Number)?.toFloat() ?: continue
                         val b = (r.endInclusive as? Number)?.toFloat() ?: continue
@@ -377,11 +436,46 @@ object ModuleSolsticeClickgui : ClientModule(
             }
             return null
         }
-        val minV = num(listOf("getMinimum", "getMin", "minimum", "min", "from", "getFrom")) ?: return null
-        val maxV = num(listOf("getMaximum", "getMax", "maximum", "max", "to", "getTo")) ?: return null
-        if (maxV <= minV) return null
-        return minV to maxV
+        val minV = num(listOf("getMinimum", "getMin", "minimum", "min", "from", "getFrom"))
+        val maxV = num(listOf("getMaximum", "getMax", "maximum", "max", "to", "getTo"))
+        if (minV != null && maxV != null && maxV > minV) return minV to maxV
+
+        // 3) 按名称推断默认区间（Scale 等必须是滑条）
+        val name = runCatching { v.name }.getOrNull()?.lowercase()
+            ?: displayName(v).lowercase()
+        val cur = (getActual(v) as? Number)?.toFloat()
+        fun around(c: Float, lo: Float, hi: Float): Pair<Float, Float> {
+            val a = minOf(lo, c - (hi - lo) * 0.1f)
+            val b = maxOf(hi, c + (hi - lo) * 0.1f)
+            return a to b
+        }
+        when {
+            "scale" in name -> return 0.1f to 5f
+            "size" in name || "width" in name || "height" in name -> return 0.1f to 20f
+            "speed" in name || "velocity" in name -> return 0f to 10f
+            "alpha" in name || "opacity" in name -> return 0f to 1f
+            "radius" in name || "range" in name || "distance" in name -> return 0f to 64f
+            "delay" in name || "ms" in name || "tick" in name -> return 0f to 20f
+            "percent" in name || "chance" in name -> return 0f to 100f
+            "fov" in name -> return 30f to 150f
+            "strength" in name || "intensity" in name -> return 0f to 5f
+            "offset" in name -> return -10f to 10f
+            "padding" in name || "margin" in name || "gap" in name -> return 0f to 40f
+            "font" in name -> return 6f to 24f
+            "cps" in name -> return 0f to 20f
+        }
+        // 4) 纯数字但无 range：给合理默认滑条
+        if (cur != null) {
+            return when {
+                cur in 0f..1.5f -> 0f to 2f
+                cur in 0f..10f -> 0f to 20f
+                cur in 0f..100f -> 0f to 100f
+                else -> around(cur, cur - 10f, cur + 10f)
+            }
+        }
+        return null
     }
+
 
     /** CPS 等双端区间：当前值为 IntRange / ClosedRange */
     private fun dualRangeValue(v: Value<*>): Pair<Float, Float>? {
@@ -451,19 +545,119 @@ object ModuleSolsticeClickgui : ClientModule(
 
     private fun isGroup(v: Value<*>): Boolean = nestedValues(v).isNotEmpty()
 
+    private fun isClickGuiModule(m: ClientModule): Boolean {
+        if (m === this@ModuleSolsticeClickgui) return true
+        val n = m.name.lowercase()
+        return "clickgui" in n || "click_gui" in n || "click-gui" in n
+    }
+
+
+    private fun isColorValue(v: Value<*>): Boolean {
+        val a = getActual(v) ?: return false
+        if (a is Color4b) return true
+        if (a is java.awt.Color) return true
+        val n = a.javaClass.name
+        if (n.contains("Color4b") || n.contains("ColorValue") || n.endsWith(".Color")) return true
+        val vn = runCatching { v.name }.getOrNull()?.lowercase() ?: ""
+        return "color" in vn || "colour" in vn
+    }
+
+    private fun isTextValue(v: Value<*>): Boolean {
+        if (isColorValue(v) || isGroup(v)) return false
+        val a = getActual(v) ?: return false
+        if (a is Boolean || a is Number || a is Enum<*>) return false
+        if (listChoices(v).isNotEmpty()) return false
+        if (rangeOf(v) != null || dualRangeValue(v) != null) return false
+        if (a is String) return true
+        val n = a.javaClass.name.lowercase()
+        if ("block" in n || "identifier" in n || "resource" in n) return true
+        val vn = runCatching { v.name }.getOrNull()?.lowercase() ?: ""
+        return listOf("text", "block", "name", "path", "file", "string", "id").any { it in vn }
+    }
+
+    private fun colorFromActual(a: Any?): Color4b {
+        when (a) {
+            is Color4b -> return a
+            is java.awt.Color -> return Color4b(a.red, a.green, a.blue, a.alpha)
+        }
+        if (a == null) return Color4b(255, 255, 255, 255)
+        fun ch(names: List<String>): Int? {
+            for (n in names) {
+                runCatching {
+                    val m = a.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.equals(n, true) }
+                    val r = m?.invoke(a)
+                    if (r is Number) return r.toInt()
+                }
+                runCatching {
+                    val f = a.javaClass.getDeclaredField(n)
+                    f.isAccessible = true
+                    val fv = f.get(a)
+                    if (fv is Number) return fv.toInt()
+                }
+            }
+            return null
+        }
+        val r = ch(listOf("getR", "r", "getRed", "red")) ?: 255
+        val g = ch(listOf("getG", "g", "getGreen", "green")) ?: 255
+        val b = ch(listOf("getB", "b", "getBlue", "blue")) ?: 255
+        val al = ch(listOf("getA", "a", "getAlpha", "alpha")) ?: 255
+        return Color4b(r.coerceIn(0, 255), g.coerceIn(0, 255), b.coerceIn(0, 255), al.coerceIn(0, 255))
+    }
+
+    private fun setColorValue(v: Value<*>, c: Color4b) {
+        if (trySet(v, c)) return
+        runCatching {
+            if (trySet(v, java.awt.Color(c.r, c.g, c.b, c.a))) return
+        }
+        runCatching {
+            val ctor = Color4b::class.java.getConstructor(
+                Int::class.javaPrimitiveType, Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType, Int::class.javaPrimitiveType,
+            )
+            trySet(v, ctor.newInstance(c.r, c.g, c.b, c.a))
+        }
+    }
+
+    private fun textOfValue(v: Value<*>): String {
+        val a = getActual(v) ?: return ""
+        if (a is String) return a
+        return a.toString()
+            .substringAfterLast('/')
+            .substringAfterLast(':')
+            .substringAfterLast('.')
+            .replace(Regex("""\[[^\]]*\]"""), "")
+            .take(48)
+    }
+
     private fun cycleChoice(v: Value<*>): Boolean {
-        for (n in listOf("next", "cycle", "selectNext")) {
-            val m = v.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.equals(n, true) } ?: continue
-            runCatching { m.invoke(v); return true }
+        // 优先 next/cycle
+        for (n in listOf("next", "cycle", "selectNext", "toggle")) {
+            val m = v.javaClass.methods.firstOrNull {
+                it.parameterCount == 0 && it.name.equals(n, true)
+            } ?: continue
+            if (runCatching { m.invoke(v); true }.getOrDefault(false)) return true
         }
         val list = listChoices(v)
         if (list.isEmpty()) return false
-        val cur = choiceLabel(getActual(v))
-        var idx = list.indexOfFirst { choiceLabel(it) == cur }
+        val cur = getActual(v)
+        val curLabel = choiceLabel(cur)
+        var idx = list.indexOfFirst {
+            it === cur || choiceLabel(it).equals(curLabel, true)
+        }
         if (idx < 0) idx = 0
         val next = list[(idx + 1) % list.size] ?: return false
-        return trySet(v, next) || trySet(v, choiceLabel(next))
+        if (trySet(v, next)) return true
+        if (trySet(v, choiceLabel(next))) return true
+        // setByString
+        runCatching {
+            v.javaClass.methods.firstOrNull {
+                it.parameterCount == 1 && it.name.contains("String", true)
+            }?.invoke(v, choiceLabel(next))
+            return true
+        }
+        return false
     }
+
 
     private fun modDesc(mod: ClientModule): String {
         return runCatching {
@@ -521,9 +715,40 @@ object ModuleSolsticeClickgui : ClientModule(
 
         override fun keyPressed(event: KeyEvent): Boolean {
             val key = event.key()
+            val te = ModuleSolsticeClickgui.textEditValue
+            if (te != null) {
+                when (key) {
+                    GLFW.GLFW_KEY_ESCAPE -> {
+                        ModuleSolsticeClickgui.textEditValue = null
+                        return true
+                    }
+                    GLFW.GLFW_KEY_ENTER, GLFW.GLFW_KEY_KP_ENTER -> {
+                        ModuleSolsticeClickgui.trySet(te, ModuleSolsticeClickgui.textBuffer)
+                        runCatching {
+                            te.javaClass.methods.firstOrNull {
+                                it.parameterCount == 1 && (
+                                    it.name.contains("String", true) || it.name.contains("setByString", true)
+                                    )
+                            }?.invoke(te, ModuleSolsticeClickgui.textBuffer)
+                        }
+                        ModuleSolsticeClickgui.textEditValue = null
+                        return true
+                    }
+                    GLFW.GLFW_KEY_BACKSPACE -> {
+                        if (ModuleSolsticeClickgui.textBuffer.isNotEmpty()) {
+                            ModuleSolsticeClickgui.textBuffer =
+                                ModuleSolsticeClickgui.textBuffer.dropLast(1)
+                        }
+                        return true
+                    }
+                }
+                return true
+            }
             if (key == GLFW.GLFW_KEY_ESCAPE) {
                 if (ModuleSolsticeClickgui.binding != null) {
                     ModuleSolsticeClickgui.binding = null
+                } else if (ModuleSolsticeClickgui.colorOpen.isNotEmpty()) {
+                    ModuleSolsticeClickgui.colorOpen.clear()
                 } else {
                     ModuleSolsticeClickgui.enabled = false
                     ModuleSolsticeClickgui.closeLayer()
@@ -555,7 +780,23 @@ object ModuleSolsticeClickgui : ClientModule(
             return true
         }
 
-        override fun charTyped(event: CharacterEvent): Boolean = true
+        override fun charTyped(event: CharacterEvent): Boolean {
+            val te = ModuleSolsticeClickgui.textEditValue ?: return true
+            val ch: Char? = try {
+                event.codepoint().toChar()
+            } catch (_: Throwable) {
+                runCatching {
+                    val m = event.javaClass.methods.firstOrNull {
+                        it.parameterCount == 0 && it.name.lowercase().contains("code")
+                    }
+                    (m?.invoke(event) as? Number)?.toInt()?.toChar()
+                }.getOrNull()
+            }
+            if (ch != null && !ch.isISOControl() && ModuleSolsticeClickgui.textBuffer.length < 64) {
+                ModuleSolsticeClickgui.textBuffer += ch
+            }
+            return true
+        }
         override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean {
             ModuleSolsticeClickgui.onMouse(event.button(), true)
             return true
@@ -578,6 +819,7 @@ object ModuleSolsticeClickgui : ClientModule(
         mouseX = guiMX()
         mouseY = guiMY()
         if (!pressed) {
+            colorDragChannel = -1
             if (button == 0) {
                 dragIdx = -1
                 catPos.forEach { it.dragging = false }
@@ -680,10 +922,12 @@ object ModuleSolsticeClickgui : ClientModule(
                     applySlider(v, sliderRectX, sliderRectX + sliderRectW, button == 2)
                 }
             }
-            actual is Number || rangeOf(v) != null -> {
+            actual is Number || rangeOf(v) != null ||
+                displayName(v).lowercase().contains("scale") -> {
                 if (button == 0 || button == 2) {
                     sliderDrag = v
                     dualSliderDrag = null
+                    // rangeOf 会给 Scale 默认 0.1..5
                     applySlider(v, sliderRectX, sliderRectX + sliderRectW, button == 2)
                 }
             }
@@ -694,7 +938,49 @@ object ModuleSolsticeClickgui : ClientModule(
                     enumOpen[v] = !(enumOpen[v] ?: false)
                 }
             }
-            else -> if (button == 0) cycleChoice(v)
+            isColorValue(v) -> {
+                if (button == 1) {
+                    colorOpen[v] = !(colorOpen[v] ?: false)
+                    textEditValue = null
+                } else if (button == 0) {
+                    if (colorOpen[v] != true) {
+                        colorOpen[v] = true
+                        textEditValue = null
+                    } else {
+                        sliderDrag = v
+                        dualSliderDrag = null
+                        colorDragChannel = 0
+                    }
+                }
+            }
+            isTextValue(v) -> {
+                if (button == 0) {
+                    textEditValue = v
+                    textBuffer = textOfValue(v)
+                    colorOpen.clear()
+                }
+            }
+            else -> {
+                if (button == 0) {
+                    val vn = displayName(v).lowercase()
+                    val looksMode = "mode" in vn || "style" in vn || "type" in vn ||
+                        listChoices(v).isNotEmpty() || actual is Enum<*>
+                    if (looksMode) {
+                        if (!cycleChoice(v)) {
+                            enumOpen[v] = !(enumOpen[v] ?: false)
+                        }
+                    } else if (actual is String || isTextValue(v)) {
+                        textEditValue = v
+                        textBuffer = textOfValue(v)
+                    } else if (!cycleChoice(v)) {
+                        // 最后尝试当文本
+                        textEditValue = v
+                        textBuffer = textOfValue(v)
+                    }
+                } else if (button == 1) {
+                    enumOpen[v] = !(enumOpen[v] ?: false)
+                }
+            }
         }
     }
 
@@ -957,6 +1243,7 @@ object ModuleSolsticeClickgui : ClientModule(
                             contentH += nestedValues(v).size * rowH * ca
                         }
                         if (enumOpen[v] == true) contentH += listChoices(v).size * rowH * ca
+                        if (colorOpen[v] == true) contentH += rowH * 4f * ca
                     }
                 }
             }
@@ -1104,6 +1391,51 @@ object ModuleSolsticeClickgui : ClientModule(
                             if (hover(sr[0], sr[1], sr[2], sr[3])) tooltip = displayName(v)
                         }
                         moduleY += rowH * cAnim
+                        if (colorOpen[v] == true && isColorValue(v)) {
+                            val col = colorFromActual(getActual(v))
+                            val channels = listOf(
+                                Triple("R", col.r, 0),
+                                Triple("G", col.g, 1),
+                                Triple("B", col.b, 2),
+                                Triple("A", col.a, 3),
+                            )
+                            for ((lab, cur, ch) in channels) {
+                                val barR = scaleRect(cx, cy, p.x, p.y + catHeight + moduleY, catWidth, rowH, s)
+                                barR[0] = panelR[0]
+                                barR[2] = panelR[2]
+                                if (barR[1] > cr[1] + cr[3] - 2f && barR[1] < listBotS) {
+                                    ctx.drawQuad(barR[0], barR[1], barR[0] + barR[2], barR[1] + barR[3], a(bgSetting, anim * cAnim))
+                                    ctx.text(font, lab, (barR[0] + 8f).roundToInt(), (barR[1] + 3f).roundToInt(), a(textDim, anim).argb, false)
+                                    val bx1 = barR[0] + 22f
+                                    val bx2 = barR[0] + barR[2] - 28f
+                                    val tt = (cur / 255f).coerceIn(0f, 1f)
+                                    ctx.drawQuad(bx1, barR[1] + barR[3] * 0.4f, bx2, barR[1] + barR[3] * 0.6f, a(Color4b(40, 40, 40, 255), anim))
+                                    val fillC = when (ch) {
+                                        0 -> Color4b(220, 60, 60, 255)
+                                        1 -> Color4b(60, 200, 80, 255)
+                                        2 -> Color4b(60, 120, 255, 255)
+                                        else -> Color4b(200, 200, 200, 255)
+                                    }
+                                    ctx.drawQuad(bx1, barR[1] + barR[3] * 0.4f, bx1 + (bx2 - bx1) * tt, barR[1] + barR[3] * 0.6f, a(fillC, anim))
+                                    ctx.text(font, cur.toString(), (bx2 + 4f).roundToInt(), (barR[1] + 3f).roundToInt(), a(textDim, anim).argb, false)
+                                    if (hover(bx1, barR[1], bx2 - bx1, barR[3]) && sliderDrag === v) {
+                                        colorDragChannel = ch
+                                    }
+                                    if (sliderDrag === v && colorDragChannel == ch) {
+                                        val nt = ((mouseX - bx1) / (bx2 - bx1).coerceAtLeast(1f)).coerceIn(0f, 1f)
+                                        val nv = (nt * 255f).roundToInt().coerceIn(0, 255)
+                                        val nc = when (ch) {
+                                            0 -> Color4b(nv, col.g, col.b, col.a)
+                                            1 -> Color4b(col.r, nv, col.b, col.a)
+                                            2 -> Color4b(col.r, col.g, nv, col.a)
+                                            else -> Color4b(col.r, col.g, col.b, nv)
+                                        }
+                                        setColorValue(v, nc)
+                                    }
+                                }
+                                moduleY += rowH * cAnim
+                            }
+                        }
 
                         // 分组子项：左键打开后显示
                         if (isGroup(v) && groupOpen[v] == true) {
@@ -1224,6 +1556,23 @@ object ModuleSolsticeClickgui : ClientModule(
         }
 
         when {
+            isColorValue(v) -> {
+                val col = colorFromActual(actual)
+                drawLabelValue(ctx, font, name, "", x, y, w - 22f, h, anim, textMain, textDim)
+                val cx0 = x + w - 18f
+                ctx.drawRoundedRect(cx0, y + 3f, cx0 + 14f, y + h - 3f, 3f, a(col, anim))
+            }
+            isTextValue(v) || textEditValue === v -> {
+                val editing = textEditValue === v
+                val shown = if (editing) {
+                    textBuffer + if ((System.currentTimeMillis() / 400) % 2L == 0L) "_" else ""
+                } else textOfValue(v).ifBlank { "..." }
+                var short = shown
+                val maxW = (w * 0.45f).toInt().coerceAtLeast(20)
+                while (short.length > 1 && font.width(short) > maxW) short = short.dropLast(1)
+                if (short != shown) short += ".."
+                drawLabelValue(ctx, font, name, short, x, y, w, h, anim, textMain, if (editing) themed(y) else textDim)
+            }
             actual is Boolean -> {
                 boolScale[v] = lerp(boolScale.getOrDefault(v, 0f), if (actual) 1f else 0f, 0.25f)
                 val mark = if (boolScale[v]!! > 0.5f) "ON" else "OFF"
@@ -1247,15 +1596,15 @@ object ModuleSolsticeClickgui : ClientModule(
                 ctx.drawRoundedRect(x + w * t0 - 3f, barY - 2f, x + w * t0 + 3f, barY + 5f, 3f, a(textMain, anim))
                 ctx.drawRoundedRect(x + w * t1 - 3f, barY - 2f, x + w * t1 + 3f, barY + 5f, 3f, a(textMain, anim))
             }
-            actual is Number || rangeOf(v) != null -> {
+            actual is Number || rangeOf(v) != null || "scale" in name.lowercase() -> {
                 val fv = when (actual) {
                     is Number -> actual.toFloat()
-                    else -> 0f
+                    else -> (getActual(v) as? Number)?.toFloat() ?: 1f
                 }
-                val range = rangeOf(v)
-                val vs = if (abs(fv - fv.toInt()) < 1e-4f) fv.toInt().toString() else "%.2f".format(fv)
+                val range = rangeOf(v) ?: (0.1f to 5f)
+                val vs = formatNumber(fv)
                 drawLabelValue(ctx, font, name, vs, x, y, w, h - 6f, anim, textMain, textDim)
-                if (range != null) {
+                if (true) {
                     val (minV, maxV) = range
                     val span = (maxV - minV).coerceAtLeast(0.001f)
                     val p = ((fv - minV) / span).coerceIn(0f, 1f)
@@ -1273,13 +1622,16 @@ object ModuleSolsticeClickgui : ClientModule(
                 }
             }
             else -> {
+                // Mode / Choice：显示可读名；可点击切换
                 var mode = choiceLabel(actual)
                 mode = mode.replace(Regex("""\[[^\]]*\]"""), "").trim()
-                val bad = mode.isBlank() || mode == "-" ||
-                    mode.contains("InputBind", true) || mode.contains("KeyBinding", true) ||
-                    mode.contains("net.minecraft", true) || mode.contains("unknown", true) ||
-                    mode.equals("UNKNOWN", true)
-                if (bad) mode = "None"
+                if (mode.isBlank() || mode == "-") {
+                    val list = listChoices(v)
+                    mode = if (list.isNotEmpty()) choiceLabel(list.first()) else "Click"
+                }
+                if (mode.contains("InputBind", true) || mode.contains("KeyBinding", true) ||
+                    mode.contains("net.minecraft", true)
+                ) mode = "None"
                 drawLabelValue(ctx, font, name, mode, x, y, w, h, anim, textMain, themed(y))
             }
         }
