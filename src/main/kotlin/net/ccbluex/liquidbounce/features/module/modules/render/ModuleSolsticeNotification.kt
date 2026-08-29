@@ -20,6 +20,12 @@
  *   - 模块开/关时播放音频：liquidbounce:enable / liquidbounce:disable
  *     （对应源码 assets/liquidbounce/sounds/enable.ogg 与 disable.ogg，
  *       并需在 assets/liquidbounce/sounds.json 中注册同名事件）
+ *   - 修复左侧黑边: 圆角列弧高改取列外缘(只小不大), 且进度填充按
+ *     卡片轮廓裁剪, 不再从圆角处伸出
+ *   - 修复 Max Notifications 无效: add() 超限时让最旧的平滑退场;
+ *     同时修复被裁剪通知因移除条件过严而永久滞留的问题
+ *   - 性能: 辉光每层回归单图元圆角矩形(不再逐列拼形); 主题色列表、
+ *     文本宽度缓存; 去掉每帧 filter/listOf 分配; 空列表零开销; 移除死代码
  * ============================================================================
  */
 package net.ccbluex.liquidbounce.features.module.modules.render
@@ -69,8 +75,6 @@ object ModuleSolsticeNotification : ClientModule(
     private val animSpeed by float("Anim Speed", 5f, 1f..15f)
     private val defaultDuration by float("Default Duration", 3f, 1f..15f)
     private val cornerRadius by float("Corner Radius", 5f, 0f..16f)
-    private val shadowBlur by float("Shadow Blur", 50f, 1f..120f)
-    private val shadowDensity by int("Shadow Density", 2, 1..8)
 
     private val glow by boolean("Glow", true)
     private val glowRadius by float("Glow Radius", 14f, 2f..48f)
@@ -113,6 +117,9 @@ object ModuleSolsticeNotification : ClientModule(
         var targetY = 0f
         var animY = 0f
         var initedY = false
+        /** 文本宽度缓存（fontSize 变化时自动重算），避免每帧重复量测 */
+        var cachedFontW = -1
+        var cachedFontSize = -1f
     }
 
     private val notifications = ArrayList<Notification>()
@@ -133,6 +140,25 @@ object ModuleSolsticeNotification : ClientModule(
 
     fun add(message: String, type: Type = Type.INFO, duration: Float = defaultDuration) {
         notifications.add(Notification(message, type, duration))
+        trimToLimit()
+    }
+
+    /**
+     * 超出 Max Notifications 上限时让「最旧」的先退场（标记超时 → 平滑滑出），
+     * 使上限真正生效。此前上限只在渲染时 break 跳过新通知，且默认开关关闭，
+     * 该项完全不起作用；超限的通知还会在列表里堆积。
+     */
+    private fun trimToLimit() {
+        if (!limitNotifications) return
+        var excess = notifications.size - maxNotifications.coerceIn(1, 25)
+        if (excess <= 0) return
+        for (n in notifications) {
+            if (excess <= 0) break
+            if (!n.isTimeUp) {
+                n.isTimeUp = true
+                excess--
+            }
+        }
     }
 
     fun info(msg: String, duration: Float = defaultDuration) = add(msg, Type.INFO, duration)
@@ -196,8 +222,15 @@ object ModuleSolsticeNotification : ClientModule(
 
     private fun lerp(a: Float, b: Float, t: Float) = a + t * (b - a)
 
+    /** 主题色列表每帧缓存（避免每次取色都 listOf 分配） */
+    private var themeColors = listOf(
+        Color4b(0xE9, 0xA8, 0xBC, 255),
+        Color4b(0x6E, 0xC8, 0xF1, 255),
+        Color4b(255, 255, 255, 128),
+    )
+
     private fun getThemedColor(index: Float, ms: Long = 0L): Color4b {
-        val colors = listOf(themeA, themeB, themeC)
+        val colors = themeColors
         val time = 10000f / themeSeconds.coerceAtLeast(0.01f)
         val now = if (ms == 0L) System.currentTimeMillis() else ms
         val angle = ((now + index.toLong()) % time.toLong()).toFloat()
@@ -214,8 +247,16 @@ object ModuleSolsticeNotification : ClientModule(
         )
     }
 
-    private fun textW(s: String) = mc.font.width(s) * (fontSize / 9f)
     private fun textH() = mc.font.lineHeight * (fontSize / 9f)
+
+    /** 通知文本宽度(带缓存): 每帧对同一条通知只量测一次, fontSize 改变时重算 */
+    private fun notifW(n: Notification): Float {
+        if (n.cachedFontW < 0 || n.cachedFontSize != fontSize) {
+            n.cachedFontW = mc.font.width(n.message)
+            n.cachedFontSize = fontSize
+        }
+        return n.cachedFontW * (fontSize / 9f)
+    }
 
     private fun drawScaledText(
         ctx: net.minecraft.client.gui.GuiGraphicsExtractor,
@@ -229,18 +270,17 @@ object ModuleSolsticeNotification : ClientModule(
     }
 
     /**
-     * 绘制「左侧圆角 + 右侧上下直角」的卡片形状。
+     * 绘制「左侧圆角 + 右侧上下直角」的卡片形状（卡片底色用）。
      *
      * 精确分块平铺：主体矩形 + 左侧中段 + 左上/左下四分之一圆(竖向列切片)。
-     * 仅使用 drawQuad, 各块互不重叠，因此半透明颜色也不会出现
-     * 「叠加变深」的接缝（圆角矩形+补矩形会在重叠区双重混合产生色差带）。
-     *
-     * @param sliceW 圆角列切片宽度(像素, 越小越圆)
+     * 弧高取列「外缘」(dx = cx - sx) 而非列中心 —— 圆弧左端接近垂直,
+     * 取中心会让最左列高出真实圆弧数像素, 在左上/左下角形成黑色突出边;
+     * 取外缘则高度只小不大, 绝不超出轮廓(缺口 ≤1px, 视觉上等同抗锯齿)。
      */
     private fun drawCardShape(
         ctx: net.minecraft.client.gui.GuiGraphicsExtractor,
         x1: Float, y1: Float, x2: Float, y2: Float,
-        radius: Float, color: Color4b, sliceW: Float = 1.5f,
+        radius: Float, color: Color4b,
     ) {
         val w = x2 - x1
         val h = y2 - y1
@@ -254,40 +294,63 @@ object ModuleSolsticeNotification : ClientModule(
         ctx.drawQuad(x1 + rad, y1, x2, y2, color)
         // 左侧中段（两个圆角之间的直条）
         ctx.drawQuad(x1, y1 + rad, x1 + rad, y2 - rad, color)
-        // 左上 / 左下 四分之一圆：竖向列切片逐列逼近圆弧
+        // 左上 / 左下 四分之一圆：竖向列切片
         val cx = x1 + rad
         val cyT = y1 + rad
         val cyB = y2 - rad
-        val step = sliceW.coerceIn(0.75f, 4f)
         var sx = x1
         while (sx < cx - 0.01f) {
-            val ex = (sx + step).coerceAtMost(cx)
-            // 列中心到圆心的水平距离 → 该列圆弧高度
-            val dx = cx - (sx + ex) * 0.5f
+            val ex = (sx + 1f).coerceAtMost(cx)
+            val dx = cx - sx // 列外缘: 弧高只小不大, 绝不超出圆弧轮廓
             val dy = sqrt(rad * rad - dx * dx).coerceAtLeast(0f)
-            // 上圆角: 自 y1 向下 dy; 下圆角: 镜像
-            ctx.drawQuad(sx, cyT - dy, ex, cyT, color)
-            ctx.drawQuad(sx, cyB, ex, cyB + dy, color)
+            if (dy > 0.05f) {
+                ctx.drawQuad(sx, cyT - dy, ex, cyT, color)
+                ctx.drawQuad(sx, cyB, ex, cyB + dy, color)
+            }
             sx = ex
         }
     }
 
-    private fun drawShadow(
+    /**
+     * 进度条填充：按卡片轮廓裁剪（左侧圆角、右侧直角），颜色按横向位置采样。
+     * 与 [drawCardShape] 同样的保守圆角规则 → 填充绝不从圆角处伸出、左侧无黑边。
+     *
+     * @param bodyStep 圆角区之后每列宽度(纯色填充传超大值 → 主体只画 1 个矩形)
+     * @param colorAt  传入相对位置 u∈[0,1](相对整条进度条), 返回该处颜色
+     */
+    private fun drawProgressFill(
         ctx: net.minecraft.client.gui.GuiGraphicsExtractor,
-        x1: Float, y1: Float, x2: Float, y2: Float, color: Color4b,
+        x: Float, y1: Float, y2: Float,
+        boxW: Float, fillW: Float,
+        radius: Float, aMul: Float,
+        bodyStep: Float,
+        colorAt: (u: Float) -> Color4b,
     ) {
-        val density = shadowDensity.coerceAtLeast(1)
-        for (d in 0 until density) {
-            val t = if (density > 1) d.toFloat() / (density - 1) else 0f
-            val r = shadowBlur * (0.25f + 0.75f * t) * 0.08f
-            val a = (0.35f * (1f - t * 0.5f) * 255).toInt().coerceIn(0, 80)
-            ctx.drawRoundedRect(
-                x1 - r, y1 - r, x2 + r, y2 + r,
-                cornerRadius + r * 0.3f,
-                Color4b.TRANSPARENT,
-                color.alpha(a),
-                1.5f + t * 2f,
-            )
+        if (fillW <= 0.5f || boxW <= 1f) return
+        val a = (245 * aMul).toInt().coerceIn(0, 255)
+        val r = radius.coerceIn(0f, minOf(boxW, y2 - y1) * 0.5f)
+        val cyT = y1 + r
+        val cyB = y2 - r
+        val cornerEnd = x + r
+        val end = x + fillW
+        var sx = x
+        while (sx < end - 0.01f) {
+            val inCorner = r >= 0.5f && sx < cornerEnd - 0.01f
+            val ex = (sx + if (inCorner) 1f else bodyStep).coerceAtMost(end)
+            val u = (((sx + ex) * 0.5f - x) / boxW).coerceIn(0f, 1f)
+            val col = colorAt(u).alpha(a)
+            if (inCorner) {
+                val dx = cornerEnd - sx
+                val h = sqrt(r * r - dx * dx).coerceAtLeast(0f)
+                if (h > 0.05f) {
+                    ctx.drawQuad(sx, cyT - h, ex, cyT, col)
+                    ctx.drawQuad(sx, cyB, ex, cyB + h, col)
+                }
+                ctx.drawQuad(sx, cyT, ex, cyB, col)
+            } else {
+                ctx.drawQuad(sx, y1, ex, y2, col)
+            }
+            sx = ex
         }
     }
 
@@ -343,59 +406,9 @@ object ModuleSolsticeNotification : ClientModule(
             val col = Color4b(rC, gC, bC, a)
 
             val rad = (cornerRadius + r * 0.55f).coerceAtLeast(cornerRadius)
-            // 辉光层与卡片同形状: 左侧圆角随层外扩, 右侧保持直角
-            drawCardShape(ctx, x1 - r, y1 - r, x2 + r, y2 + r, rad, col)
-        }
-    }
-
-    private fun drawHGradient(
-        ctx: net.minecraft.client.gui.GuiGraphicsExtractor,
-        x1: Float, y1: Float, x2: Float, y2: Float,
-        c1: Color4b, c2: Color4b, radius: Float,
-    ) {
-        val w = x2 - x1
-        if (w <= 1f) {
-            ctx.drawRoundedRect(x1, y1, x2, y2, radius, c1)
-            return
-        }
-        val segments = 10
-        val segW = w / segments
-        for (i in 0 until segments) {
-            val t = i / segments.toFloat()
-            val col = Color4b(
-                lerp(c1.r.toFloat(), c2.r.toFloat(), t).toInt().coerceIn(0, 255),
-                lerp(c1.g.toFloat(), c2.g.toFloat(), t).toInt().coerceIn(0, 255),
-                lerp(c1.b.toFloat(), c2.b.toFloat(), t).toInt().coerceIn(0, 255),
-                lerp(c1.a.toFloat(), c2.a.toFloat(), t).toInt().coerceIn(0, 255),
-            )
-            val sx = x1 + segW * i
-            val ex = if (i == segments - 1) x2 else x1 + segW * (i + 1)
-            if (i == 0 || i == segments - 1) ctx.drawRoundedRect(sx, y1, ex, y2, radius, col)
-            else ctx.drawQuad(sx, y1, ex, y2, col)
-        }
-    }
-
-    /**
-     * Rainbow 进度条：色谱固定铺满整条进度条（红→橙→黄→绿→青→蓝→紫），
-     * 填充从左到右逐渐揭示。颜色按每段中心的绝对位置连续采样（HSV 色相插值），
-     * 段宽约 2px、相邻段色差极小，视觉上是连续渐变，不会出现一条条拼接的色块。
-     */
-    private fun drawRainbowBar(
-        ctx: net.minecraft.client.gui.GuiGraphicsExtractor,
-        x: Float, boxTop: Float, boxBottom: Float,
-        fillW: Float, boxW: Float, aMul: Float,
-    ) {
-        if (fillW <= 0.5f || boxW <= 1f) return
-        val a = (245 * aMul).toInt().coerceIn(0, 255)
-        val segs = (fillW / 2f).roundToInt().coerceIn(16, 96)
-        val segW = fillW / segs
-        for (i in 0 until segs) {
-            val sx = x + segW * i
-            val ex = if (i == segs - 1) x + fillW else x + segW * (i + 1)
-            if (ex <= sx) continue
-            // 色相取自段中心在整条进度条上的位置：色谱位置固定，填充只是逐段显现
-            val u = (((sx + ex) * 0.5f - x) / boxW).coerceIn(0f, 1f)
-            ctx.drawQuad(sx, boxTop, ex, boxBottom, rainbowAt(u).alpha(a))
+            // 辉光是模糊光晕: 每层用单次圆角矩形(每层 1 个图元)即可,
+            // 逐列拼形会导致 12 层 × ~13 列 ≈ 156 图元/通知, 严重拖帧
+            ctx.drawRoundedRect(x1 - r, y1 - r, x2 + r, y2 + r, rad, col)
         }
     }
 
@@ -435,13 +448,23 @@ object ModuleSolsticeNotification : ClientModule(
         } else 0.016f
         lastFrameNs = nowNs
 
+        // 无通知时直接返回, 不做任何计算/绘制
+        if (notifications.isEmpty()) return@handler
+
+        // 每帧刷新一次主题色缓存
+        themeColors = listOf(themeA, themeB, themeC)
+        val scaleF = fontSize / 11f
+        val boxHP = textH() + 30f * scaleF
+
         // 超时标记
         for (n in notifications) {
             n.timeShown += dt
             if (n.timeShown >= n.duration) n.isTimeUp = true
         }
-        // 完全滑出后再移除
-        notifications.removeAll { it.isTimeUp && it.slide <= 0.01f && it.timeShown > it.duration }
+        // 完全滑出后移除。
+        // 注: 不能再附加 timeShown > duration 条件 —— 被上限裁剪的通知
+        // 时长未到却已滑出, 会永远滞留在列表里(不可见但占用堆叠计算)
+        notifications.removeAll { it.isTimeUp && it.slide <= 0.01f }
 
         val screenW = ctx.guiWidth().toFloat()
         val screenH = ctx.guiHeight().toFloat()
@@ -452,20 +475,16 @@ object ModuleSolsticeNotification : ClientModule(
             n.slide = lerp(n.slide, targetSlide, dt * animSpeed).coerceIn(0f, 1f)
         }
 
-        // 2) 只对仍可见的通知算堆叠目标（slide>0.05），从下往上
-        val visible = notifications.filter { it.slide > 0.05f }
+        // 2) 只对仍可见的通知算堆叠目标（slide>0.05），从下往上。原地遍历, 不分配列表
         var stackY = screenH - bottomMargin
-        for (n in visible) {
-            val tH = textH()
-            val tW = textW(n.message)
-            val boxH = tH + 30f * (fontSize / 11f)
-            val gap = 8f
+        for (n in notifications) {
+            if (n.slide <= 0.05f) continue
             n.targetY = stackY
             if (!n.initedY) {
                 n.animY = stackY
                 n.initedY = true
             }
-            stackY -= (boxH - 10f + gap)
+            stackY -= (boxHP - 10f + 8f)
         }
 
         // 3) 平滑 Y，互不影响关闭动画
@@ -474,16 +493,12 @@ object ModuleSolsticeNotification : ClientModule(
             n.animY = lerp(n.animY, n.targetY, (dt * animSpeed * 1.2f).coerceIn(0f, 1f))
         }
 
-        var shown = 0
         for (n in notifications) {
             if (n.slide <= 0.01f) continue
-            if (limitNotifications && shown >= maxNotifications) break
 
             val percentDone = Mth.clamp(n.timeShown / n.duration.coerceAtLeast(0.01f), 0f, 1f)
-            val tH = textH()
-            val tW = textW(n.message)
-            val boxW = max(200f * (fontSize / 11f), 50f + tW)
-            val boxH = tH + 30f * (fontSize / 11f)
+            val boxW = max(200f * scaleF, 50f + notifW(n))
+            val boxH = boxHP
 
             val beginX = screenW - boxW - rightMargin
             val endX = screenW + 8f
@@ -526,42 +541,29 @@ object ModuleSolsticeNotification : ClientModule(
 
             val fillW = boxW * percentDone
             if (fillW > 0.5f) {
-                if (progressRainbow) {
-                    drawRainbowBar(ctx, x, boxTop, boxBottom, fillW, boxW, aMul)
-                } else if (colorGradient) {
-                    val segs = 24
-                    val segW = fillW / segs
-                    for (i in 0 until segs) {
-                        val t0 = if (segs <= 1) 0f else i / (segs - 1).toFloat()
-                        val s = t0 * t0 * (3f - 2f * t0)
-                        val col = Color4b(
+                when {
+                    progressRainbow -> drawProgressFill(
+                        ctx, x, boxTop, boxBottom, boxW, fillW, cornerRadius, aMul, 3f,
+                    ) { u -> rainbowAt(u) }
+
+                    colorGradient -> drawProgressFill(
+                        ctx, x, boxTop, boxBottom, boxW, fillW, cornerRadius, aMul, 3f,
+                    ) { u ->
+                        val s = u * u * (3f - 2f * u)
+                        Color4b(
                             lerp(cLeft.r.toFloat(), cRight.r.toFloat(), s).toInt().coerceIn(0, 255),
                             lerp(cLeft.g.toFloat(), cRight.g.toFloat(), s).toInt().coerceIn(0, 255),
                             lerp(cLeft.b.toFloat(), cRight.b.toFloat(), s).toInt().coerceIn(0, 255),
-                            (245 * aMul).toInt().coerceIn(0, 255),
-                        )
-                        val sx = x + segW * i
-                        val ex = (x + segW * (i + 1)).coerceAtMost(x + fillW)
-                        if (ex > sx) ctx.drawQuad(sx, boxTop, ex, boxBottom, col)
-                    }
-                    if (percentDone > 0.98f) {
-                        drawCardShape(
-                            ctx, x, boxTop, x + boxW, boxBottom, cornerRadius,
-                            cLeft.alpha((245 * aMul).toInt().coerceIn(0, 255)),
                         )
                     }
-                } else {
-                    val fillCol = cLeft.alpha((245 * aMul).toInt().coerceIn(0, 255))
-                    if (percentDone >= 0.99f) {
-                        drawCardShape(ctx, x, boxTop, x + boxW, boxBottom, cornerRadius, fillCol)
-                    } else {
-                        ctx.drawQuad(x, boxTop, x + fillW, boxBottom, fillCol)
-                    }
+
+                    else -> drawProgressFill(
+                        ctx, x, boxTop, boxBottom, boxW, fillW, cornerRadius, aMul, 1e5f,
+                    ) { cLeft }
                 }
             }
 
             drawScaledText(ctx, n.message, x + 10f, boxTop + 10f * (fontSize / 11f), Color4b.WHITE)
-            if (!n.isTimeUp) shown++
         }
     }
 
