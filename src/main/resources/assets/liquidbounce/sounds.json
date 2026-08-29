@@ -85,5 +85,11 @@
   },
   "info": {
     "sounds": ["liquidbounce:info"]
+      },
+  "enable": {
+    "sounds": ["liquidbounce:enable"]
+  },
+  "disable": {
+    "sounds": ["liquidbounce:disable"]
   }
 }
