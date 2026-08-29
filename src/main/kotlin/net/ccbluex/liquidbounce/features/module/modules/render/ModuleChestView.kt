@@ -109,6 +109,93 @@ object ModuleChestView : ClientModule(
 
     private fun a(c: Color4b, m: Float) = c.alpha((c.a * m).toInt().coerceIn(0, 255))
 
+    private fun clientScreen(): Any? = runCatching {
+        // LB / 高版本: mc.gui.screen()
+        val gui = mc.gui
+        gui.javaClass.methods.firstOrNull {
+            it.parameterCount == 0 && it.name.equals("screen", true)
+        }?.invoke(gui) ?: gui.javaClass.methods.firstOrNull {
+            it.parameterCount == 0 && it.name.equals("getScreen", true)
+        }?.invoke(gui)
+    }.getOrNull() ?: runCatching {
+        mc.javaClass.methods.firstOrNull {
+            it.parameterCount == 0 && (it.name == "getScreen" || it.name == "screen")
+        }?.invoke(mc)
+    }.getOrNull()
+
+    private fun camPos(cam: Camera): Vec3 {
+        runCatching {
+            val m = cam.javaClass.methods.firstOrNull {
+                it.parameterCount == 0 && (it.name == "getPosition" || it.name == "position")
+            }
+            val r = m?.invoke(cam)
+            if (r is Vec3) return r
+        }
+        return runCatching {
+            val f = cam.javaClass.getDeclaredField("position")
+            f.isAccessible = true
+            f.get(cam) as Vec3
+        }.getOrDefault(Vec3(0.0, 0.0, 0.0))
+    }
+
+    private fun camYaw(cam: Camera): Float {
+        runCatching {
+            val m = cam.javaClass.methods.firstOrNull {
+                it.parameterCount == 0 && (it.name == "getYRot" || it.name == "yRot" || it.name == "getYaw")
+            }
+            val r = m?.invoke(cam)
+            if (r is Float) return r
+        }
+        return runCatching {
+            val f = cam.javaClass.getDeclaredField("yRot")
+            f.isAccessible = true
+            f.getFloat(cam)
+        }.getOrDefault(0f)
+    }
+
+    private fun camPitch(cam: Camera): Float {
+        runCatching {
+            val m = cam.javaClass.methods.firstOrNull {
+                it.parameterCount == 0 && (it.name == "getXRot" || it.name == "xRot" || it.name == "getPitch")
+            }
+            val r = m?.invoke(cam)
+            if (r is Float) return r
+        }
+        return runCatching {
+            val f = cam.javaClass.getDeclaredField("xRot")
+            f.isAccessible = true
+            f.getFloat(cam)
+        }.getOrDefault(0f)
+    }
+
+    private fun packetHitPos(packet: ServerboundUseItemOnPacket): BlockPos? {
+        runCatching {
+            val m = packet.javaClass.methods.firstOrNull {
+                it.parameterCount == 0 && (
+                    it.name == "getHitResult" || it.name == "getBlockHit" ||
+                        it.name == "blockHit" || it.name == "getLocation"
+                    )
+            }
+            val r = m?.invoke(packet)
+            when (r) {
+                is BlockHitResult -> return r.blockPos
+                is BlockPos -> return r
+            }
+        }
+        runCatching {
+            for (n in listOf("blockHit", "hitResult", "location")) {
+                val f = packet.javaClass.getDeclaredField(n)
+                f.isAccessible = true
+                when (val r = f.get(packet)) {
+                    is BlockHitResult -> return r.blockPos
+                    is BlockPos -> return r
+                }
+            }
+        }
+        return null
+    }
+
+
     private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t.coerceIn(0f, 1f)
 
     private fun rainbow(off: Float): Color4b {
@@ -141,7 +228,7 @@ object ModuleChestView : ClientModule(
     }
 
     private fun isContainerScreen(): Boolean {
-        val s = mc.screen
+        val s = clientScreen()
         return s is AbstractContainerScreen<*> && (
             s is ContainerScreen ||
                 s is ShulkerBoxScreen ||
@@ -158,13 +245,13 @@ object ModuleChestView : ClientModule(
     /** 世界坐标 → 屏幕（简易视角投影） */
     private fun worldToScreen(pos: Vec3, partial: Float): FloatArray? {
         val cam = camera() ?: return null
-        val camPos = cam.position
+        val camPos = camPos(cam)
         val relX = (pos.x - camPos.x).toFloat()
         val relY = (pos.y - camPos.y).toFloat()
         val relZ = (pos.z - camPos.z).toFloat()
 
-        val yaw = Math.toRadians(cam.yRot.toDouble())
-        val pitch = Math.toRadians(cam.xRot.toDouble())
+        val yaw = Math.toRadians(camYaw(cam).toDouble())
+        val pitch = Math.toRadians(camPitch(cam).toDouble())
 
         // 相机空间：先 yaw 再 pitch
         val cosY = cos(yaw).toFloat()
@@ -226,7 +313,7 @@ object ModuleChestView : ClientModule(
     }
 
     private fun chestSlots(): Int {
-        val menu = (mc.screen as? AbstractContainerScreen<*>)?.menu ?: return 27
+        val menu = (clientScreen() as? AbstractContainerScreen<*>)?.menu ?: return 27
         return when (menu) {
             is ChestMenu -> menu.rowCount * 9
             is ShulkerBoxMenu -> 27
@@ -235,7 +322,7 @@ object ModuleChestView : ClientModule(
     }
 
     private fun slotStack(index: Int): net.minecraft.world.item.ItemStack {
-        val menu = (mc.screen as? AbstractContainerScreen<*>)?.menu ?: return net.minecraft.world.item.ItemStack.EMPTY
+        val menu = (clientScreen() as? AbstractContainerScreen<*>)?.menu ?: return net.minecraft.world.item.ItemStack.EMPTY
         if (index < 0 || index >= menu.slots.size) return net.minecraft.world.item.ItemStack.EMPTY
         // 容器槽在前
         return try {
@@ -249,7 +336,7 @@ object ModuleChestView : ClientModule(
     private val packetHandler = handler<PacketEvent> { event ->
         val packet = event.packet
         if (packet is ServerboundUseItemOnPacket) {
-            val pos = packet.blockHit.blockPos
+            val pos = packetHitPos(packet) ?: return@handler
             if (isStorageBlock(pos)) {
                 containerPos = pos
             }
