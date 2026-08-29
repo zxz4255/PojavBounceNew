@@ -21,6 +21,10 @@
  *     空分组不再显示 ">" 箭头且点击无副作用;
  *     MODE 子项按 activeMode 缓存(切换模式立即刷新);
  *     文本编辑失焦自动提交; 模块名缩短缓存; 设置行悬停显示描述
+ * 12. 三轮修复: 行剔除改为滚动感知窗口 [scroll, scroll+listH](原来固定 [0,listH],
+ *     滚动后下方行全部被剔除 → 大栏/子项滚下去整片空白);
+ *     行内容 alpha 乘以行高动画因子(收起动画时文字随之淡出,
+ *     原来行高→0 但文字仍全亮, 折叠期间各行文字挤成一团)
  */
 package net.ccbluex.liquidbounce.features.module.modules.render
 
@@ -548,12 +552,18 @@ object ModuleSolsticeClickgui : ClientModule(
     /** 复用的 Row (emit 消费方不持有引用, 递归安全) */
     private val rowPool = Row()
 
+    /**
+     * 行剔除: 只发射与内容坐标可见窗口 [visTop, visBot] 相交的行。
+     * visTop/visBot = scroll / scroll+listH —— 之前用固定 [0, listH] 剔除,
+     * 导致滚动后 [listH, contentH] 区间的行全被丢弃(滚下去整片空白)。
+     */
     private inline fun emitRow(
-        y: Float, h: Float, listH: Float,
+        y: Float, h: Float,
+        visTop: Float, visBot: Float,
         mod: ClientModule?, value: Value<*>?, choice: Any?, channel: Int, indent: Int,
         emit: (Row) -> Unit,
     ) {
-        if (y >= listH || y + h <= 0f) return
+        if (y >= visBot || y + h <= visTop) return
         rowPool.y = y
         rowPool.h = h
         rowPool.mod = mod
@@ -566,12 +576,13 @@ object ModuleSolsticeClickgui : ClientModule(
 
     private val PICKER_SB_ROWS = 2.6f
 
-    /** 返回内容总高; emit 只接收可见行 (listH 为当前可见列表高度, 行高已含动画系数 f)
+    /** 返回内容总高; emit 只接收可见窗口 [visTop, visBot] 内的行 (内容坐标, 已含滚动)
      *  注意: 不可 inline, walkValues 是递归函数 */
     private fun walkSettings(
         mods: List<ClientModule>,
         f: Float,
-        listH: Float,
+        visTop: Float,
+        visBot: Float,
         emit: (Row) -> Unit,
     ): Float {
         var y = 0f
@@ -579,10 +590,10 @@ object ModuleSolsticeClickgui : ClientModule(
         for (mod in mods) {
             val open = modOpen[mod] == true
             val cAnim = modAnim.getOrDefault(mod, if (open) 1f else 0f)
-            emitRow(y, rh, listH, mod, null, null, -1, 0, emit)
+            emitRow(y, rh, visTop, visBot, mod, null, null, -1, 0, emit)
             y += rh
             if (cAnim > 0.001f) {
-                y = walkValues(childrenOfModule(mod), cAnim * f, 1, y, listH, emit)
+                y = walkValues(childrenOfModule(mod), cAnim * f, 1, y, visTop, visBot, emit)
             }
         }
         return y
@@ -593,19 +604,20 @@ object ModuleSolsticeClickgui : ClientModule(
         f: Float,
         indent: Int,
         startY: Float,
-        listH: Float,
+        visTop: Float,
+        visBot: Float,
         emit: (Row) -> Unit,
     ): Float {
         var y = startY
         val rh = rowH * f
         for (v in values) {
             val vi = info(v)
-            emitRow(y, rh, listH, null, v, null, -1, indent, emit)
+            emitRow(y, rh, visTop, visBot, null, v, null, -1, indent, emit)
             y += rh
             when (vi.kind) {
                 Kind.GROUP, Kind.TOGGLE_GROUP, Kind.MODE ->
                     if (groupOpen[v] == true) {
-                        y = walkValues(childrenOf(v), f, indent + 1, y, listH, emit)
+                        y = walkValues(childrenOf(v), f, indent + 1, y, visTop, visBot, emit)
                     }
                 else -> {}
             }
@@ -613,17 +625,17 @@ object ModuleSolsticeClickgui : ClientModule(
                 enumOpen[v] == true
             ) {
                 for (c in vi.choices) {
-                    emitRow(y, rh, listH, null, v, c, -1, indent + 1, emit)
+                    emitRow(y, rh, visTop, visBot, null, v, c, -1, indent + 1, emit)
                     y += rh
                 }
             }
             if (vi.kind == Kind.COLOR && colorOpen[v] == true) {
                 val sbH = rowH * PICKER_SB_ROWS * f
-                emitRow(y, sbH, listH, null, v, null, 0, indent, emit)
+                emitRow(y, sbH, visTop, visBot, null, v, null, 0, indent, emit)
                 y += sbH
-                emitRow(y, rh, listH, null, v, null, 1, indent, emit)
+                emitRow(y, rh, visTop, visBot, null, v, null, 1, indent, emit)
                 y += rh
-                emitRow(y, rh, listH, null, v, null, 2, indent, emit)
+                emitRow(y, rh, visTop, visBot, null, v, null, 2, indent, emit)
                 y += rh
             }
         }
@@ -913,7 +925,7 @@ object ModuleSolsticeClickgui : ClientModule(
         if (mouseY < m.listTop || mouseY >= m.clipBot) return false
 
         var hit = false
-        walkSettings(mods, p.extAnim, m.listH) { row ->
+        walkSettings(mods, p.extAnim, p.scroll - rowH, p.scroll + m.listH + rowH) { row ->
             if (hit) return@walkSettings
             val ry = m.listTop + row.y - p.scroll
             // 与渲染相同的可见性判断
@@ -1478,28 +1490,35 @@ object ModuleSolsticeClickgui : ClientModule(
                 if (clipBot <= clipTop + 2f) continue
 
                 ctx.scissorStack.withPush(ctx.getBounds(p.x, clipTop, p.x + catWidth, clipBot)) {
-                    walkSettings(modList, f, m.listH) { row ->
+                    // 可见窗口(内容坐标) = [scroll, scroll+listH], 上下各放宽一行给部分可见行
+                    walkSettings(modList, f, p.scroll - rowH, p.scroll + m.listH + rowH) { row ->
                         val ry = clipTop + row.y - p.scroll
                         if (ry + row.h <= clipTop + 1f || ry >= clipBot - 1f) return@walkSettings
 
+                        // 行自身动画因子(行高/标准行高): 收起时行高→0,
+                        // 用它把文本/内容淡出, 否则折叠动画期间各行文字挤成一团
+                        val rf = (row.h / rowH).coerceIn(0f, 1f)
+                        val rowA = anim * f * ((rf - 0.15f) / 0.85f).coerceIn(0f, 1f)
+                        if (rowA <= 0.01f) return@walkSettings
+
                         val mod = row.mod
                         if (mod != null) {
-                            drawModuleRow(ctx, font, mod, p, ry, anim, i)
+                            drawModuleRow(ctx, font, mod, p, ry, rowA, i)
                             return@walkSettings
                         }
 
                         val v = row.value ?: return@walkSettings
 
                         if (row.choice != null) {
-                            drawChoiceRow(ctx, font, v, row.choice!!, p.x, ry, catWidth, row.h, anim * f)
+                            drawChoiceRow(ctx, font, v, row.choice!!, p.x, ry, catWidth, row.h, rowA)
                             return@walkSettings
                         }
                         if (row.channel >= 0) {
-                            drawPickerRow(ctx, v, row.channel, p.x, ry, catWidth, row.h, anim * f)
+                            drawPickerRow(ctx, v, row.channel, p.x, ry, catWidth, row.h, rowA)
                             return@walkSettings
                         }
 
-                        drawSetting(ctx, font, v, p.x, ry, catWidth, row.h, anim * f, row.indent)
+                        drawSetting(ctx, font, v, p.x, ry, catWidth, row.h, rowA, row.indent)
                     }
                 }
             }
