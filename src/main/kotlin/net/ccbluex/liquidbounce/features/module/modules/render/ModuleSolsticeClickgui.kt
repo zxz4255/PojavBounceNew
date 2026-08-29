@@ -320,7 +320,7 @@ object ModuleSolsticeClickgui : ClientModule(
         return s.take(20)
     }
 
-    private fun listChoices    private fun listChoices(v: Value<*>): List<Any?> {
+    private fun listChoices(v: Value<*>): List<Any?> {
         val actual = getActual(v)
         if (actual is Enum<*>) {
             return actual.javaClass.enumConstants?.toList() ?: emptyList()
