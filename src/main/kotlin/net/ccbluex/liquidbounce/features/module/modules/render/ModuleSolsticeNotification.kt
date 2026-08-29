@@ -16,7 +16,7 @@
  *  本文件改动:
  *   - 进度条动画改为「从左到右」：填充随 percentDone 由左侧向右推进
  *   - 进度条新增独立 Rainbow 模式：连续色谱按位置采样，视觉无分段拼接
- *   - 卡片四角统一圆角（与原版一致）
+ *   - 卡片左侧上下为圆角，右侧上下为直角（Solaris 轮廓）
  *   - 模块开/关时播放音频：liquidbounce:enable / liquidbounce:disable
  *     （对应源码 assets/liquidbounce/sounds/enable.ogg 与 disable.ogg，
  *       并需在 assets/liquidbounce/sounds.json 中注册同名事件）
@@ -227,6 +227,52 @@ object ModuleSolsticeNotification : ClientModule(
         }
     }
 
+    /**
+     * 绘制「左侧圆角 + 右侧上下直角」的卡片形状。
+     *
+     * 精确分块平铺：主体矩形 + 左侧中段 + 左上/左下四分之一圆(圆心扇形三角)。
+     * 各块互不重叠，因此半透明颜色也不会出现「叠加变深」的接缝
+     * （直接用圆角矩形再盖一层矩形会在右半边产生双重混合的色差带）。
+     *
+     * @param arcSteps 四分之一圆的扇形细分数(越小越省, 辉光等模糊层可用小值)
+     */
+    private fun drawCardShape(
+        ctx: net.minecraft.client.gui.GuiGraphicsExtractor,
+        x1: Float, y1: Float, x2: Float, y2: Float,
+        radius: Float, color: Color4b, arcSteps: Int = 10,
+    ) {
+        val w = x2 - x1
+        val h = y2 - y1
+        if (w <= 0.5f || h <= 0.5f) return
+        val rad = radius.coerceIn(0f, minOf(w, h) * 0.5f)
+        if (rad < 0.5f) {
+            ctx.drawQuad(x1, y1, x2, y2, color)
+            return
+        }
+        // 主体：圆角结束处 → 右缘（右侧上下均为直角）
+        ctx.drawQuad(x1 + rad, y1, x2, y2, color)
+        // 左侧中段（两个圆角之间的直条）
+        ctx.drawQuad(x1, y1 + rad, x1 + rad, y2 - rad, color)
+        // 左上 / 左下 四分之一圆：扇形三角精确覆盖
+        val cx = x1 + rad
+        val cyT = y1 + rad
+        val cyB = y2 - rad
+        val n = arcSteps.coerceIn(3, 24)
+        for (i in 0 until n) {
+            val a0 = (kotlin.math.PI * 0.5f) * (i.toFloat() / n)
+            val a1 = (kotlin.math.PI * 0.5f) * ((i + 1).toFloat() / n)
+            // x 向左扫(负 sin): a=0 → (cx, y1), a=π/2 → (x1, y1+rad)
+            val sx0 = cx - rad * kotlin.math.sin(a0)
+            val sx1 = cx - rad * kotlin.math.sin(a1)
+            val c0 = rad * kotlin.math.cos(a0)
+            val c1 = rad * kotlin.math.cos(a1)
+            // 上圆角
+            ctx.drawTriangle(cx, cyT, sx0, cyT - c0, sx1, cyT - c1, color, null, false)
+            // 下圆角: 关于卡片水平中线镜像
+            ctx.drawTriangle(cx, cyB, sx0, cyB + c0, sx1, cyB + c1, color, null, false)
+        }
+    }
+
     private fun drawShadow(
         ctx: net.minecraft.client.gui.GuiGraphicsExtractor,
         x1: Float, y1: Float, x2: Float, y2: Float, color: Color4b,
@@ -298,7 +344,8 @@ object ModuleSolsticeNotification : ClientModule(
             val col = Color4b(rC, gC, bC, a)
 
             val rad = (cornerRadius + r * 0.55f).coerceAtLeast(cornerRadius)
-            ctx.drawRoundedRect(x1 - r, y1 - r, x2 + r, y2 + r, rad, col)
+            // 辉光层与卡片同形状: 左侧圆角随层外扩, 右侧保持直角
+            drawCardShape(ctx, x1 - r, y1 - r, x2 + r, y2 + r, rad, col)
         }
     }
 
@@ -474,9 +521,9 @@ object ModuleSolsticeNotification : ClientModule(
             }
             drawGlow(ctx, x, boxTop, x + boxW, boxBottom, g1, g2, aMul, gGrad)
 
-            // 整卡大进度条：底色纯黑；填充改为从左到右推进（percentDone 0→1）
+            // 整卡大进度条：底色纯黑；左侧圆角、右侧直角
             val blackBg = Color4b(0, 0, 0, (240 * aMul).toInt().coerceIn(0, 255))
-            ctx.drawRoundedRect(x, boxTop, x + boxW, boxBottom, cornerRadius, blackBg)
+            drawCardShape(ctx, x, boxTop, x + boxW, boxBottom, cornerRadius, blackBg)
 
             val fillW = boxW * percentDone
             if (fillW > 0.5f) {
@@ -499,15 +546,15 @@ object ModuleSolsticeNotification : ClientModule(
                         if (ex > sx) ctx.drawQuad(sx, boxTop, ex, boxBottom, col)
                     }
                     if (percentDone > 0.98f) {
-                        ctx.drawRoundedRect(
-                            x, boxTop, x + boxW, boxBottom, cornerRadius,
+                        drawCardShape(
+                            ctx, x, boxTop, x + boxW, boxBottom, cornerRadius,
                             cLeft.alpha((245 * aMul).toInt().coerceIn(0, 255)),
                         )
                     }
                 } else {
                     val fillCol = cLeft.alpha((245 * aMul).toInt().coerceIn(0, 255))
                     if (percentDone >= 0.99f) {
-                        ctx.drawRoundedRect(x, boxTop, x + boxW, boxBottom, cornerRadius, fillCol)
+                        drawCardShape(ctx, x, boxTop, x + boxW, boxBottom, cornerRadius, fillCol)
                     } else {
                         ctx.drawQuad(x, boxTop, x + fillW, boxBottom, fillCol)
                     }
