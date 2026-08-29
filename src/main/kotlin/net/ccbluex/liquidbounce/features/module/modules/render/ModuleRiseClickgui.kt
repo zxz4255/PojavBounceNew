@@ -1,13 +1,11 @@
 /*
- * ModuleRiseClickgui —— Rise 风格单窗 ClickGUI（分组 / 搜索 / 滚动条 / 色板透明度 / 范围数值）
+ * ModuleRiseClickgui —— Rise 风格 ClickGUI（修复：子项居中、Mode 可切换、点击不卡死）
+ * LiquidBounce Nextgen 0.39
  */
 package net.ccbluex.liquidbounce.features.module.modules.render
 
-import net.ccbluex.liquidbounce.config.types.RangedValue
 import net.ccbluex.liquidbounce.config.types.Value
 import net.ccbluex.liquidbounce.event.events.KeyboardKeyEvent
-import net.ccbluex.liquidbounce.event.events.MouseButtonEvent
-import net.ccbluex.liquidbounce.event.events.MouseRotationEvent
 import net.ccbluex.liquidbounce.event.events.MouseScrollEvent
 import net.ccbluex.liquidbounce.event.events.MouseScrollInHotbarEvent
 import net.ccbluex.liquidbounce.event.events.OverlayRenderEvent
@@ -19,19 +17,20 @@ import net.ccbluex.liquidbounce.features.module.ModuleManager
 import net.ccbluex.liquidbounce.render.drawQuad
 import net.ccbluex.liquidbounce.render.drawRoundedRect
 import net.ccbluex.liquidbounce.render.engine.type.Color4b
-import net.ccbluex.liquidbounce.render.withPush
 import net.ccbluex.liquidbounce.utils.client.mc
 import net.minecraft.client.gui.Font
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.screens.Screen
-import net.minecraft.client.input.KeyEvent
 import net.minecraft.client.input.CharacterEvent
+import net.minecraft.client.input.KeyEvent
+import net.minecraft.client.input.MouseButtonEvent
 import net.minecraft.network.chat.Component
 import org.lwjgl.glfw.GLFW
 import java.util.IdentityHashMap
+import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.pow
 import kotlin.math.roundToInt
 
 object ModuleRiseClickgui : ClientModule(
@@ -40,120 +39,98 @@ object ModuleRiseClickgui : ClientModule(
     bind = GLFW.GLFW_KEY_RIGHT_SHIFT,
     aliases = listOf("RiseClickGUI", "RiseGUI"),
 ) {
-
     private val colBg by color("Background", Color4b(23, 26, 33, 254))
     private val colSecondary by color("Secondary", Color4b(18, 20, 25, 255))
     private val colText by color("Text", Color4b(255, 255, 255, 255))
     private val colSecondaryText by color("Secondary Text", Color4b(255, 255, 255, 220))
     private val colTrinaryText by color("Trinary Text", Color4b(255, 255, 255, 130))
-    private val colOverlay by color("Overlay", Color4b(0, 0, 0, 50))
+    private val colAccent by color("Accent", Color4b(0x56, 0xB4, 0xE9, 255))
     private val screenDim by boolean("Screen Dim", true)
     private val screenDimAlpha by int("Screen Dim Alpha", 28, 0..60)
-    private val colAccent by color("Accent", Color4b(0x56, 0xB4, 0xE9, 255))
 
-    private val windowW by float("Window Width", 420f, 300f..600f)
-    private val windowH by float("Window Height", 320f, 220f..520f)
-    private val sidebarW by float("Sidebar Width", 96f, 70f..150f)
-    private val round by float("Round", 10f, 0f..20f)
-    private val moduleRowH by float("Module Row H", 22f, 16f..32f)
-    private val settingRowH by float("Setting Row H", 20f, 14f..28f)
-    private val animMs by float("Anim Ms", 300f, 80f..800f)
-    private val shadow by boolean("Drop Shadow", true)
-    private val scaleAnim by boolean("Scale Animation", true)
+    private val windowW by float("Window Width", 420f, 320f..640f)
+    private val windowH by float("Window Height", 280f, 200f..480f)
+    private val sidebarW by float("Sidebar Width", 100f, 70f..160f)
+    private val moduleRowH by float("Module Row", 18f, 14f..26f)
+    private val settingRowH by float("Setting Row", 16f, 12f..24f)
+    private val animSpeed by float("Anim Speed", 12f, 4f..24f)
 
     private var winX = -1f
     private var winY = -1f
-    private var dragging = false
-    private var dragOffX = 0f
-    private var dragOffY = 0f
     private var selectedCat: ModuleCategory? = null
     private var expanded: ClientModule? = null
     private var scroll = 0f
     private var targetScroll = 0f
-    private var contentH = 0f
-    private var mouseX = 0f
-    private var mouseY = 0f
-    private var sliderDrag: Value<*>? = null
-    private var scrollBarDrag = false
-
     private var scale = 0f
     private var opacity = 0f
+    private var mouseX = 0f
+    private var mouseY = 0f
     private var lastNs = 0L
-
-    private val enumOpen = IdentityHashMap<Value<*>, Boolean>()
-
-    // 搜索
     private var searchText = ""
+    private var searchFocused = false
+    private var sliderDrag: Value<*>? = null
     private var textEditValue: Value<*>? = null
     private var textEditBuf = ""
-    private var searchFocused = false
+    private val enumOpen = IdentityHashMap<Value<*>, Boolean>()
+    private var scrollBarDrag = false
 
-    // 色板 + 透明度
-    private val palette = listOf(
-        Color4b(0x56, 0xB4, 0xE9), Color4b(255, 70, 70), Color4b(90, 230, 110),
-        Color4b(255, 170, 40), Color4b(140, 110, 255), Color4b(255, 120, 200),
-        Color4b(255, 255, 255), Color4b(40, 40, 40),
-        Color4b(0xE9, 0xA8, 0xBC), Color4b(0x6E, 0xC8, 0xF1), Color4b(255, 230, 60), Color4b(120, 120, 120),
-    )
-    private var colorEdit: Value<*>? = null
-    private var paletteX = 0f
-    private var paletteY = 0f
-    private var colorAlpha = 255
-    private var alphaDragging = false
-
-    private fun easeOutExpo(t: Float): Float =
-        if (t >= 1f) 1f else (1.0 - 2.0.pow((-10.0 * t))).toFloat()
-
-    private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
-
-    private fun guiMX() =
-        (mc.mouseHandler.xpos() * mc.window.guiScaledWidth / mc.window.width).toFloat()
-
-    private fun guiMY() =
-        (mc.mouseHandler.ypos() * mc.window.guiScaledHeight / mc.window.height).toFloat()
-
+    private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t.coerceIn(0f, 1f)
     private fun over(x: Float, y: Float, w: Float, h: Float) =
         mouseX >= x && mouseY >= y && mouseX < x + w && mouseY < y + h
 
-    /** 全部分类（保证侧边栏有分组） */
+    private fun guiMX() =
+        (mc.mouseHandler.xpos() * mc.window.guiScaledWidth / mc.window.width).toFloat()
+    private fun guiMY() =
+        (mc.mouseHandler.ypos() * mc.window.guiScaledHeight / mc.window.height).toFloat()
+
+    /** 垂直居中文字 y */
+    private fun textMidY(rowY: Float, rowH: Float, font: Font): Int {
+        val lh = font.lineHeight.toFloat().coerceAtLeast(8f)
+        return (rowY + (rowH - lh) * 0.5f).roundToInt()
+    }
+
+    private fun allModules(): List<ClientModule> = try {
+        ModuleManager.getModules().filter { !it.hidden }
+    } catch (_: Throwable) {
+        emptyList()
+    }
+
     private fun allCategories(): List<ModuleCategory> {
-        val fromModules = ModuleManager.getModules()
-            .filter { !it.hidden }
-            .map { it.category }
-            .distinct()
+        val from = allModules().map { it.category }.distinct()
         val entries = try {
             ModuleCategories.entries.toList()
         } catch (_: Throwable) {
             emptyList()
         }
-        // 优先官方枚举顺序，再补模块里出现过的
         val ordered = mutableListOf<ModuleCategory>()
         for (c in entries) if (c !in ordered) ordered += c
-        for (c in fromModules) if (c !in ordered) ordered += c
+        for (c in from) if (c !in ordered) ordered += c
         return ordered
     }
 
     private fun catLabel(cat: ModuleCategory): String = try {
         cat.tag
     } catch (_: Throwable) {
-        cat.toString()
+        cat.toString().substringAfterLast('.').substringAfterLast('$')
     }
 
     private fun modulesIn(cat: ModuleCategory): List<ClientModule> {
         val q = searchText.trim().lowercase()
-        return ModuleManager.getModules()
-            .filter { !it.hidden && it.category == cat }
-            .filter { q.isEmpty() || it.name.lowercase().contains(q) || it.aliases.any { a -> a.lowercase().contains(q) } }
+        return allModules()
+            .filter { it.category == cat }
+            .filter {
+                q.isEmpty() || it.name.lowercase().contains(q) ||
+                    it.aliases.any { a -> a.lowercase().contains(q) }
+            }
             .sortedBy { it.name }
     }
 
     private fun modulesSearchAll(): List<ClientModule> {
         val q = searchText.trim().lowercase()
         if (q.isEmpty()) return emptyList()
-        return ModuleManager.getModules()
-            .filter { !it.hidden }
-            .filter { it.name.lowercase().contains(q) || it.aliases.any { a -> a.lowercase().contains(q) } }
-            .sortedBy { it.name }
+        return allModules().filter {
+            it.name.lowercase().contains(q) || it.aliases.any { a -> a.lowercase().contains(q) }
+        }.sortedBy { it.name }
     }
 
     private fun collectValues(mod: ClientModule): List<Value<*>> = try {
@@ -163,308 +140,441 @@ object ModuleRiseClickgui : ClientModule(
     }
 
     private fun getActual(v: Value<*>): Any? {
-        var obj: Any? = try { v.get() } catch (_: Exception) {
-            runCatching { v.javaClass.getMethod("getValue").invoke(v) }.getOrNull()
+        var obj: Any? = try {
+            v.get()
+        } catch (_: Exception) {
+            null
         }
-        var depth = 0
-        while (obj is Value<*> && depth < 6) {
-            val cur = obj as Value<*>
-            obj = try { cur.get() } catch (_: Exception) {
-                runCatching { cur.javaClass.getMethod("getValue").invoke(cur) }.getOrNull()
+        var d = 0
+        while (obj is Value<*> && d < 4) {
+            obj = try {
+                obj.get()
+            } catch (_: Exception) {
+                null
             }
-            depth++
+            d++
         }
         return obj
     }
 
+    private fun displayName(v: Value<*>): String {
+        val raw = runCatching {
+            v.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.equals("getName", true) }
+                ?.invoke(v) as? String
+        }.getOrNull()
+        return (raw ?: v.name).replace(Regex("""\[[^\]]*\]"""), "").take(18).ifBlank { "Setting" }
+    }
+
+    private fun formatNumber(n: Number): String {
+        val d = n.toDouble()
+        if (!d.isFinite()) return "0"
+        if (abs(d - d.toLong()) < 1e-6 && abs(d) < 1e12) return d.toLong().toString()
+        return String.format(Locale.US, "%.2f", d).trimEnd('0').trimEnd('.').ifBlank { "0" }
+    }
+
+    private fun choiceLabel(any: Any?): String {
+        if (any == null) return "-"
+        if (any is Boolean) return if (any) "ON" else "OFF"
+        if (any is Number) return formatNumber(any)
+        if (any is Enum<*>) return any.name.lowercase().replaceFirstChar { it.uppercase() }
+        runCatching {
+            for (n in listOf("getTag", "getName", "getChoiceName", "getDisplayName", "tag", "name")) {
+                val m = any.javaClass.methods.firstOrNull {
+                    it.parameterCount == 0 && it.name.equals(n, true)
+                } ?: continue
+                val r = m.invoke(any)
+                if (r is String && r.isNotBlank() && r != "-") {
+                    return r.substringAfterLast('.').substringBefore('@').take(20)
+                }
+            }
+        }
+        var s = any.toString().substringAfterLast('$').substringAfterLast('.').substringBefore('@')
+        s = s.replace(Regex("""\[[^\]]*\]"""), "").trim()
+        return s.take(20).ifBlank { "Mode" }
+    }
+
+    private fun listChoices(v: Value<*>): List<Any?> {
+        val actual = getActual(v)
+        if (actual is Enum<*>) {
+            return actual.javaClass.enumConstants?.toList() ?: emptyList()
+        }
+        for (target in listOf<Any?>(v, actual)) {
+            if (target == null) continue
+            for (n in listOf("getChoices", "choices", "getModes", "modes", "entries", "values")) {
+                val m = target.javaClass.methods.firstOrNull {
+                    it.parameterCount == 0 && it.name.equals(n, true)
+                } ?: continue
+                when (val r = runCatching { m.invoke(target) }.getOrNull()) {
+                    is Collection<*> -> if (r.isNotEmpty()) return r.toList()
+                    is Array<*> -> if (r.isNotEmpty()) return r.toList()
+                }
+            }
+        }
+        return emptyList()
+    }
+
     private fun trySet(v: Value<*>, value: Any): Boolean {
         val label = choiceLabel(value)
-
-        // 0) ChoiceConfigurable: setActiveChoice by instance or name
-        runCatching {
-            val choices = listFrom(v, listOf("getChoices", "choices", "getActiveChoices")) ?: emptyList()
-            if (choices.isNotEmpty()) {
-                val match = choices.firstOrNull {
-                    it === value || choiceLabel(it).equals(label, true)
-                }
-                if (match != null) {
-                    for (n in listOf("setActiveChoice", "setCurrent", "setSelected", "select", "set")) {
-                        val m = v.javaClass.methods.firstOrNull {
-                            it.parameterCount == 1 && it.name.equals(n, true)
-                        } ?: continue
-                        runCatching { m.invoke(v, match); return@runCatching true }.getOrNull()
-                        // also try by string name on Choice
-                        runCatching { m.invoke(v, choiceLabel(match)); return@runCatching true }.getOrNull()
-                    }
-                }
-            }
-        }
-
-        // 1) setByString / setAsString — 对 Choice/Mode/Text/Block 最稳
-        for (m in v.javaClass.methods) {
-            if (m.parameterCount != 1) continue
-            val n = m.name
-            if (!n.equals("setByString", true) && !n.equals("setAsString", true) &&
-                !n.equals("fromString", true) && !n.equals("setFromString", true)
-            ) continue
-            try {
-                m.invoke(v, label)
-                return true
-            } catch (_: Exception) {
-            }
-        }
-
-        // 2) 直接 set / setValue 等
-        for (m in v.javaClass.methods) {
-            if (m.parameterCount != 1) continue
-            val n = m.name
-            if (n != "set" && n != "setValue" && n != "setActiveChoice" &&
-                n != "setCurrent" && n != "setSelected" && n != "select" && n != "changeValue"
-            ) continue
-            try {
-                m.invoke(v, value)
-                return true
-            } catch (_: Exception) {
+        for (n in listOf("setByString", "setAsString", "set", "setValue", "setActiveChoice", "select")) {
+            for (m in v.javaClass.methods) {
+                if (m.parameterCount != 1 || !m.name.equals(n, true)) continue
                 try {
-                    m.invoke(v, label)
-                    return true
+                    m.invoke(v, value); return true
                 } catch (_: Exception) {
                 }
-            }
-        }
-
-        // 3) Boolean
-        if (value is Boolean) {
-            runCatching {
-                v.javaClass.methods.firstOrNull { it.name == "toggle" && it.parameterCount == 0 }?.invoke(v)
-                return true
-            }
-            runCatching {
-                v.javaClass.methods.firstOrNull {
-                    it.parameterCount == 1 && (it.name == "set" || it.name == "setValue")
-                }?.invoke(v, value)
-                return true
-            }
-        }
-
-        // 4) 字段直写
-        runCatching {
-            for (f in v.javaClass.declaredFields) {
-                if (f.name.contains("value", true) || f.name == "current" || f.name == "active") {
-                    f.isAccessible = true
-                    f.set(v, value)
-                    return true
+                try {
+                    m.invoke(v, label); return true
+                } catch (_: Exception) {
                 }
             }
         }
         return false
     }
 
-    private fun displayName(v: Value<*>): String {
-        var raw = try { v.name } catch (_: Exception) { "" }
-        if (raw.isBlank()) raw = "Setting"
-        raw = raw.substringAfterLast('/').substringAfterLast('.')
-        if ('[' in raw) raw = raw.substringBefore('[').ifBlank { raw.substringAfter('[').substringBefore(']') }
-        if (raw.equals("Value", true) || raw.isBlank()) {
-            raw = v.javaClass.simpleName.removeSuffix("Value").removeSuffix("Setting").ifBlank { "Setting" }
+    private fun cycleChoice(v: Value<*>): Boolean {
+        for (n in listOf("next", "cycle", "selectNext")) {
+            val m = v.javaClass.methods.firstOrNull {
+                it.parameterCount == 0 && it.name.equals(n, true)
+            } ?: continue
+            if (runCatching { m.invoke(v); true }.getOrDefault(false)) return true
         }
-        return raw.take(28)
+        val list = listChoices(v)
+        if (list.isEmpty()) return false
+        val cur = getActual(v)
+        val curL = choiceLabel(cur)
+        var idx = list.indexOfFirst { it === cur || choiceLabel(it).equals(curL, true) }
+        if (idx < 0) idx = 0
+        val next = list[(idx + 1) % list.size] ?: return false
+        return trySet(v, next) || trySet(v, choiceLabel(next))
     }
 
-    /** 解析数值范围：优先 RangedValue，否则反射 min/max */
     private fun rangeOf(v: Value<*>): Pair<Float, Float>? {
-        if (v is RangedValue<*>) {
-            val minV = (v.range.start as? Number)?.toFloat()
-            val maxV = (v.range.endInclusive as? Number)?.toFloat()
-            if (minV != null && maxV != null && maxV > minV) return minV to maxV
+        for (n in listOf("getRange", "range")) {
+            val m = v.javaClass.methods.firstOrNull {
+                it.parameterCount == 0 && it.name.equals(n, true)
+            }
+            when (val r = runCatching { m?.invoke(v) }.getOrNull()) {
+                is ClosedFloatingPointRange<*> -> {
+                    val a = (r.start as? Number)?.toFloat()
+                    val b = (r.endInclusive as? Number)?.toFloat()
+                    if (a != null && b != null && b > a) return a to b
+                }
+                is IntRange -> if (r.last > r.first) return r.first.toFloat() to r.last.toFloat()
+            }
         }
-        return try {
-            val minM = v.javaClass.methods.firstOrNull { it.name.equals("getMinimum", true) || it.name == "getMin" }
-            val maxM = v.javaClass.methods.firstOrNull { it.name.equals("getMaximum", true) || it.name == "getMax" }
-            val minV = (minM?.takeIf { it.parameterCount == 0 }?.invoke(v) as? Number)?.toFloat()
-            val maxV = (maxM?.takeIf { it.parameterCount == 0 }?.invoke(v) as? Number)?.toFloat()
-            if (minV != null && maxV != null && maxV > minV) minV to maxV else null
-        } catch (_: Exception) {
-            null
+        fun num(names: List<String>): Float? {
+            for (n in names) {
+                val m = v.javaClass.methods.firstOrNull {
+                    it.parameterCount == 0 && it.name.equals(n, true)
+                }
+                val r = runCatching { m?.invoke(v) }.getOrNull()
+                if (r is Number) return r.toFloat()
+            }
+            return null
+        }
+        val minV = num(listOf("getMinimum", "getMin", "minimum", "min"))
+        val maxV = num(listOf("getMaximum", "getMax", "maximum", "max"))
+        if (minV != null && maxV != null && maxV > minV) return minV to maxV
+        val name = displayName(v).lowercase()
+        when {
+            "scale" in name -> return 0.1f to 5f
+            "speed" in name -> return 0f to 10f
+            "alpha" in name -> return 0f to 1f
+            "size" in name || "width" in name || "height" in name -> return 0.1f to 20f
+            "radius" in name || "range" in name -> return 0f to 64f
+        }
+        val cur = (getActual(v) as? Number)?.toFloat() ?: return null
+        return when {
+            cur in 0f..1.5f -> 0f to 2f
+            cur in 0f..10f -> 0f to 20f
+            else -> 0f to max(cur * 2f, 10f)
         }
     }
 
-    private fun applySliderValue(v: Value<*>, x1: Float, x2: Float) {
+    private fun isTextLike(v: Value<*>, actual: Any?): Boolean {
+        if (actual is Boolean || actual is Number || actual is Enum<*>) return false
+        if (listChoices(v).isNotEmpty()) return false
+        if (rangeOf(v) != null) return false
+        if (actual is String) return true
+        val n = displayName(v).lowercase()
+        if (listOf("text", "block", "path", "file", "name", "string").any { it in n }) return true
+        val sn = actual?.javaClass?.simpleName?.lowercase() ?: ""
+        return "block" in sn || "identifier" in sn
+    }
+
+    private fun isColorValue(actual: Any?): Boolean {
+        if (actual == null) return false
+        if (actual is Color4b || actual is java.awt.Color) return true
+        return actual.javaClass.simpleName.contains("Color", true)
+    }
+
+    private fun applySlider(v: Value<*>, x: Float, w: Float) {
         val range = rangeOf(v) ?: return
         val (minV, maxV) = range
-        val nv = ((mouseX - x1) / (x2 - x1).coerceAtLeast(1f) * (maxV - minV) + minV).coerceIn(minV, maxV)
-        when (val actual = getActual(v)) {
-            is Float -> trySet(v, nv)
-            is Double -> trySet(v, nv.toDouble())
+        val t = ((mouseX - x) / w.coerceAtLeast(1f)).coerceIn(0f, 1f)
+        val nv = minV + t * (maxV - minV)
+        val actual = getActual(v)
+        when (actual) {
             is Int -> trySet(v, nv.roundToInt())
             is Long -> trySet(v, nv.toLong())
-            is Number -> trySet(v, nv)
+            is Double -> trySet(v, nv.toDouble())
             else -> trySet(v, nv)
         }
     }
 
-    private fun readColor4b(actual: Any?): Color4b {
-        if (actual == null) return colAccent
-        return try {
-            when (actual) {
-                is Color4b -> actual
-                is Int -> Color4b(actual)
+    /** 安全处理点击：任何异常都不影响后续模块开关 */
+    private fun handleSettingClick(v: Value<*>, x: Float, w: Float, button: Int) {
+        try {
+            val actual = getActual(v)
+            when {
+                actual is Boolean -> {
+                    if (button == 0) trySet(v, !actual)
+                }
+                actual is Number || rangeOf(v) != null -> {
+                    if (button == 0) {
+                        sliderDrag = v
+                        applySlider(v, x + 8f, w - 16f)
+                    }
+                }
+                isColorValue(actual) -> {
+                    // 简单循环 alpha / 略过完整色板
+                    if (button == 0 && actual is Color4b) {
+                        trySet(v, Color4b(actual.r, actual.g, actual.b, if (actual.a > 128) 80 else 255))
+                    }
+                }
+                listChoices(v).isNotEmpty() || actual is Enum<*> -> {
+                    if (button == 0) {
+                        if (!cycleChoice(v)) enumOpen[v] = true
+                    } else if (button == 1) {
+                        enumOpen[v] = !(enumOpen[v] ?: false)
+                    }
+                }
+                isTextLike(v, actual) -> {
+                    if (button == 0) {
+                        if (textEditValue == v) {
+                            trySet(v, textEditBuf)
+                            textEditValue = null
+                        } else {
+                            textEditValue = v
+                            textEditBuf = if (actual is String) actual else choiceLabel(actual).let {
+                                if (it == "-" || it == "Mode") "" else it
+                            }
+                        }
+                    } else if (button == 1) {
+                        textEditValue = null
+                        textEditBuf = ""
+                    }
+                }
                 else -> {
-                    val argb = actual.javaClass.methods.firstOrNull {
-                        (it.name == "argb" || it.name == "getArgb") && it.parameterCount == 0
-                    }?.invoke(actual) as? Int
-                    if (argb != null) Color4b(argb) else colAccent
+                    // 默认当 Mode 尝试切换
+                    if (button == 0) {
+                        if (!cycleChoice(v)) {
+                            if (actual is String) {
+                                textEditValue = v
+                                textEditBuf = actual
+                            } else {
+                                enumOpen[v] = true
+                            }
+                        }
+                    } else if (button == 1) {
+                        enumOpen[v] = !(enumOpen[v] ?: false)
+                    }
                 }
             }
-        } catch (_: Exception) {
-            colAccent
+        } catch (_: Throwable) {
+            // 吞掉异常，避免卡死后续点击
+            sliderDrag = null
         }
     }
 
-    private fun setColorValue(v: Value<*>, c: Color4b) {
-        try {
-            trySet(v, c)
-        } catch (_: Exception) {
-            trySet(v, c.argb)
-        }
-    }
+    private fun listClipTop() = winY + 52f
+    private fun listClipBot() = winY + windowH - 8f
 
-    /* —— Screen —— */
+    // —— Screen ——
     private class RiseGuiScreen : Screen(Component.literal("RiseClickGui")) {
         override fun isPauseScreen() = false
         override fun shouldCloseOnEsc() = false
 
         override fun onClose() {
-            if (ModuleRiseClickgui.enabled) {
-                ModuleRiseClickgui.enabled = false
-            }
+            if (ModuleRiseClickgui.enabled) ModuleRiseClickgui.enabled = false
         }
 
         override fun keyPressed(event: KeyEvent): Boolean {
             val key = event.key()
-            // 文本/方块 ID 编辑优先
-            if (ModuleRiseClickgui.textEditValue != null) {
+            val self = ModuleRiseClickgui
+            if (self.textEditValue != null) {
                 when (key) {
                     GLFW.GLFW_KEY_ESCAPE -> {
-                        ModuleRiseClickgui.textEditValue = null
-                        ModuleRiseClickgui.textEditBuf = ""
-                        return true
+                        self.textEditValue = null; self.textEditBuf = ""; return true
                     }
                     GLFW.GLFW_KEY_ENTER, GLFW.GLFW_KEY_KP_ENTER -> {
-                        ModuleRiseClickgui.commitTextEdit()
-                        return true
+                        self.textEditValue?.let { self.trySet(it, self.textEditBuf) }
+                        self.textEditValue = null; self.textEditBuf = ""; return true
                     }
                     GLFW.GLFW_KEY_BACKSPACE -> {
-                        if (ModuleRiseClickgui.textEditBuf.isNotEmpty()) {
-                            ModuleRiseClickgui.textEditBuf = ModuleRiseClickgui.textEditBuf.dropLast(1)
-                        }
+                        if (self.textEditBuf.isNotEmpty()) self.textEditBuf = self.textEditBuf.dropLast(1)
                         return true
                     }
                 }
                 return true
             }
             if (key == GLFW.GLFW_KEY_ESCAPE) {
-                if (ModuleRiseClickgui.searchFocused) {
-                    ModuleRiseClickgui.searchFocused = false
-                } else {
-                    ModuleRiseClickgui.requestCloseFromEsc()
-                }
+                if (self.searchFocused) self.searchFocused = false
+                else self.enabled = false
                 return true
             }
-            if (ModuleRiseClickgui.searchFocused) {
-                when (key) {
-                    GLFW.GLFW_KEY_BACKSPACE -> {
-                        if (ModuleRiseClickgui.searchText.isNotEmpty()) {
-                            ModuleRiseClickgui.searchText = ModuleRiseClickgui.searchText.dropLast(1)
-                            ModuleRiseClickgui.targetScroll = 0f
-                        }
-                        return true
-                    }
-                    GLFW.GLFW_KEY_ENTER -> {
-                        ModuleRiseClickgui.searchFocused = false
-                        return true
-                    }
+            if (self.searchFocused && key == GLFW.GLFW_KEY_BACKSPACE) {
+                if (self.searchText.isNotEmpty()) {
+                    self.searchText = self.searchText.dropLast(1)
+                    self.targetScroll = 0f
                 }
+                return true
             }
             return true
         }
 
         override fun charTyped(event: CharacterEvent): Boolean {
-            var cp = 0
-            try {
-                cp = event.javaClass.getMethod("codepoint").invoke(event) as? Int ?: 0
-            } catch (_: Exception) {
-                try {
-                    cp = event.javaClass.getMethod("getCodePoint").invoke(event) as? Int ?: 0
-                } catch (_: Exception) {}
-            }
-            if (cp <= 31 || cp == 127) return true
-
-            // 文本/方块 ID 输入
-            if (ModuleRiseClickgui.textEditValue != null) {
-                if (ModuleRiseClickgui.textEditBuf.length < 96) {
-                    ModuleRiseClickgui.textEditBuf += cp.toChar()
-                }
+            val self = ModuleRiseClickgui
+            val ch = try {
+                event.codepoint().toChar()
+            } catch (_: Throwable) {
                 return true
             }
-
-            if (!ModuleRiseClickgui.searchFocused) return true
-            if (ModuleRiseClickgui.searchText.length >= 48) return true
-            ModuleRiseClickgui.searchText += cp.toChar()
-            ModuleRiseClickgui.targetScroll = 0f
+            if (ch.isISOControl()) return true
+            if (self.textEditValue != null) {
+                if (self.textEditBuf.length < 64) self.textEditBuf += ch
+                return true
+            }
+            if (self.searchFocused && self.searchText.length < 48) {
+                self.searchText += ch
+                self.targetScroll = 0f
+            }
             return true
         }
 
-        override fun mouseClicked(event: net.minecraft.client.input.MouseButtonEvent, doubleClick: Boolean): Boolean = true
-        override fun mouseReleased(event: net.minecraft.client.input.MouseButtonEvent): Boolean = true
-        override fun mouseDragged(event: net.minecraft.client.input.MouseButtonEvent, dx: Double, dy: Double): Boolean = true
-        override fun mouseScrolled(mouseX: Double, mouseY: Double, horizontal: Double, vertical: Double): Boolean = true
-    }
+        override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean {
+            ModuleRiseClickgui.onMouse(event.button(), true)
+            return true
+        }
 
-    private fun requestCloseFromEsc() {
-        if (!enabled) return
-        try {
-            mc.execute {
-                enabled = false
-                closeLayer()
-                clearPauseScreens(8)
-            }
-        } catch (_: Throwable) {
-            enabled = false
-            closeLayer()
+        override fun mouseReleased(event: MouseButtonEvent): Boolean {
+            ModuleRiseClickgui.onMouse(event.button(), false)
+            return true
+        }
+
+        override fun mouseDragged(event: MouseButtonEvent, dx: Double, dy: Double): Boolean = true
+        override fun mouseScrolled(mx: Double, my: Double, h: Double, v: Double): Boolean {
+            if (v != 0.0) ModuleRiseClickgui.targetScroll =
+                (ModuleRiseClickgui.targetScroll - v.toFloat() * 22f).coerceAtLeast(0f)
+            return true
         }
     }
 
-    private fun isPauseLike(scn: Any?): Boolean {
-        if (scn == null) return false
-        val n = scn.javaClass.name
-        return n.contains("Pause", true) || n.contains("GameMenu", true)
-    }
-
-    private fun clearPauseScreens(framesLeft: Int) {
-        if (framesLeft <= 0) return
-        try {
-            mc.execute {
-                val scn = try { mc.gui.screen() } catch (_: Throwable) { null }
-                if (isPauseLike(scn)) {
-                    try { mc.gui.setScreen(null) } catch (_: Throwable) {}
-                }
-                if (framesLeft > 1) clearPauseScreens(framesLeft - 1)
-            }
-        } catch (_: Throwable) {}
-    }
-
     private fun openLayer() {
-        if (mc.gui.screen() is RiseGuiScreen) return
-        try { mc.gui.setScreen(RiseGuiScreen()) } catch (_: Throwable) {
-            try { mc.execute { mc.gui.setScreen(RiseGuiScreen()) } } catch (_: Throwable) {}
+        try {
+            if (mc.gui.screen() !is RiseGuiScreen) mc.gui.setScreen(RiseGuiScreen())
+        } catch (_: Throwable) {
+            try {
+                mc.execute { mc.gui.setScreen(RiseGuiScreen()) }
+            } catch (_: Throwable) {
+            }
         }
     }
 
     private fun closeLayer() {
-        if (mc.gui.screen() is RiseGuiScreen) {
-            try { mc.gui.setScreen(null) } catch (_: Throwable) {
-                try { mc.execute { mc.gui.setScreen(null) } } catch (_: Throwable) {}
+        try {
+            if (mc.gui.screen() is RiseGuiScreen) mc.gui.setScreen(null)
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun onMouse(button: Int, pressed: Boolean) {
+        mouseX = guiMX()
+        mouseY = guiMY()
+        if (!pressed) {
+            sliderDrag = null
+            scrollBarDrag = false
+            return
+        }
+        if (scale < 0.4f) return
+
+        // 搜索框
+        val searchX = winX + sidebarW + 6f
+        val searchY = winY + 28f
+        val searchW = windowW - sidebarW - 14f
+        if (button == 0 && over(searchX, searchY, searchW, 16f)) {
+            searchFocused = true
+            textEditValue = null
+            return
+        } else if (button == 0) {
+            searchFocused = false
+        }
+
+        // 分类
+        var cy = winY + 36f
+        for (cat in allCategories()) {
+            if (over(winX + 4f, cy, sidebarW - 8f, 20f)) {
+                if (button == 0) {
+                    selectedCat = cat
+                    expanded = null
+                    targetScroll = 0f
+                    scroll = 0f
+                }
+                return
+            }
+            cy += 22f
+        }
+
+        val mods = if (searchText.isNotBlank()) modulesSearchAll()
+        else modulesIn(selectedCat ?: return)
+        val listX = winX + sidebarW + 6f
+        val listW = windowW - sidebarW - 20f
+        val clipTop = listClipTop()
+        val clipBot = listClipBot()
+        var y = clipTop - scroll
+
+        for (mod in mods) {
+            if (y + moduleRowH > clipTop && y < clipBot) {
+                if (over(listX, y, listW, moduleRowH)) {
+                    when (button) {
+                        0 -> mod.enabled = !mod.enabled
+                        1 -> if (collectValues(mod).isNotEmpty()) {
+                            expanded = if (expanded == mod) null else mod
+                            // 展开时清掉可能坏掉的状态
+                            enumOpen.clear()
+                            textEditValue = null
+                            sliderDrag = null
+                        }
+                    }
+                    return
+                }
+            }
+            y += moduleRowH
+            if (expanded == mod) {
+                for (v in collectValues(mod)) {
+                    if (y + settingRowH > clipTop && y < clipBot) {
+                        if (over(listX, y, listW, settingRowH)) {
+                            handleSettingClick(v, listX, listW, button)
+                            return
+                        }
+                    }
+                    y += settingRowH
+                    if (enumOpen[v] == true) {
+                        for (c in listChoices(v)) {
+                            if (y + settingRowH > clipTop && y < clipBot) {
+                                if (over(listX, y, listW, settingRowH) && button == 0) {
+                                    try {
+                                        trySet(v, c!!)
+                                        enumOpen[v] = false
+                                    } catch (_: Throwable) {
+                                    }
+                                    return
+                                }
+                            }
+                            y += settingRowH
+                        }
+                    }
+                }
             }
         }
     }
@@ -476,29 +586,22 @@ object ModuleRiseClickgui : ClientModule(
         targetScroll = 0f
         scale = 0f
         opacity = 0f
-        winX = -1f
-        searchText = ""
-        searchFocused = false
+        enumOpen.clear()
+        textEditValue = null
         openLayer()
     }
 
     override fun onDisabled() {
         closeLayer()
         sliderDrag = null
-        colorEdit = null
-        alphaDragging = false
-        scrollBarDrag = false
         searchFocused = false
-    }
-
-    @Suppress("unused")
-    private val rotHandler = handler<MouseRotationEvent> { e ->
-        if (enabled || scale > 0.01f) e.cancelEvent()
+        textEditValue = null
+        enumOpen.clear()
     }
 
     @Suppress("unused")
     private val hotbarHandler = handler<MouseScrollInHotbarEvent> { e ->
-        if (enabled || scale > 0.01f) e.cancelEvent()
+        if (enabled || scale > 0.01f) runCatching { e.cancelEvent() }
     }
 
     @Suppress("unused")
@@ -506,763 +609,206 @@ object ModuleRiseClickgui : ClientModule(
         if (!enabled && scale < 0.01f) return@handler
         if (e.keyCode == GLFW.GLFW_KEY_ESCAPE && e.action == 1) {
             if (searchFocused) searchFocused = false
-            else if (enabled) requestCloseFromEsc()
+            else if (textEditValue != null) {
+                textEditValue = null; textEditBuf = ""
+            } else if (enabled) enabled = false
+        }
+    }
+
+    private fun drawSetting(
+        ctx: GuiGraphicsExtractor,
+        font: Font,
+        v: Value<*>,
+        x: Float, y: Float, w: Float, a: Int,
+    ) {
+        val actual = getActual(v)
+        val ty = textMidY(y, settingRowH, font)
+        val name = displayName(v)
+
+        when {
+            actual is Boolean -> {
+                ctx.text(font, name, (x + 8f).roundToInt(), ty, colSecondaryText.alpha(a).argb, false)
+                val mark = if (actual) "ON" else "OFF"
+                val mc = if (actual) colAccent.alpha(a) else colTrinaryText.alpha(a)
+                ctx.text(font, mark, (x + w - 8f - font.width(mark)).roundToInt(), ty, mc.argb, false)
+            }
+            actual is Number || rangeOf(v) != null -> {
+                val fv = (actual as? Number)?.toFloat() ?: 0f
+                val range = rangeOf(v) ?: (0f to 1f)
+                val (minV, maxV) = range
+                val p = ((fv - minV) / (maxV - minV).coerceAtLeast(0.001f)).coerceIn(0f, 1f)
+                ctx.text(font, name, (x + 8f).roundToInt(), ty, colSecondaryText.alpha(a).argb, false)
+                val vs = formatNumber(fv)
+                ctx.text(font, vs, (x + w - 8f - font.width(vs)).roundToInt(), ty, colTrinaryText.alpha(a).argb, false)
+                val barY = y + settingRowH - 4f
+                ctx.drawQuad(x + 8f, barY, x + w - 8f, barY + 2f, Color4b(40, 40, 50, a))
+                ctx.drawQuad(x + 8f, barY, x + 8f + (w - 16f) * p, barY + 2f, colAccent.alpha(a))
+                if (sliderDrag === v) applySlider(v, x + 8f, w - 16f)
+            }
+            isColorValue(actual) -> {
+                ctx.text(font, name, (x + 8f).roundToInt(), ty, colSecondaryText.alpha(a).argb, false)
+                val c = when (actual) {
+                    is Color4b -> actual
+                    is java.awt.Color -> Color4b(actual.red, actual.green, actual.blue, actual.alpha)
+                    else -> colAccent
+                }
+                ctx.drawRoundedRect(x + w - 22f, y + 3f, x + w - 6f, y + settingRowH - 3f, 3f, c.alpha(a))
+            }
+            else -> {
+                ctx.text(font, name, (x + 8f).roundToInt(), ty, colSecondaryText.alpha(a).argb, false)
+                val editing = textEditValue == v
+                val mode = if (editing) {
+                    textEditBuf + if ((System.currentTimeMillis() / 400) % 2L == 0L) "_" else ""
+                } else {
+                    val lab = choiceLabel(actual)
+                    if (lab == "-" || lab.isBlank()) {
+                        if (listChoices(v).isNotEmpty()) "Click" else if (isTextLike(v, actual)) "edit" else "Mode"
+                    } else lab
+                }
+                val mc = if (editing) Color4b(120, 220, 255, a) else colAccent.alpha(a)
+                ctx.text(
+                    font, mode.take(28),
+                    (x + w - 8f - font.width(mode.take(28))).roundToInt(),
+                    ty, mc.argb, false,
+                )
+            }
         }
     }
 
     @Suppress("unused")
-    private val scrollHandler = handler<MouseScrollEvent> { e ->
-        if (!enabled) return@handler
-        val contentX = winX + sidebarW
-        if (over(contentX, winY + 52f, windowW - sidebarW, windowH - 58f)) {
-            targetScroll = (targetScroll - e.vertical.toFloat() * 22f).coerceAtLeast(0f)
-        }
-    }
+    private val renderHandler = handler<OverlayRenderEvent> { event ->
+        if (!enabled && scale < 0.05f) return@handler
 
-    private fun listClipTop() = winY + 52f
-    private fun listClipBot() = winY + windowH - 8f
-    private fun listViewH() = listClipBot() - listClipTop()
+        val now = System.nanoTime()
+        val dt = if (lastNs != 0L) ((now - lastNs) / 1e9f).coerceIn(0.001f, 0.05f) else 0.016f
+        lastNs = now
 
-    @Suppress("unused")
-    private val mouseHandler = handler<MouseButtonEvent> { e ->
-        if (!enabled || scale < 0.05f) return@handler
-        if (mc.gui.screen() !is RiseGuiScreen) openLayer()
         mouseX = guiMX()
         mouseY = guiMY()
+        scale = lerp(scale, if (enabled) 1f else 0f, (dt * animSpeed * 0.12f).coerceIn(0f, 1f))
+        opacity = lerp(opacity, if (enabled) 1f else 0f, (dt * animSpeed * 0.15f).coerceIn(0f, 1f))
+        if (scale < 0.02f) return@handler
 
-        if (e.action == 0) {
-            dragging = false
-            sliderDrag = null
-            alphaDragging = false
-            scrollBarDrag = false
-            return@handler
-        }
-        if (e.action != 1) return@handler
-
-        // 色板
-        colorEdit?.let { cv ->
-            if (e.button == 0) {
-                val cell = 14f
-                val cols = 6
-                val rows = 2
-                val panelW = cols * cell + 8f
-                val panelH = rows * cell + 28f
-                if (over(paletteX, paletteY, panelW, panelH)) {
-                    // alpha 条
-                    val barY = paletteY + rows * cell + 8f
-                    if (over(paletteX + 4f, barY, panelW - 8f, 12f)) {
-                        alphaDragging = true
-                        colorAlpha = (((mouseX - paletteX - 4f) / (panelW - 8f)) * 255f)
-                            .roundToInt().coerceIn(0, 255)
-                        val cur = readColor4b(getActual(cv))
-                        setColorValue(cv, Color4b(cur.r, cur.g, cur.b, colorAlpha))
-                        return@handler
-                    }
-                    val c = ((mouseX - paletteX - 4f) / cell).toInt()
-                    val r = ((mouseY - paletteY - 4f) / cell).toInt()
-                    if (c in 0 until cols && r in 0 until rows) {
-                        val idx = r * cols + c
-                        if (idx in palette.indices) {
-                            val p = palette[idx]
-                            setColorValue(cv, Color4b(p.r, p.g, p.b, colorAlpha))
-                            colorEdit = null
-                        }
-                    }
-                    return@handler
-                }
-                colorEdit = null
-            }
-            return@handler
+        val ctx = event.context
+        val font = mc.font
+        val sw = ctx.guiWidth().toFloat()
+        val sh = ctx.guiHeight().toFloat()
+        if (winX < 0f) {
+            winX = (sw - windowW) / 2f
+            winY = (sh - windowH) / 2f
         }
 
-        // 搜索框
-        val searchX = winX + sidebarW + 8f
-        val searchY = winY + 30f
-        val searchW = windowW - sidebarW - 16f
-        if (e.button == 0 && over(searchX, searchY, searchW, 18f)) {
-            searchFocused = true
-            return@handler
-        } else if (e.button == 0) {
-            searchFocused = false
+        val a = (255 * opacity).toInt().coerceIn(0, 255)
+        if (screenDim) {
+            ctx.drawQuad(0f, 0f, sw, sh, Color4b(0, 0, 0, (screenDimAlpha * opacity).toInt().coerceIn(0, 80)))
         }
 
-        // 标题拖
-        if (e.button == 0 && over(winX, winY, windowW, 28f)) {
-            dragging = true
-            dragOffX = mouseX - winX
-            dragOffY = mouseY - winY
-            return@handler
-        }
+        // 窗体
+        ctx.drawRoundedRect(winX, winY, winX + windowW, winY + windowH, 6f, colBg.alpha(a))
+        ctx.drawQuad(winX, winY, winX + windowW, winY + 26f, colSecondary.alpha(a))
+        // 顶栏标题 Rise
+        ctx.text(font, "Rise", (winX + 12f).roundToInt(), (winY + (26f - font.lineHeight) * 0.5f).roundToInt(), colText.alpha(a).argb, true)
 
-        // 滚动条
-        val barX = winX + windowW - 10f
-        val viewH = listViewH()
-        if (contentH > viewH && e.button == 0 && over(barX, listClipTop(), 6f, viewH)) {
-            scrollBarDrag = true
-            val ratio = ((mouseY - listClipTop()) / viewH).coerceIn(0f, 1f)
-            targetScroll = ratio * max(0f, contentH - viewH)
-            return@handler
-        }
-
-        // 侧边栏分类
-        val cats = allCategories()
+        // 侧边分类
         var cy = winY + 36f
-        for (cat in cats) {
-            if (over(winX + 4f, cy, sidebarW - 8f, 20f)) {
-                if (e.button == 0) {
-                    selectedCat = cat
-                    expanded = null
-                    targetScroll = 0f
-                    scroll = 0f
-                    if (searchText.isNotEmpty()) {
-                        // 保留搜索，也可清空
-                    }
-                }
-                return@handler
+        for (cat in allCategories()) {
+            val sel = cat == selectedCat
+            if (sel) {
+                ctx.drawRoundedRect(winX + 4f, cy, winX + sidebarW - 4f, cy + 18f, 4f, colAccent.alpha((a * 0.35f).toInt()))
             }
+            val tc = if (sel) colText.alpha(a) else colTrinaryText.alpha(a)
+            ctx.text(
+                font, catLabel(cat).take(12),
+                (winX + 10f).roundToInt(),
+                textMidY(cy, 18f, font),
+                tc.argb, false,
+            )
             cy += 22f
         }
 
-        // 模块列表点击
-        val mods = if (searchText.isNotBlank()) modulesSearchAll() else modulesIn(selectedCat ?: return@handler)
+        // 搜索
+        val searchX = winX + sidebarW + 6f
+        val searchY = winY + 28f
+        val searchW = windowW - sidebarW - 14f
+        ctx.drawRoundedRect(searchX, searchY, searchX + searchW, searchY + 16f, 4f, colSecondary.alpha(a))
+        val hint = if (searchText.isEmpty() && !searchFocused) "Search..." else searchText + if (searchFocused && (System.currentTimeMillis() / 400) % 2L == 0L) "_" else ""
+        ctx.text(font, hint.take(40), (searchX + 6f).roundToInt(), textMidY(searchY, 16f, font), colTrinaryText.alpha(a).argb, false)
+
+        // 列表
+        if (selectedCat == null) selectedCat = allCategories().firstOrNull()
+        val mods = if (searchText.isNotBlank()) modulesSearchAll() else modulesIn(selectedCat!!)
         val listX = winX + sidebarW + 6f
         val listW = windowW - sidebarW - 20f
         val clipTop = listClipTop()
         val clipBot = listClipBot()
+
+        // content height
+        var contentH = 0f
+        for (mod in mods) {
+            contentH += moduleRowH
+            if (expanded == mod) {
+                for (v in collectValues(mod)) {
+                    contentH += settingRowH
+                    if (enumOpen[v] == true) contentH += listChoices(v).size * settingRowH
+                }
+            }
+        }
+        val viewH = clipBot - clipTop
+        val maxScroll = (contentH - viewH).coerceAtLeast(0f)
+        targetScroll = targetScroll.coerceIn(0f, maxScroll)
+        scroll = lerp(scroll, targetScroll, (dt * 14f).coerceIn(0f, 1f))
+
         var y = clipTop - scroll
         for (mod in mods) {
             if (y + moduleRowH > clipTop && y < clipBot) {
-                if (over(listX, y, listW, moduleRowH)) {
-                    when (e.button) {
-                        0 -> if (mod.name != name) mod.enabled = !mod.enabled
-                        1 -> if (collectValues(mod).isNotEmpty()) {
-                            expanded = if (expanded == mod) null else mod
-                        }
-                    }
-                    return@handler
+                if (mod.enabled) {
+                    ctx.drawQuad(listX, y, listX + 2f, y + moduleRowH, colAccent.alpha(a))
+                }
+                val mc_ = if (mod.enabled) colText.alpha(a) else colSecondaryText.alpha(a)
+                ctx.text(
+                    font, mod.name.take(22),
+                    (listX + 6f).roundToInt(),
+                    textMidY(y, moduleRowH, font),
+                    mc_.argb, false,
+                )
+                if (collectValues(mod).isNotEmpty()) {
+                    val mark = if (expanded == mod) "-" else "+"
+                    ctx.text(
+                        font, mark,
+                        (listX + listW - 12f).roundToInt(),
+                        textMidY(y, moduleRowH, font),
+                        colTrinaryText.alpha(a).argb, false,
+                    )
                 }
             }
             y += moduleRowH
             if (expanded == mod) {
                 for (v in collectValues(mod)) {
                     if (y + settingRowH > clipTop && y < clipBot) {
-                        if (over(listX, y, listW, settingRowH)) {
-                            handleSettingClick(v, listX, listW, e.button)
-                            return@handler
-                        }
+                        ctx.drawQuad(listX, y, listX + listW, y + settingRowH, Color4b(0, 0, 0, (30 * opacity).toInt()))
+                        drawSetting(ctx, font, v, listX, y, listW, a)
                     }
                     y += settingRowH
                     if (enumOpen[v] == true) {
-                        val actual = getActual(v)
-                        val options: List<Any?> = when {
-                            actual is Enum<*> ->
-                                (actual.javaClass.enumConstants?.toList() ?: emptyList())
-                            else -> {
-                                val names = listOf(
-                                    "getChoices", "choices", "getModes", "modes",
-                                    "getActiveChoices", "getValues", "values", "entries", "options",
-                                )
-                                listFrom(v, names) ?: listFrom(actual, names) ?: emptyList()
-                            }
-                        }
-                        for (c in options) {
-                            if (c == null) continue
+                        val cur = choiceLabel(getActual(v))
+                        for (c in listChoices(v)) {
                             if (y + settingRowH > clipTop && y < clipBot) {
-                                if (over(listX, y, listW, settingRowH) && e.button == 0) {
-                                    trySet(v, c)
-                                    enumOpen[v] = false
-                                    return@handler
+                                val lab = choiceLabel(c)
+                                val sel = lab.equals(cur, true)
+                                if (sel) {
+                                    ctx.drawQuad(listX, y, listX + 2f, y + settingRowH, colAccent.alpha(a))
                                 }
+                                ctx.text(
+                                    font, lab.take(24),
+                                    (listX + 14f).roundToInt(),
+                                    textMidY(y, settingRowH, font),
+                                    colSecondaryText.alpha(a).argb, false,
+                                )
                             }
                             y += settingRowH
                         }
                     }
                 }
-            }
-        }
-    }
-
-    
-    private fun listFrom(obj: Any?, names: List<String>): List<Any?>? {
-        if (obj == null) return null
-        for (name in names) {
-            val m = obj.javaClass.methods.firstOrNull {
-                it.parameterCount == 0 && it.name.equals(name, true)
-            } ?: continue
-            val r = runCatching { m.invoke(obj) }.getOrNull() ?: continue
-            when (r) {
-                is Collection<*> -> if (r.isNotEmpty()) return r.toList()
-                is Array<*> -> if (r.isNotEmpty()) return r.toList()
-            }
-        }
-        return null
-    }
-
-    private fun cycleChoice(v: Value<*>): Boolean {
-        // 优先 Value 自带的 next / cycle（必须真有方法才算成功）
-        for (name in listOf("next", "cycle", "selectNext", "increment", "cycleNext")) {
-            val m = v.javaClass.methods.firstOrNull {
-                it.parameterCount == 0 && it.name.equals(name, true)
-            } ?: continue
-            val before = choiceLabel(getActual(v))
-            runCatching { m.invoke(v) }
-            val after = choiceLabel(getActual(v))
-            if (after != before && after != "-" && after.isNotBlank()) return true
-            // 即使标签相同也可能内部已切（少数实现），仍算成功
-            if (after.isNotBlank() && after != "-") return true
-        }
-
-        val actual = getActual(v)
-        if (actual is Enum<*>) {
-            val constants = actual.javaClass.enumConstants?.toList() ?: return false
-            if (constants.isEmpty()) return false
-            val idx = constants.indexOf(actual).let { if (it < 0) 0 else it }
-            return trySet(v, constants[(idx + 1) % constants.size]!!)
-        }
-
-        val names = listOf(
-            "getChoices", "choices", "getModes", "modes",
-            "getActiveChoices", "getValues", "values", "entries",
-            "getAllChoices", "getOptions", "options",
-        )
-        val choices = listFrom(v, names) ?: listFrom(actual, names)
-        if (choices != null && choices.isNotEmpty()) {
-            // 按标签匹配当前项
-            val curLabel = choiceLabel(actual)
-            var idx = choices.indexOfFirst { choiceLabel(it) == curLabel }
-            if (idx < 0) idx = choices.indexOf(actual)
-            if (idx < 0) idx = 0
-            val next = choices[(idx + 1) % choices.size]!!
-            if (trySet(v, next)) return true
-            // 再用字符串设一次
-            return trySet(v, choiceLabel(next))
-        }
-
-        // NamedChoice / toString 列表失败时：尝试 Value 上的 getChoices 字段
-        runCatching {
-            for (f in v.javaClass.declaredFields) {
-                f.isAccessible = true
-                val fv = f.get(v) ?: continue
-                val list = when (fv) {
-                    is Collection<*> -> fv.toList()
-                    is Array<*> -> fv.toList()
-                    else -> continue
-                }
-                if (list.isEmpty()) continue
-                val curLabel = choiceLabel(actual)
-                var idx = list.indexOfFirst { choiceLabel(it) == curLabel }
-                if (idx < 0) idx = 0
-                val next = list[(idx + 1) % list.size]!!
-                if (trySet(v, next) || trySet(v, choiceLabel(next))) return true
-            }
-        }
-        return false
-    }
-
-    private fun choiceLabel(actual: Any?): String {
-        if (actual == null) return "-"
-        if (actual is Boolean) return if (actual) "On" else "Off"
-        if (actual is Enum<*>) return actual.name
-        if (actual is Number) {
-            val d = actual.toDouble()
-            return if (d == d.toLong().toDouble()) actual.toLong().toString()
-            else String.format("%.2f", d)
-        }
-        runCatching {
-            for (name in listOf("getName", "getChoiceName", "getTag", "getTitle", "getDisplayName")) {
-                val m = actual.javaClass.methods.firstOrNull {
-                    it.parameterCount == 0 && it.name.equals(name, true)
-                } ?: continue
-                val r = m.invoke(actual)
-                if (r is String && r.isNotBlank() && !r.contains("Value[")) {
-                    return r.substringAfterLast('.').take(18)
-                }
-            }
-        }
-        var s = actual.toString()
-        if ('[' in s) s = s.substringBefore('[')
-        s = s.substringAfterLast('.').substringBefore('@').substringBefore('$')
-        return s.ifBlank { "" }.take(24).ifBlank { "-" }
-    }
-
-    private fun isTextLike(v: Value<*>, actual: Any?): Boolean {
-        val sn = v.javaClass.simpleName
-        val an = actual?.javaClass?.simpleName ?: ""
-        if (actual is String) return true
-        if (sn.contains("Text", true) || sn.contains("String", true)) return true
-        if (an.contains("Text", true) || an.contains("String", true)) return true
-        // Block / BlockValue / Registry key text
-        if (sn.contains("Block", true) || an.contains("Block", true)) return true
-        if (sn.contains("Item", true) && !sn.contains("Boolean", true)) {
-            // 部分 Item 选择器以文本 id 形式编辑
-            if (!isChoiceLike(v, actual)) return true
-        }
-        return false
-    }
-
-    private fun beginTextEdit(v: Value<*>) {
-        textEditValue = v
-        searchFocused = false
-        val actual = getActual(v)
-        textEditBuf = when (actual) {
-            is String -> actual
-            null -> ""
-            else -> choiceLabel(actual).let { if (it == "-") "" else it }
-        }
-        // 尝试把当前 Block 的 registry id 读出来
-        if (textEditBuf.isBlank() || textEditBuf == "-") {
-            runCatching {
-                for (n in listOf("getAsString", "asString", "getString", "getId", "getKey", "toId")) {
-                    val m = v.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.equals(n, true) }
-                        ?: actual?.javaClass?.methods?.firstOrNull { it.parameterCount == 0 && it.name.equals(n, true) }
-                    val r = m?.invoke(if (m.declaringClass.isInstance(v)) v else actual) ?: continue
-                    if (r is String && r.isNotBlank()) {
-                        textEditBuf = r
-                        break
-                    }
-                }
-            }
-        }
-    }
-
-    private fun commitTextEdit() {
-        val v = textEditValue ?: return
-        val s = textEditBuf.trim()
-        // Block / Text 优先 setByString
-        if (!trySet(v, s)) {
-            runCatching {
-                v.javaClass.methods.firstOrNull {
-                    it.parameterCount == 1 && (
-                        it.name.equals("setByString", true) ||
-                            it.name.equals("setAsString", true) ||
-                            it.name.equals("set", true)
-                        )
-                }?.invoke(v, s)
-            }
-        }
-        textEditValue = null
-        textEditBuf = ""
-    }
-
-    private fun handleSettingClick(v: Value<*>, x: Float, w: Float, button: Int) {
-        val actual = getActual(v)
-
-        // 文本 / 方块 ID：左键进入输入，右键清空不折叠
-        if (isTextLike(v, actual)) {
-            if (button == 0) {
-                if (textEditValue == v) {
-                    commitTextEdit()
-                } else {
-                    beginTextEdit(v)
-                }
-            } else if (button == 1) {
-                // 右键：若正在编辑则取消，否则开始编辑
-                if (textEditValue == v) {
-                    textEditValue = null
-                    textEditBuf = ""
-                } else {
-                    beginTextEdit(v)
-                }
-            }
-            return
-        }
-
-        if (button == 1) {
-            // 右键：仅对 Choice/Enum 展开列表，不误伤其它类型
-            if (actual is Enum<*> || isChoiceLike(v, actual)) {
-                enumOpen[v] = !(enumOpen[v] ?: false)
-            }
-            return
-        }
-        if (button != 0) return
-
-        // 点击其它项时结束文本编辑
-        if (textEditValue != null && textEditValue != v) {
-            commitTextEdit()
-        }
-
-        when {
-            actual is Boolean -> {
-                if (!trySet(v, !actual)) {
-                    runCatching {
-                        v.javaClass.methods.firstOrNull { it.name == "toggle" && it.parameterCount == 0 }?.invoke(v)
-                    }
-                }
-            }
-            actual is Number -> {
-                val range = rangeOf(v)
-                if (range != null) {
-                    sliderDrag = v
-                    applySliderValue(v, x + w * 0.38f, x + w - 10f)
-                }
-            }
-            actual != null && actual.javaClass.simpleName.contains("Color", true) -> {
-                colorEdit = if (colorEdit == v) null else v
-                colorAlpha = readColor4b(actual).a
-                paletteX = (x + w - 6 * 14f - 8f).coerceAtLeast(4f)
-                paletteY = (mouseY + 8f)
-            }
-            // 枚举 / Choice / Mode：左键切换，失败则展开列表（不反复折叠）
-            actual is Enum<*> || isChoiceLike(v, actual) -> {
-                if (!cycleChoice(v)) {
-                    // 展开下拉，而不是 toggle 导致「点一下就收」
-                    enumOpen[v] = true
-                }
-            }
-            else -> {
-                // 未知类型：尝试当文本编辑（Block id 等）
-                if (isTextLike(v, actual) || choiceLabel(actual) == "-") {
-                    beginTextEdit(v)
-                } else if (!cycleChoice(v)) {
-                    beginTextEdit(v)
-                }
-            }
-        }
-    }
-
-    private fun isChoiceLike(v: Value<*>, actual: Any?): Boolean {
-        val sn = v.javaClass.simpleName
-        // 文本 / 方块 ID 不当作 Choice
-        if (sn.contains("Text", true) || sn.contains("String", true) || sn.contains("Block", true)) return false
-        if (actual is String) return false
-        if (sn.contains("Choice", true) || sn.contains("Mode", true) || sn.contains("Select", true)) return true
-        if (actual != null) {
-            val an = actual.javaClass.simpleName
-            if (an.contains("Block", true) || an.contains("Text", true)) return false
-            if (an.contains("Choice", true) || an.contains("Mode", true) || actual is Enum<*>) return true
-        }
-        val names = listOf("getChoices", "choices", "getModes", "modes", "getActiveChoices")
-        val list = listFrom(v, names) ?: listFrom(actual, names)
-        // 列表过长（如全方块）不当模式切换
-        if (list != null && list.size in 2..32) return true
-        return false
-    }
-
-    @Suppress("unused")
-    private val renderHandler = handler<OverlayRenderEvent> { event ->
-        val ctx = event.context
-        val font = mc.font
-        val now = System.nanoTime()
-        val dt = if (lastNs != 0L) ((now - lastNs) / 1e9f).coerceIn(0.001f, 0.05f) else 0.016f
-        lastNs = now
-
-        val open = enabled
-        val speed = if (open) (1000f / animMs) else (1000f / (animMs * 0.35f))
-        scale = (scale + (if (open) 1f else 0f - scale) * (dt * speed).coerceIn(0f, 1f)).coerceIn(0f, 1f)
-        val sVis = if (scaleAnim) easeOutExpo(scale) else if (open) 1f else 0f
-        opacity = lerp(opacity, if (open) 1f else 0f, (dt * speed).coerceIn(0f, 1f))
-        if (sVis < 0.01f && !open) return@handler
-
-        mouseX = guiMX()
-        mouseY = guiMY()
-        val sw = ctx.guiWidth().toFloat()
-        val sh = ctx.guiHeight().toFloat()
-        if (winX < 0f) {
-            winX = sw / 2f - windowW / 2f
-            winY = sh / 2f - windowH / 2f
-        }
-        if (dragging) {
-            winX = (mouseX - dragOffX).coerceIn(0f, sw - windowW)
-            winY = (mouseY - dragOffY).coerceIn(0f, sh - windowH)
-        }
-
-        val cats = allCategories()
-        if (selectedCat == null || selectedCat !in cats) {
-            selectedCat = cats.firstOrNull()
-        }
-
-        val mods = if (searchText.isNotBlank()) modulesSearchAll() else modulesIn(selectedCat!!)
-        contentH = 0f
-        for (m in mods) {
-            contentH += moduleRowH
-            if (expanded == m) {
-                for (v in collectValues(m)) {
-                    contentH += settingRowH
-                    if (enumOpen[v] == true) {
-                        val act = getActual(v)
-                        if (act is Enum<*>) contentH += settingRowH * (act.javaClass.enumConstants?.size ?: 0)
-                    }
-                }
-            }
-        }
-        val viewH = listViewH()
-        targetScroll = targetScroll.coerceIn(0f, max(0f, contentH - viewH))
-        scroll += (targetScroll - scroll) * 0.28f
-
-        if (scrollBarDrag && contentH > viewH) {
-            val ratio = ((mouseY - listClipTop()) / viewH).coerceIn(0f, 1f)
-            targetScroll = ratio * max(0f, contentH - viewH)
-        }
-
-        sliderDrag?.let {
-            val listX = winX + sidebarW + 6f
-            val listW = windowW - sidebarW - 20f
-            applySliderValue(it, listX + listW * 0.38f, listX + listW - 10f)
-        }
-
-        if (alphaDragging && colorEdit != null) {
-            val cell = 14f
-            val panelW = 6 * cell + 8f
-            colorAlpha = (((mouseX - paletteX - 4f) / (panelW - 8f)) * 255f).roundToInt().coerceIn(0, 255)
-            val cur = readColor4b(getActual(colorEdit!!))
-            setColorValue(colorEdit!!, Color4b(cur.r, cur.g, cur.b, colorAlpha))
-        }
-
-        val a = (255 * opacity * sVis.coerceAtLeast(0.15f)).roundToInt().coerceIn(0, 255)
-        val cx = winX + windowW / 2f
-        val cy = winY + windowH / 2f
-
-        // 轻遮罩，避免偶发整屏灰黑（过高 alpha / 异常 opacity）
-        if (screenDim && sw > 1f && sh > 1f) {
-            val dimA = (screenDimAlpha * opacity.coerceIn(0f, 1f)).roundToInt().coerceIn(0, 60)
-            if (dimA > 0) ctx.drawQuad(0f, 0f, sw, sh, Color4b(0, 0, 0, dimA))
-        }
-
-        ctx.pose().withPush {
-            if (scaleAnim && sVis < 0.999f) {
-                translate(cx, cy)
-                scale(sVis, sVis)
-                translate(-cx, -cy)
-            }
-
-            if (shadow && sVis > 0.7f) {
-                for (i in 1..5) {
-                    val e = i * 2.2f
-                    val sa = (12 * opacity * (1f - i / 6f)).roundToInt()
-                    ctx.drawRoundedRect(winX - e, winY - e, winX + windowW + e, winY + windowH + e, round + 2f, Color4b(0, 0, 0, sa))
-                }
-            }
-
-            ctx.drawRoundedRect(winX, winY, winX + windowW, winY + windowH, round, colBg.alpha(a))
-            ctx.drawRoundedRect(winX, winY, winX + sidebarW, winY + windowH, round, colSecondary.alpha(a))
-            ctx.drawQuad(winX + sidebarW - 8f, winY, winX + sidebarW, winY + windowH, colSecondary.alpha(a))
-
-            ctx.text(font, "Rise", (winX + 12f).roundToInt(), (winY + 10f).roundToInt(), colText.alpha(a).argb, true)
-
-            // 侧边栏分类（分组）
-            var catY = winY + 36f
-            for (cat in cats) {
-                val sel = cat == selectedCat && searchText.isBlank()
-                if (sel) {
-                    ctx.drawRoundedRect(winX + 4f, catY - 1f, winX + sidebarW - 4f, catY + 19f, 4f, colAccent.alpha((a * 0.35f).toInt()))
-                }
-                if (over(winX + 4f, catY, sidebarW - 8f, 20f)) {
-                    ctx.drawRoundedRect(winX + 4f, catY - 1f, winX + sidebarW - 4f, catY + 19f, 4f, colOverlay.alpha((a * 0.5f).toInt()))
-                }
-                val tc = if (sel) colAccent.alpha(a) else colTrinaryText.alpha(a)
-                val label = catLabel(cat)
-                val shown = if (font.width(label) > sidebarW - 20) label.take(6) + "…" else label
-                ctx.text(font, shown, (winX + 12f).roundToInt(), (catY + 4f).roundToInt(), tc.argb, false)
-                catY += 22f
-            }
-
-            // 搜索框
-            val searchX = winX + sidebarW + 8f
-            val searchY = winY + 30f
-            val searchW = windowW - sidebarW - 16f
-            ctx.drawRoundedRect(searchX, searchY, searchX + searchW, searchY + 18f, 4f, colSecondary.alpha(a))
-            if (searchFocused) {
-                ctx.drawRoundedRect(searchX, searchY, searchX + searchW, searchY + 18f, 4f, colAccent.alpha((a * 0.25f).toInt()))
-            }
-            val hint = if (searchText.isEmpty() && !searchFocused) "Search..." else searchText
-            val sc = if (searchText.isEmpty() && !searchFocused) colTrinaryText.alpha(a) else colSecondaryText.alpha(a)
-            ctx.text(font, hint, (searchX + 6f).roundToInt(), (searchY + 5f).roundToInt(), sc.argb, false)
-
-            // 模块列表
-            val listX = winX + sidebarW + 6f
-            val listW = windowW - sidebarW - 20f
-            val clipTop = listClipTop()
-            val clipBot = listClipBot()
-            var y = clipTop - scroll
-
-            for (mod in mods) {
-                val rowBot = y + moduleRowH
-                if (rowBot > clipTop && y < clipBot) {
-                    val y1 = max(y, clipTop)
-                    val y2 = min(rowBot, clipBot)
-                    if (mod.enabled) {
-                        ctx.drawQuad(listX, y1, listX + listW, y2, colAccent.alpha((a * 0.18f).toInt()))
-                    }
-                    if (over(listX, y1, listW, y2 - y1)) {
-                        ctx.drawQuad(listX, y1, listX + listW, y2, colOverlay.alpha(a))
-                    }
-                    val ty = y + moduleRowH / 2f - 4f
-                    if (ty >= clipTop && ty + 9f <= clipBot) {
-                        val mc_ = if (mod.enabled) colText.alpha(a) else colSecondaryText.alpha(a)
-                        val nameShow = if (searchText.isNotBlank()) "${mod.name}  [${catLabel(mod.category)}]" else mod.name
-                        ctx.text(font, nameShow, (listX + 6f).roundToInt(), ty.roundToInt(), mc_.argb, false)
-                        if (collectValues(mod).isNotEmpty()) {
-                            val mark = if (expanded == mod) "▾" else "▸"
-                            ctx.text(font, mark, (listX + listW - 12f).roundToInt(), ty.roundToInt(), colTrinaryText.alpha(a).argb, false)
-                        }
-                    }
-                }
-                y += moduleRowH
-
-                if (expanded == mod) {
-                    for (v in collectValues(mod)) {
-                        if (y + settingRowH > clipTop && y < clipBot) {
-                            drawSetting(ctx, font, v, listX, y, listW, a, clipTop, clipBot)
-                        }
-                        y += settingRowH
-                        if (enumOpen[v] == true) {
-                            val act = getActual(v)
-                            if (act is Enum<*>) {
-                                for (c in act.javaClass.enumConstants ?: emptyArray()) {
-                                    if (y + settingRowH > clipTop && y < clipBot) {
-                                        val y1 = max(y, clipTop)
-                                        val y2 = min(y + settingRowH, clipBot)
-                                        ctx.drawQuad(listX, y1, listX + listW, y2, colSecondary.alpha((a * 0.6f).toInt()))
-                                        if (c == act) ctx.drawQuad(listX, y1, listX + 2f, y2, colAccent.alpha(a))
-                                        val ty = y + settingRowH / 2f - 4f
-                                        if (ty >= clipTop && ty + 9f <= clipBot) {
-                                            ctx.text(font, c.name, (listX + 14f).roundToInt(), ty.roundToInt(), colSecondaryText.alpha(a).argb, false)
-                                        }
-                                    }
-                                    y += settingRowH
-                                }
-                            }
-                        }
-                    }
-                }
-                if (y > clipBot + 40f) break
-            }
-
-            // 顶底遮罩
-            ctx.drawQuad(winX + sidebarW, winY, winX + windowW, clipTop, colBg.alpha(a))
-            ctx.drawQuad(winX + sidebarW, clipBot, winX + windowW, winY + windowH, colBg.alpha(a))
-            // 重画搜索区在遮罩上
-            ctx.drawRoundedRect(searchX, searchY, searchX + searchW, searchY + 18f, 4f, colSecondary.alpha(a))
-            if (searchFocused) {
-                ctx.drawRoundedRect(searchX, searchY, searchX + searchW, searchY + 18f, 4f, colAccent.alpha((a * 0.25f).toInt()))
-            }
-            ctx.text(font, hint, (searchX + 6f).roundToInt(), (searchY + 5f).roundToInt(), sc.argb, false)
-
-            // 滚动条
-            if (contentH > viewH + 1f) {
-                val barX = winX + windowW - 10f
-                val trackH = viewH
-                val thumbH = max(20f, trackH * (viewH / contentH))
-                val maxOff = contentH - viewH
-                val thumbY = clipTop + (scroll / maxOff.coerceAtLeast(0.001f)) * (trackH - thumbH)
-                ctx.drawRoundedRect(barX, clipTop, barX + 5f, clipBot, 2f, Color4b(40, 42, 50, a))
-                ctx.drawRoundedRect(barX, thumbY, barX + 5f, thumbY + thumbH, 2f, colAccent.alpha((a * 0.85f).toInt()))
-            }
-
-            // 色板 + alpha
-            colorEdit?.let {
-                val cell = 14f
-                val cols = 6
-                val rows = 2
-                val pw = cols * cell + 8f
-                val ph = rows * cell + 28f
-                ctx.drawRoundedRect(paletteX, paletteY, paletteX + pw, paletteY + ph, 4f, colSecondary.alpha(a))
-                for (i in palette.indices) {
-                    val c = i % cols
-                    val r = i / cols
-                    if (r >= rows) break
-                    ctx.drawRoundedRect(
-                        paletteX + 4 + c * cell, paletteY + 4 + r * cell,
-                        paletteX + 4 + c * cell + cell - 2, paletteY + 4 + r * cell + cell - 2,
-                        3f, palette[i].alpha(a),
-                    )
-                }
-                val barY = paletteY + rows * cell + 8f
-                ctx.drawQuad(paletteX + 4f, barY, paletteX + pw - 4f, barY + 10f, Color4b(30, 30, 35, a))
-                val aw = (pw - 8f) * (colorAlpha / 255f)
-                ctx.drawQuad(paletteX + 4f, barY, paletteX + 4f + aw, barY + 10f, colAccent.alpha(a))
-                ctx.text(
-                    font, "A:$colorAlpha",
-                    (paletteX + 6f).roundToInt(), (barY - 1f).roundToInt(),
-                    colTrinaryText.alpha(a).argb, false,
-                )
-            }
-        }
-    }
-
-    private fun drawSetting(
-        ctx: GuiGraphicsExtractor, font: Font, v: Value<*>,
-        x: Float, y: Float, w: Float, a: Int, clipTop: Float, clipBot: Float,
-    ) {
-        val actual = getActual(v) ?: return
-        val y1 = max(y, clipTop)
-        val y2 = min(y + settingRowH, clipBot)
-        ctx.drawQuad(x, y1, x + w, y2, colSecondary.alpha((a * 0.45f).toInt()))
-        if (over(x, y1, w, y2 - y1)) {
-            ctx.drawQuad(x, y1, x + w, y2, colOverlay.alpha(a))
-        }
-        val ty = y + settingRowH / 2f - 4f
-        if (ty < clipTop || ty + 9f > clipBot) return
-
-        when {
-            actual is Boolean -> {
-                ctx.text(font, displayName(v), (x + 8f).roundToInt(), ty.roundToInt(), colSecondaryText.alpha(a).argb, false)
-                val bx = x + w - 28f
-                ctx.drawRoundedRect(bx, y + 4f, bx + 20f, y + settingRowH - 4f, 4f,
-                    if (actual) colAccent.alpha(a) else Color4b(60, 60, 70, a))
-                val kx = if (actual) bx + 10f else bx + 2f
-                ctx.drawRoundedRect(kx, y + 5f, kx + 8f, y + settingRowH - 5f, 3f, Color4b.WHITE.alpha(a))
-            }
-            actual is Enum<*> -> {
-                ctx.text(font, displayName(v), (x + 8f).roundToInt(), ty.roundToInt(), colSecondaryText.alpha(a).argb, false)
-                val mode = choiceLabel(actual)
-                ctx.text(
-                    font, mode,
-                    (x + w - 8f - font.width(mode)).roundToInt(), ty.roundToInt(),
-                    colAccent.alpha(a).argb, false,
-                )
-            }
-            actual is Number -> {
-                val range = rangeOf(v)
-                ctx.text(font, displayName(v), (x + 8f).roundToInt(), (y + 2f).roundToInt(), colSecondaryText.alpha(a).argb, false)
-                val fv = actual.toFloat()
-                if (range != null) {
-                    val (minV, maxV) = range
-                    val p = ((fv - minV) / (maxV - minV)).coerceIn(0f, 1f)
-                    val sx = x + w * 0.38f
-                    val sw = w * 0.48f
-                    val sy = y + settingRowH - 7f
-                    ctx.drawQuad(sx, sy, sx + sw, sy + 3f, Color4b(50, 50, 60, a))
-                    ctx.drawQuad(sx, sy, sx + sw * p, sy + 3f, colAccent.alpha(a))
-                    // 滑块圆点
-                    val kx = sx + sw * p - 3f
-                    ctx.drawRoundedRect(kx, sy - 2f, kx + 6f, sy + 5f, 3f, Color4b.WHITE.alpha(a))
-                    val vs = if (fv == fv.toInt().toFloat()) fv.toInt().toString()
-                    else String.format("%.2f", fv)
-                    ctx.text(
-                        font, vs,
-                        (sx + sw + 4f).roundToInt().coerceAtMost((x + w - 4).roundToInt()),
-                        (y + 2f).roundToInt(),
-                        colTrinaryText.alpha(a).argb, false,
-                    )
-                } else {
-                    val vs = actual.toString()
-                    ctx.text(font, vs, (x + w - 8f - font.width(vs)).roundToInt(), ty.roundToInt(), colTrinaryText.alpha(a).argb, false)
-                }
-            }
-            actual != null && actual.javaClass.simpleName.contains("Color", true) -> {
-                ctx.text(font, displayName(v), (x + 8f).roundToInt(), ty.roundToInt(), colSecondaryText.alpha(a).argb, false)
-                val col = readColor4b(actual)
-                ctx.drawRoundedRect(x + w - 22f, y + 3f, x + w - 6f, y + settingRowH - 3f, 3f, col.alpha(a))
-            }
-            else -> {
-                ctx.text(font, displayName(v), (x + 8f).roundToInt(), ty.roundToInt(), colSecondaryText.alpha(a).argb, false)
-                val editing = textEditValue == v
-                val mode = if (editing) {
-                    textEditBuf + if ((System.currentTimeMillis() / 500) % 2L == 0L) "_" else ""
-                } else {
-                    val lab = choiceLabel(actual)
-                    if (lab == "-" || lab.isBlank()) {
-                        // Block / 文本空值提示
-                        if (isTextLike(v, actual)) "click to edit" else "-"
-                    } else lab
-                }
-                val mc = if (editing) Color4b(120, 220, 255, a) else colAccent.alpha(a)
-                ctx.text(
-                    font, mode.take(28),
-                    (x + w - 8f - font.width(mode.take(28))).roundToInt(), ty.roundToInt(),
-                    mc.argb, false,
-                )
             }
         }
     }
