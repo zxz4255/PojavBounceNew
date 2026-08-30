@@ -927,8 +927,55 @@ object ModuleLiquidClickgui : ClientModule(
     }
 
     private fun toggleModule(m: ClientModule) {
-        modOpen[m] = !(modOpen[m] == true)
+        val opening = !(modOpen[m] == true)
+        modOpen[m] = opening
         saveModuleOpen()
+        if (opening) ensureModuleVisible(m, includeSettings = true)
+    }
+
+    /**
+     * 展开靠近底部的模块时，自动滚动让子项完全进入可视区，避免被裁切且滑不到。
+     */
+    private fun ensureModuleVisible(m: ClientModule, includeSettings: Boolean) {
+        for (p in panels) {
+            if (!p.modules.contains(m)) continue
+            p.expanded = true
+            p.extAnim = 1f
+            p.z = ++maxZ
+
+            var y = 0f
+            var contentH = 0f
+            for (mm in p.modules) {
+                contentH += ROW_H
+                val open = modOpen[mm] == true || (mm === m && includeSettings)
+                if (open) contentH += settingsHeight(mm)
+            }
+            for (mm in p.modules) {
+                if (mm === m) {
+                    val setH = if (includeSettings || modOpen[m] == true) settingsHeight(m) else 0f
+                    val top = y
+                    val bot = y + ROW_H + setH
+                    val viewH = panelMaxHeight
+                    var scroll = p.scrollTarget
+                    // 子项底部超出 → 向下滚
+                    if (bot > scroll + viewH - 4f) {
+                        scroll = bot - viewH + 12f
+                    }
+                    // 模块顶部在视口上方 → 向上滚
+                    if (top < scroll + 4f) {
+                        scroll = top - 4f
+                    }
+                    val maxScroll = (contentH - viewH).coerceAtLeast(0f)
+                    p.contentH = contentH
+                    p.scrollTarget = scroll.coerceIn(0f, maxScroll)
+                    // 立即贴一点，减少“滑不到”的感觉
+                    p.scroll = p.scroll + (p.scrollTarget - p.scroll) * 0.85f
+                    return
+                }
+                y += ROW_H
+                if (modOpen[mm] == true) y += settingsHeight(mm)
+            }
+        }
     }
 
     private fun toggleGroup(v: Value<*>) {
@@ -1318,20 +1365,33 @@ object ModuleLiquidClickgui : ClientModule(
     private fun locateModule(m: ClientModule) {
         highlightMod = m
         highlightAnim = 1f
+        searchQuery = ""
+        searchResults = emptyList()
+        searchFocus = false
         for (p in panels) {
-            if (p.modules.contains(m)) {
-                p.z = ++maxZ
-                p.expanded = true
-
-                var y = 0f
-                for (mm in p.modules) {
-                    if (mm === m) break
-                    y += ROW_H + quintOut(modOpenAnim.getOrDefault(mm, 0f)) * settingsHeight(mm)
+            if (!p.modules.contains(m)) continue
+            p.z = ++maxZ
+            p.expanded = true
+            p.extAnim = 1f
+            // 计算目标模块在内容中的偏移（按当前展开状态）
+            var y = 0f
+            var contentH = 0f
+            for (mm in p.modules) {
+                contentH += ROW_H
+                if (modOpen[mm] == true) contentH += settingsHeight(mm)
+            }
+            for (mm in p.modules) {
+                if (mm === m) {
+                    val maxScroll = (contentH - panelMaxHeight).coerceAtLeast(0f)
+                    // 滚到模块大致居中
+                    p.contentH = contentH
+                    p.scrollTarget = (y - panelMaxHeight * 0.35f).coerceIn(0f, maxScroll)
+                    p.scroll = p.scrollTarget
+                    saveLayout()
+                    return
                 }
-                val maxScroll = (p.contentH - panelMaxHeight).coerceAtLeast(0f)
-                p.scrollTarget = (y - panelMaxHeight / 2f).coerceIn(0f, maxScroll)
-                saveLayout()
-                break
+                y += ROW_H
+                if (modOpen[mm] == true) y += settingsHeight(mm)
             }
         }
     }
@@ -1760,12 +1820,31 @@ object ModuleLiquidClickgui : ClientModule(
         val m = highlightMod ?: return
         if (highlightAnim <= 0.01f) return
         val r = rowRects[m] ?: return
-        val a = (255 * highlightAnim * uiAlpha).toInt()
+        // rowRects 是布局坐标 → 转屏幕坐标（随 Scale）
+        val panel = panels.firstOrNull { it.modules.contains(m) }
+        val s = scale.coerceIn(0.5f, 2f)
+        val x1: Float
+        val y1: Float
+        val rw: Float
+        val rh: Float
+        if (panel != null) {
+            x1 = panel.x + (r[0] - panel.x) * s
+            y1 = panel.y + (r[1] - panel.y) * s
+            rw = r[2] * s
+            rh = r[3] * s
+        } else {
+            x1 = r[0]
+            y1 = r[1]
+            rw = r[2]
+            rh = r[3]
+        }
+        val a = (255 * highlightAnim * uiAlpha).toInt().coerceIn(0, 255)
         val b = alpha(accentColor, a)
-        ctx.drawQuad(r[0], r[1], r[0] + r[2], r[1] + 2f, b)
-        ctx.drawQuad(r[0], r[1] + r[3] - 2f, r[0] + r[2], r[1] + r[3], b)
-        ctx.drawQuad(r[0], r[1], r[0] + 2f, r[1] + r[3], b)
-        ctx.drawQuad(r[0] + r[2] - 2f, r[1], r[0] + r[2], r[1] + r[3], b)
+        val t = (2f * s).coerceAtLeast(1.5f)
+        ctx.drawQuad(x1, y1, x1 + rw, y1 + t, b)
+        ctx.drawQuad(x1, y1 + rh - t, x1 + rw, y1 + rh, b)
+        ctx.drawQuad(x1, y1, x1 + t, y1 + rh, b)
+        ctx.drawQuad(x1 + rw - t, y1, x1 + rw, y1 + rh, b)
     }
 
 
