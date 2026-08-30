@@ -109,8 +109,9 @@ object ModuleSolsticeNotification : ClientModule(
         val duration: Float = 3f,
     ) {
         var timeShown = 0f
-        /** 0→1 入场，关闭时 1→0（仅水平滑出，不带动其他通知乱跳） */
-        var slide = 0f
+        /** 0→1 入场，关闭时 1→0（仅水平滑出，不带动其他通知乱跳）
+         *  初始给一点 slide，避免入场前半段辉光完全不可见 */
+        var slide = 0.35f
         var isTimeUp = false
         /** 堆叠目标 Y（底部基准坐标，每条独立平滑） */
         var targetY = 0f
@@ -342,9 +343,9 @@ object ModuleSolsticeNotification : ClientModule(
             val gauss = kotlin.math.exp(-(u * u) * (2.8f / soft)).toFloat()
             val core = 1f + inner * (1f - u)
             val fall = (gauss * core).coerceIn(0f, 1.6f)
-            val a = (fall * strength * pulse * aScale * 165f * alphaMul)
+            val a = (fall * strength * pulse * aScale * 200f * alphaMul)
                 .toInt()
-                .coerceIn(0, 180)
+                .coerceIn(0, 220)
             if (a < 2) continue
 
             // layer color: solid base, or lerp base→base2 by radius (outer uses base2)
@@ -475,6 +476,8 @@ object ModuleSolsticeNotification : ClientModule(
                 Type.INFO -> Unit
             }
             val aMul = n.slide
+            // 辉光：所有通知在显示期间都满辉光；仅关闭退场时随 slide 淡出
+            val glowMul = if (n.isTimeUp) aMul.coerceIn(0f, 1f) else 1f
             val cLeft = theme.alpha((220 * aMul).toInt().coerceIn(0, 255))
             val cRight = getThemedColor(boxTop * 2f + boxW * 1.2f)
                 .alpha((200 * aMul).toInt().coerceIn(0, 255))
@@ -492,7 +495,7 @@ object ModuleSolsticeNotification : ClientModule(
                 )
                 GlowColorMode.GRADIENT -> Triple(glowColor, glowColor2, true)
             }
-            drawGlow(ctx, x, boxTop, x + boxW, boxBottom, g1, g2, aMul, gGrad)
+            drawGlow(ctx, x, boxTop, x + boxW, boxBottom, g1, g2, glowMul, gGrad)
 
             // 整卡大进度条：底色纯黑；左侧圆角、右侧直角
             val blackBg = Color4b(0, 0, 0, (240 * aMul).toInt().coerceIn(0, 255))
