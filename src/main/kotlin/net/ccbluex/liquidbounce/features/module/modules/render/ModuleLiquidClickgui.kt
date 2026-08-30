@@ -46,7 +46,6 @@ object ModuleLiquidClickgui : ClientModule(
     ModuleCategories.RENDER,
     aliases = listOf("LiquidGui", "LiquidClickGui", "VanillaClickGui"),
     bind = InputConstants.KEY_RSHIFT,
-    disableActivation = true,
 ) {
 
 
@@ -377,7 +376,23 @@ object ModuleLiquidClickgui : ClientModule(
     override fun onEnabled() {
         ensurePanels()
         loadLayout()
-        mc.execute { mc.gui.setScreen(LiquidScreen()) }
+        uiAlpha = 1f
+        lastNs = 0L
+        // 若分类为空也至少画搜索栏/背景，避免“全黑无界面”
+        if (panels.isEmpty()) {
+            panels.add(Panel("Render", 0).also {
+                it.x = 20f; it.y = 20f; it.expanded = true; it.extAnim = 1f
+            })
+        }
+        for (p in panels) {
+            // 默认展开一点，否则 bodyH=0 像没内容
+            if (!p.expanded) {
+                p.expanded = true
+                p.extAnim = 1f
+            }
+        }
+        runCatching { mc.gui.setScreen(LiquidScreen()) }
+        runCatching { mc.execute { mc.gui.setScreen(LiquidScreen()) } }
         super.onEnabled()
     }
 
@@ -1212,20 +1227,26 @@ object ModuleLiquidClickgui : ClientModule(
 
 
     @Suppress("unused")
+    private fun isGuiOpen(): Boolean =
+        enabled || runCatching { mc.gui.screen() is LiquidScreen }.getOrDefault(false)
+
     private val renderHandler = handler<OverlayRenderEvent> { event ->
-        if (!enabled && uiAlpha <= 0.01f) {
+        val open = isGuiOpen()
+        if (!open && uiAlpha <= 0.01f) {
             lastNs = 0L
             return@handler
         }
-        if (!panelsBuilt) ensurePanels()
+        if (!panelsBuilt || panels.isEmpty()) ensurePanels()
 
         val now = System.nanoTime()
         val dt = if (lastNs != 0L) ((now - lastNs) / 1e9f).coerceIn(0.001f, 0.05f) else 0.016f
         lastNs = now
         frameDt = dt
 
-        uiAlpha = if (enabled) (uiAlpha + dt * 1000f / fadeMs).coerceIn(0f, 1f)
-        else (uiAlpha - dt * 1000f / fadeMs).coerceIn(0f, 1f)
+        // 打开时立刻可见，不要等 fade 从 0 爬
+        if (open && uiAlpha < 0.05f) uiAlpha = 1f
+        uiAlpha = if (open) (uiAlpha + dt * 1000f / fadeMs.coerceAtLeast(1)).coerceIn(0f, 1f)
+        else (uiAlpha - dt * 1000f / fadeMs.coerceAtLeast(1)).coerceIn(0f, 1f)
         if (uiAlpha <= 0.01f) return@handler
 
         val ctx = event.context
