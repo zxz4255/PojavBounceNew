@@ -245,6 +245,8 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSessionInfo
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleOpalNameTag
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleChestESP
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleLiquidClickgui
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleMusicVisualizer
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleEntityGlow
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSmoothCamera
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleStorageESP
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleTNTTimer
@@ -665,6 +667,7 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleClickGui,
             ModuleDamageParticles,
             ModuleSolsticeNotification,
+            ModuleMusicVisualizer,
             ModuleParticles,
             ModuleESP,
             ModuleLogoffSpot,
@@ -701,6 +704,7 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleOpalNameTag,
             ModuleSessionInfo,
             ModuleLiquidClickgui,
+            ModuleEntityGlow,
             ModuleNoBob,
             ModuleNoFov,
             ModuleNoHurtCam,
