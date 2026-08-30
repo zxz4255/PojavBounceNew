@@ -1,49 +1,3 @@
-/*
- * ModuleLiquidClickgui —— LiquidBounce 官方 ClickGUI 的纯 Kotlin 复刻版
- * LiquidBounce Nextgen 0.39 兼容 API
- *
- * 原版 ClickGUI 是 Svelte 网页前端(src-theme/src/routes/clickgui/*)经内嵌浏览器渲染的,
- * 本模块不调用任何浏览器/Web 栈, 全部用原生 GuiGraphicsExtractor 绘制还原:
- *
- *  ── 布局 (ClickGui.svelte / Panel.svelte / Module.svelte) ──
- *  · 每个分类一个独立面板: 默认位置 left=20, top=index*50+20, 可拖动, 点击置顶
- *  · 面板 250px 宽 r5, 投影 10px(黑50%), 标题栏黑90% + 底部 2px 强调色边框,
- *    padding 10x15, 左侧分类图标 + 14px 分类名 + 右侧 +/- 展开钮
- *  · 模块体黑80%, 展开高度 0→545 过渡 300ms ease, 2px 滚动条, 平滑滚动
- *  · 模块行: 居中 12px 文字, padding 10, 灰字 / 悬停黑85%+白字 / 启用强调色,
- *    右键展开设置, 右侧 40px 展开箭头区(rotate -90°→0°)
- *  · 设置区: 黑50% 背景 + 左侧 4px 强调色边框, padding 0 11px 0 7px, slide 500ms quintOut
- *
- *  ── 搜索 (Search.svelte) ──
- *  · 顶部居中 y=70, 600px 宽, 圆角 30(有结果时 10), 黑90%, 投影
- *  · 输入框 padding 15x25 16px 字体; 结果: 顶部 2px 强调色边框, 最高 250px,
- *    每行 16px + 别名, 悬停提示 "Right-click to locate"
- *  · 键盘: ↑↓ 选择, Enter 切换, Tab 定位(面板置顶+展开+滚动+2px 强调色描边高亮)
- *
- *  ── 描述气泡 (Description.svelte) ──
- *  · 悬停模块名显示, 右侧空间>300px 则在右侧否则左侧, 偏移 20px,
- *    箭头三角指向模块, 黑90% r5, 12px 文字 padding 10, fly 200ms
- *
- *  ── 网格吸附 (clickgui_store / Panel) ──
- *  · 拖动面板时显示 gridSize 网格(灰 25%), 吸附 gridSize, Shift 临时禁用
- *
- *  ── 设置组件 (setting/*.svelte) ──
- *  · Switch 22x12: 轨道 r4 (关=白45%混黑 / 开=强调色40%混黑), 圆钮 12px (白/强调色)
- *  · Slider (noUiSlider): 轨道 2px 白20%混黑, 填充+圆钮 12px 强调色,
- *    名称+可编辑数值+后缀 一行, 滑条第二行, 整行高 46
- *  · Dropdown: 强调色背景 r3 padding 6x10, "name • value", 展开时上圆角3下0,
- *    选项列表 黑底 强调色边框, 灰字/悬停白/选中强调色
- *  · 嵌套设置: 左侧 2px 强调色边框 + padding-left 7
- *  · 多选: chips (黑30% 底灰字 / 选中=强调色12%底强调色字)
- *  · 文本: 黑36% 底 强调色边框 r3; 颜色: 色块 + HSV 取色器; 按键: 捕获绑定
- *
- *  ── 配色 (colors.scss) ──
- *  · surface=#000 text=#fff dimmed=#d3d3d3 accent=#4677ff
- *  · 黑色 alpha 混合: 90%=229 85%=217 80%=204 70%=178 60%=153 50%=127 36%=92 30%=77
- *  · 背景 overlay = 黑 60%; 网格 = #808080 @ 25%
- *
- *  面板位置/展开/滚动 持久化(java.util.prefs, 纯 JDK 无文件依赖)。
- */
 package net.ccbluex.liquidbounce.features.module.modules.render
 
 import com.mojang.blaze3d.platform.InputConstants
@@ -95,7 +49,7 @@ object ModuleLiquidClickgui : ClientModule(
     disableActivation = true,
 ) {
 
-    // ======================== 设置 (原版 Scale/Snapping 均还原为可调项) ========================
+
 
     private val scale by float("Scale", 1f, 0.5f..2f)
 
@@ -130,7 +84,7 @@ object ModuleLiquidClickgui : ClientModule(
     private val descEnabled by boolean("Descriptions", true)
     private val catIcons by boolean("Category Icons", true)
 
-    /** 原版 color-mix(black N%) 的等价 alpha */
+
     private fun mix(alphaPct: Float, a: Int = 255): Color4b {
         val base = baseColor
         return Color4b(base.r, base.g, base.b, (255 * alphaPct).toInt().coerceIn(0, 255) * a / 255)
@@ -139,31 +93,31 @@ object ModuleLiquidClickgui : ClientModule(
     private fun alpha(c: Color4b, a: Int) =
         Color4b(c.r, c.g, c.b, (c.a * a / 255).coerceIn(0, 255))
 
-    // ======================== 常量 (Svelte 设计稿) ========================
 
-    private val HEADER_H get() = headerPadding * 2f + 17f   // 10*2 + 14px 行高
-    private val ROW_H = 34f                                  // 10*2 + 14 (12px 字体)
-    private val SET_PAD_L = 7f                               // padding: 0 11px 0 7px
+
+    private val HEADER_H get() = headerPadding * 2f + 17f
+    private val ROW_H = 34f
+    private val SET_PAD_L = 7f
     private val SET_PAD_R = 11f
     private val SWITCH_W = 22f
     private val SWITCH_H = 12f
     private val SLIDER_H = 46f
-    private val DROPDOWN_H = 26f                             // 6*2 + 14
-    private val DROPDOWN_OPT_H = 24f                         // 5*2 + 14
+    private val DROPDOWN_H = 26f
+    private val DROPDOWN_OPT_H = 24f
     private val SETTING_ROW_PAD = 7f
     private val DESC_OFFSET = 20f
     private val EXPAND_ZONE_W = 40f
 
-    // 内联取色器
+
     private val PICKER_SB_H = 130f
     private val PICKER_BAR_H = 12f
     private val PICKER_GAP = 8f
     private val PICKER_TOTAL = PICKER_GAP + PICKER_SB_H + PICKER_GAP + PICKER_BAR_H + PICKER_GAP + PICKER_BAR_H
-    private val NESTED_INDENT = 9f                           // 2px 边框 + 7px padding
+    private val NESTED_INDENT = 9f
 
     private val CAT_ORDER = listOf("Combat", "Player", "Movement", "Render", "World", "Misc", "Exploit", "Fun")
 
-    // ======================== 状态 ========================
+
 
     private class Panel(
         val category: String,
@@ -172,11 +126,11 @@ object ModuleLiquidClickgui : ClientModule(
         var x = 20f
         var y = 20f
         var expanded = false
-        var extAnim = 0f          // 0..1 展开动画
-        var scroll = 0f           // 当前滚动 (平滑)
+        var extAnim = 0f
+        var scroll = 0f
         var scrollTarget = 0f
         var z = 0
-        var hoverAnim = 0f        // 头部悬停(预留)
+        var hoverAnim = 0f
         var modules: List<ClientModule> = emptyList()
         var contentH = 0f
     }
@@ -197,7 +151,7 @@ object ModuleLiquidClickgui : ClientModule(
     private val groupOpen = IdentityHashMap<Value<*>, Boolean>()
     private val groupOpenAnim = IdentityHashMap<Value<*>, Float>()
 
-    // 搜索
+
     private var searchQuery = ""
     private var searchFocus = true
     private var searchSelected = 0
@@ -205,23 +159,23 @@ object ModuleLiquidClickgui : ClientModule(
     private var searchResults: List<ClientModule> = emptyList()
     private var searchOpenAnim = 0f
 
-    // 描述气泡
+
     private var descTarget: ClientModule? = null
     private var descAnchorRight = true
     private var descAnim = 0f
 
-    // 定位高亮 (Tab locate)
+
     private var highlightMod: ClientModule? = null
     private var highlightAnim = 0f
 
-    // 拖动/交互中的组件状态
+
     private var sliderDrag: Value<*>? = null
     private var dualWhich = 0
     private val switchAnim = IdentityHashMap<Value<*>, Float>()
     private val sliderRects = IdentityHashMap<Value<*>, FloatArray>()
     private val dropdownOpen = IdentityHashMap<Value<*>, Boolean>()
     private val dropdownAnim = IdentityHashMap<Value<*>, Float>()
-    private var dropdownRect: FloatArray? = null        // 当前展开的下拉框(展开区, 供点击)
+    private var dropdownRect: FloatArray? = null
     private var dropdownOptions = emptyList<Any?>()
     private var dropdownValue: Value<*>? = null
     private var colorOpen: Value<*>? = null
@@ -233,7 +187,7 @@ object ModuleLiquidClickgui : ClientModule(
     private var textBuf = ""
     private var keyListen: Value<*>? = null
 
-    // 悬停行记录(渲染时写入, 点击时读取)
+
     private val rowRects = IdentityHashMap<ClientModule, FloatArray>()
     private val headerRects = HashMap<Panel, FloatArray>()
     private val switchRects = IdentityHashMap<Value<*>, FloatArray>()
@@ -254,7 +208,7 @@ object ModuleLiquidClickgui : ClientModule(
     private var viewH = 0f
     private var uiAlpha = 0f
 
-    // ======================== 值系统 (类型缓存, 同已验证实现) ========================
+
 
     private enum class Kind { GROUP, TOGGLE_GROUP, MODE, CHOICE, MULTI, SLIDER, DUAL, BOOL, COLOR, TEXT, KEY, BIND, OTHER }
 
@@ -418,7 +372,7 @@ object ModuleLiquidClickgui : ClientModule(
         return Triple(h, s, mx)
     }
 
-    // ======================== 生命周期 ========================
+
 
     override fun onEnabled() {
         ensurePanels()
@@ -445,7 +399,7 @@ object ModuleLiquidClickgui : ClientModule(
         enabled = false
     }
 
-    // ======================== 面板构建与持久化 ========================
+
 
     private fun allModules(): List<ClientModule> {
         val raw = runCatching { ModuleManager.getModules() }.getOrNull()
@@ -464,7 +418,7 @@ object ModuleLiquidClickgui : ClientModule(
             val cat = categoryLabel(m)
             byCat.getOrPut(cat) { ArrayList() }.add(m)
         }
-        // 按原版图标顺序排列
+
         val ordered = byCat.entries.sortedBy { (cat, _) ->
             val i = CAT_ORDER.indexOf(cat)
             if (i < 0) CAT_ORDER.size else i
@@ -527,7 +481,7 @@ object ModuleLiquidClickgui : ClientModule(
         runCatching { p.flush() }
     }
 
-    // ======================== 输入入口 ========================
+
 
     private fun guiMX() = (mc.mouseHandler.xpos() * refW() / mc.window.width).toFloat()
     private fun guiMY() = (mc.mouseHandler.ypos() * refH() / mc.window.height).toFloat()
@@ -538,7 +492,7 @@ object ModuleLiquidClickgui : ClientModule(
         if (down) {
             mouseX = guiMX()
             mouseY = guiMY()
-            // 逆缩放
+
             val s = scale
             mouseX = viewW / 2f + (mouseX - viewW / 2f) / s
             mouseY = viewH / 2f + (mouseY - viewH / 2f) / s
@@ -556,18 +510,18 @@ object ModuleLiquidClickgui : ClientModule(
     private fun inRect(r: FloatArray?) =
         r != null && over(r[0], r[1], r[2], r[3])
 
-    // ======================== 交互逻辑 ========================
+
 
     private fun click(button: Int): Boolean {
         val left = button == 0
         val right = button == 1
 
-        // 取色器(最高层)
+
         colorOpen?.let { v ->
             val pr = pickerRect
             if (pr != null && over(pr[0], pr[1], pr[3], pr[4])) {
                 if (left) {
-                    // 通道: SB 面板 / 色相条 / 透明度条
+
                     val sbBottom = pr[1] + pr[5]
                     val hueBottom = sbBottom + PICKER_GAP + PICKER_BAR_H
                     colorDragChannel = when {
@@ -579,13 +533,13 @@ object ModuleLiquidClickgui : ClientModule(
                 }
                 return true
             }
-            // 点击取色器/色块行附近以外 → 关闭(点击继续传递, 同原版内联 pickr)
+
             if (pr == null || !over(pr[0] - pr[3], pr[1] - 30f, pr[3] * 3f, pr[4] + 34f)) {
                 colorOpen = null
             }
         }
 
-        // 下拉选项(次高层)
+
         dropdownValue?.let { dv ->
             val dr = dropdownRect
             if (dr != null && left && over(dr[0], dr[1], dr[2], dr[3])) {
@@ -593,16 +547,16 @@ object ModuleLiquidClickgui : ClientModule(
                 selectOption(dv, dropdownOptions[idx])
                 return true
             }
-            // 点击其它区域关闭
+
             val head = dropdownHeadRects[dv]
             val onHead = head != null && over(head[0], head[1], head[2], head[3])
             dropdownValue = null
             dropdownOpen[dv] = false
-            // 点击触发器本身: 本次仅关闭(避免 openDropdown 立即重新展开)
+
             if (onHead) return true
         }
 
-        // 搜索栏
+
         if (searchEnabled) {
             val sw = searchWidth
             val sx = viewW / 2f - sw / 2f
@@ -611,7 +565,7 @@ object ModuleLiquidClickgui : ClientModule(
             if (over(sx, searchY, sw, 49f + resultsH)) {
                 if (left) {
                     searchFocus = true
-                    // 点击结果行
+
                     if (searchResults.isNotEmpty() && mouseY > searchY + 49f) {
                         val idx = ((mouseY - searchY - 49f - 2f) / 39f + searchScroll / 39f).toInt()
                         if (idx in searchResults.indices) {
@@ -632,7 +586,7 @@ object ModuleLiquidClickgui : ClientModule(
             if (left) searchFocus = false
         }
 
-        // 按键捕获: 点击原按钮 → 取消监听; 其它按键/鼠标键 → 绑定 (原版 mouseButton listener)
+
         keyListen?.let { kl ->
             val kr = keyRects[kl]
             if (kr != null && over(kr[0], kr[1], kr[2], kr[3]) && button == 0) {
@@ -644,13 +598,13 @@ object ModuleLiquidClickgui : ClientModule(
             return true
         }
 
-        // 面板: 按 z 从高到低
+
         val sorted = panels.sortedByDescending { it.z }
         for (p in sorted) {
-            // 标题栏
+
             val hr = headerRects[p]
             if (hr != null && over(hr[0], hr[1], hr[2], hr[3])) {
-                // 展开按钮 (+/-) 区域: 右侧 15px padding + 12px 图标 → 切换而非拖动
+
                 val btnL = p.x + hr[2] - 15f - 12f - 4f
                 val onExpandBtn = mouseX >= btnL
                 if (left && !onExpandBtn) {
@@ -663,7 +617,7 @@ object ModuleLiquidClickgui : ClientModule(
                 }
                 return true
             }
-            // 模块列表区(展开时)
+
             if (p.extAnim > 0.05f) {
                 val bodyY = p.y + HEADER_H + 2f
                 val bodyH = p.extAnim * panelMaxHeight
@@ -675,9 +629,9 @@ object ModuleLiquidClickgui : ClientModule(
         return true
     }
 
-    /** 面板内容点击: 先设置组件 → 模块行 */
+
     private fun handlePanelContent(p: Panel, bodyY: Float, bodyH: Float, left: Boolean, right: Boolean): Boolean {
-        // 1) 组件命中(在模块展开设置区)
+
         for ((v, r) in switchRects) {
             if (inRectRow(r, p) && over(r[0], r[1], r[2], r[3])) {
                 if (left) {
@@ -732,7 +686,7 @@ object ModuleLiquidClickgui : ClientModule(
                         colorOpen = null
                     } else {
                         colorOpen = v
-                        // 打开时从当前颜色初始化 HSV
+
                         val cur = colorOf(v)
                         val (h, s, vv) = rgbToHsv(cur)
                         colorHue[v] = h
@@ -758,7 +712,7 @@ object ModuleLiquidClickgui : ClientModule(
                 return true
             }
         }
-        // 2) 模块行
+
         for ((m, r) in rowRects) {
             if (!samePanel(r, p)) continue
             if (over(r[0], r[1], r[2], r[3])) {
@@ -796,7 +750,7 @@ object ModuleLiquidClickgui : ClientModule(
     }
 
     private fun saveModuleOpen() {
-        // 模块展开状态存内存(同原版 localStorage, 会话级足够)
+
     }
 
     private fun openDropdown(v: Value<*>) {
@@ -845,7 +799,7 @@ object ModuleLiquidClickgui : ClientModule(
         if (vi.isInt) {
             nv = nv.roundToInt().toFloat()
         } else {
-            // noUiSlider step: >100→0.1, ≤0.1→0.0001, ≤1→0.001, 其余 0.01
+
             val step = when {
                 maxV > 100f -> 0.1f
                 maxV <= 0.1f -> 0.0001f
@@ -957,12 +911,12 @@ object ModuleLiquidClickgui : ClientModule(
         val s = scale
         val mx = viewW / 2f + (guiMX() - viewW / 2f) / s
         val my = viewH / 2f + (guiMY() - viewH / 2f) / s
-        // 原版下拉列表在任意滚动时关闭 (on:scroll|capture)
+
         dropdownValue?.let {
             dropdownValue = null
             dropdownOpen[it] = false
         }
-        // 搜索结果滚动
+
         if (searchEnabled && searchResults.isNotEmpty()) {
             val sw = searchWidth
             val sx = viewW / 2f - sw / 2f
@@ -974,7 +928,7 @@ object ModuleLiquidClickgui : ClientModule(
                 return true
             }
         }
-        // 面板体滚动
+
         val sorted = panels.sortedByDescending { it.z }
         for (p in sorted) {
             if (p.extAnim < 0.9f) continue
@@ -990,15 +944,15 @@ object ModuleLiquidClickgui : ClientModule(
     }
 
     private fun saveScroll(p: Panel) {
-        // 防抖: 关闭时统一保存
+
     }
 
-    // ======================== 键盘 ========================
+
 
     internal fun onKeyPressed(key: Int): Boolean {
         if (key == GLFW.GLFW_KEY_LEFT_SHIFT) shiftIgnoreGrid = true
 
-        // 按键绑定捕获 (KEY 存 InputConstants.Key, BIND 存 InputBind)
+
         keyListen?.let { v ->
             val k = if (key == GLFW.GLFW_KEY_ESCAPE) {
                 InputConstants.UNKNOWN
@@ -1010,7 +964,7 @@ object ModuleLiquidClickgui : ClientModule(
             return true
         }
 
-        // 文本编辑
+
         textEdit?.let {
             when (key) {
                 GLFW.GLFW_KEY_ESCAPE -> textEdit = null
@@ -1034,7 +988,7 @@ object ModuleLiquidClickgui : ClientModule(
             }
         }
 
-        // 搜索键盘导航 (原版 Search.svelte: ↓↑ Enter Tab)
+
         if (searchEnabled && searchResults.isNotEmpty()) {
             when (key) {
                 GLFW.GLFW_KEY_DOWN -> {
@@ -1064,11 +1018,11 @@ object ModuleLiquidClickgui : ClientModule(
 
     internal fun onChar(cp: Int): Boolean {
         val ch = runCatching { cp.toChar() }.getOrNull() ?: return true
-        // 按键捕获中不输入字符
+
         if (keyListen != null) return true
         if (textEdit != null) {
             if (!ch.isISOControl() && textBuf.length < 128) {
-                // 数值编辑时仅允许数字/小数点/负号/分隔符
+
                 val numeric = when (info(textEdit!!).kind) {
                     Kind.SLIDER, Kind.DUAL -> true
                     else -> false
@@ -1147,7 +1101,7 @@ object ModuleLiquidClickgui : ClientModule(
         }
     }
 
-    /** Tab / 右键 locate: 面板置顶 + 展开 + 滚动到模块 + 描边高亮 */
+
     private fun locateModule(m: ClientModule) {
         highlightMod = m
         highlightAnim = 1f
@@ -1155,7 +1109,7 @@ object ModuleLiquidClickgui : ClientModule(
             if (p.modules.contains(m)) {
                 p.z = ++maxZ
                 p.expanded = true
-                // 滚动到该模块行
+
                 var y = 0f
                 for (mm in p.modules) {
                     if (mm === m) break
@@ -1169,28 +1123,28 @@ object ModuleLiquidClickgui : ClientModule(
         }
     }
 
-    // ======================== 工具 ========================
 
-    /** quintOut 缓动 (Svelte: svelte/easing) */
+
+
     private fun quintOut(t: Float): Float = 1f - (1f - t).pow(5f)
 
     private fun approach(cur: Float, target: Float, speed: Float): Float =
         cur + (target - cur) * (1f - (0.001f).pow(frameDt * speed)).coerceIn(0f, 1f)
 
-    /** 模块设置区总高度(不绘制, 仅测量) */
+
     private fun settingsHeight(m: ClientModule): Float {
         var h = 0f
         walkValues(childrenOfModule(m), 0, 0f, 0f) { _, _, _, rowH, _ -> h += rowH }
         return h
     }
 
-    /** 模块设置区当前显示高度(随展开动画, quintOut 同 svelte slide) */
+
     private fun settingsHeightNow(m: ClientModule, openF: Float): Float {
         if (openF <= 0.001f) return 0f
         return settingsHeight(m) * quintOut(openF)
     }
 
-    // ======================== Screen ========================
+
 
     private class LiquidScreen : Screen(Component.literal("ClickGUI")) {
         override fun isPauseScreen() = false
@@ -1246,7 +1200,7 @@ object ModuleLiquidClickgui : ClientModule(
         }
     }
 
-    // ======================== 渲染主入口 ========================
+
 
     @Suppress("unused")
     private val renderHandler = handler<OverlayRenderEvent> { event ->
@@ -1271,14 +1225,14 @@ object ModuleLiquidClickgui : ClientModule(
         viewH = ctx.guiHeight().toFloat()
         val s = scale
 
-        // 鼠标(逆缩放到 GUI 逻辑坐标)
+
         mouseX = viewW / 2f + (guiMX() - viewW / 2f) / s
         mouseY = viewH / 2f + (guiMY() - viewH / 2f) / s
 
-        // 更新动画(悬停检测使用上一帧的命中矩形)
+
         updateAnimations(dt)
 
-        // 命中矩形每帧重建
+
         rowRects.clear()
         headerRects.clear()
         switchRects.clear()
@@ -1291,12 +1245,12 @@ object ModuleLiquidClickgui : ClientModule(
         sliderRects.clear()
         descTarget = null
 
-        // 背景变暗 (overlay: black 60%)
+
         if (dimBackground && dimAlpha > 0f) {
             ctx.drawQuad(0f, 0f, viewW, viewH, alpha(Color4b(0, 0, 0, 255), (dimAlpha * 255 * uiAlpha).toInt()))
         }
 
-        // 网格 (拖动时显示)
+
         val dragging = dragPanel != null
 
         ctx.pose().withPush {
@@ -1304,26 +1258,26 @@ object ModuleLiquidClickgui : ClientModule(
             scale(s, s)
             translate(-viewW / 2f, -viewH / 2f)
 
-            // 网格: GUI 逻辑坐标下绘制, 与吸附位置精确对齐
+
             if (dragging && snapEnabled && showGridWhileDrag) {
                 drawGrid(ctx, s)
             }
 
-            // 搜索栏(最顶层 UI 之下)
+
             if (searchEnabled) drawSearch(ctx, font)
 
-            // 面板按 z 升序绘制
+
             for (p in panels.sortedBy { it.z }) {
                 drawPanel(ctx, font, p)
             }
 
-            // 定位高亮描边(最上层)
+
             drawHighlight(ctx)
 
-            // 描述气泡
+
             if (descEnabled) drawDescription(ctx, font)
 
-            // 下拉选项浮层(portal 到 body, 不受面板剪裁, 最顶层)
+
             drawDropdown(ctx, font)
         }
     }
@@ -1337,7 +1291,7 @@ object ModuleLiquidClickgui : ClientModule(
             } else {
                 (p.extAnim - dt * speed).coerceAtLeast(target)
             }
-            // 平滑滚动
+
             p.scroll += (p.scrollTarget - p.scroll) * (1f - (0.05f).pow(dt * 14f)).coerceIn(0f, 1f)
             if (abs(p.scroll - p.scrollTarget) < 0.1f) p.scroll = p.scrollTarget
         }
@@ -1355,7 +1309,7 @@ object ModuleLiquidClickgui : ClientModule(
                 else (hCur - dt * 1000f / hoverAnimMs.coerceAtLeast(1)).coerceAtLeast(0f)
             }
         }
-        // 搜索圆角过渡 + 描述淡入 (原版 has-results 基于 query 非空)
+
         searchOpenAnim = approach(searchOpenAnim, if (searchQuery.isNotEmpty()) 1f else 0f, 12f)
         descAnim = approach(descAnim, if (descTarget != null) 1f else 0f, 18f)
         if (highlightAnim > 0f) highlightAnim = (highlightAnim - dt * 0.5f).coerceAtLeast(0f)
@@ -1369,7 +1323,7 @@ object ModuleLiquidClickgui : ClientModule(
     private fun drawGrid(ctx: GuiGraphicsExtractor, s: Float) {
         val g = gridSize.toFloat().coerceAtLeast(1f)
         val gc = Color4b(0x80, 0x80, 0x80, (255 * 0.25f * uiAlpha).toInt())
-        // GUI 逻辑坐标(已被 pose 缩放): 可见范围 [-half/s, viewW + half/s]
+
         val halfW = viewW / 2f / s
         val halfH = viewH / 2f / s
         var x = (viewW / 2f - halfW - g).coerceAtLeast(0f)
@@ -1384,14 +1338,14 @@ object ModuleLiquidClickgui : ClientModule(
         }
     }
 
-    // ======================== 面板渲染 ========================
+
 
     private fun drawPanel(ctx: GuiGraphicsExtractor, font: Font, p: Panel) {
         val a = (uiAlpha * 255).toInt()
         val w = panelWidth
         val bodyH = p.extAnim * panelMaxHeight
 
-        // 投影 (box-shadow 0 0 10px 黑50%) — 四向渐变带
+
         val sh = Color4b(baseColor.r, baseColor.g, baseColor.b, (255 * 0.5f * uiAlpha).toInt())
         val r = 10f
         for (i in 0 until 6) {
@@ -1406,42 +1360,42 @@ object ModuleLiquidClickgui : ClientModule(
             ctx.drawQuad(p.x + w, p.y, p.x + w + off, p.y + HEADER_H + bodyH, c)
         }
 
-        // 标题栏 (黑90% + 底部 2px 强调色)
+
         ctx.drawRoundedRect(
             p.x, p.y, p.x + w, p.y + HEADER_H + 2f, panelRadius, mix(0.9f, a),
         )
         ctx.drawQuad(p.x, p.y + HEADER_H, p.x + w, p.y + HEADER_H + 2f, mix(0.9f, a))
         ctx.drawQuad(p.x, p.y + HEADER_H, p.x + w, p.y + HEADER_H + 2f, alpha(accentColor, a))
 
-        // 模块体 (黑80%)
+
         if (bodyH > 0.5f) {
             ctx.drawRoundedRect(
                 p.x, p.y + HEADER_H + 2f, p.x + w, p.y + HEADER_H + 2f + bodyH, panelRadius, mix(0.8f, a),
             )
-            // 顶部补直角(与标题栏衔接)
+
             ctx.drawQuad(p.x, p.y + HEADER_H + 2f, p.x + w, p.y + HEADER_H + 8f, mix(0.8f, a))
         }
 
-        // 分类图标 (17x15, 垂直居中)
+
         if (catIcons) {
             drawCategoryIcon(ctx, p.category, p.x + 15f + 8.5f, p.y + HEADER_H / 2f, a)
         }
 
-        // 分类名 (14px, 500) — 图标(17px) + 间距 12px
+
         val nameX = p.x + 15f + (if (catIcons) 17f + 12f else 0f)
         drawText(
             ctx, font, p.category, nameX, p.y + (HEADER_H - 17f) / 2f,
             alpha(textColor, a), 14f,
         )
 
-        // 展开钮 (+/-) 12px: 竖线随展开旋转 90°(高度收缩)
+
         val bx = p.x + w - 15f - 6f
         val by = p.y + HEADER_H / 2f
         val ic = alpha(textColor, a)
         val ext = p.extAnim
-        // 横线
+
         ctx.drawQuad(bx - 6f, by - 1f, bx + 6f, by + 1f, ic)
-        // 竖线 (展开时收缩消失)
+
         if (ext < 0.99f) {
             val hh = (1f - ext).coerceAtLeast(0.08f)
             ctx.drawQuad(bx - hh, by - 6f, bx + hh, by + 6f, alpha(ic, (255 * (1f - ext)).toInt()))
@@ -1449,7 +1403,7 @@ object ModuleLiquidClickgui : ClientModule(
 
         headerRects[p] = floatArrayOf(p.x, p.y, w, HEADER_H + 2f)
 
-        // 模块列表
+
         if (bodyH > 0.5f) {
             drawModuleList(ctx, font, p, bodyH, a)
         }
@@ -1461,7 +1415,7 @@ object ModuleLiquidClickgui : ClientModule(
         val x = p.x
         val w = panelWidth
 
-        // 内容高度
+
         var contentH = 0f
         for (m in p.modules) {
             contentH += ROW_H
@@ -1475,21 +1429,21 @@ object ModuleLiquidClickgui : ClientModule(
             var y = clipTop - p.scroll
             for (m in p.modules) {
                 val openF = modOpenAnim.getOrDefault(m, 0f)
-                // 行(可见剔除)
+
                 if (y + ROW_H > clipTop && y < clipBot) {
                     drawModuleRow(ctx, font, m, x, y, w, a)
                 }
                 rowRects[m] = floatArrayOf(x, y, w, ROW_H, p.index.toFloat())
                 y += ROW_H
 
-                // 设置区
+
                 if (openF > 0.001f) {
                     val setH = settingsHeight(m) * quintOut(openF)
                     if (y + setH > clipTop && y < clipBot) {
-                        // 设置区背景: 黑50% + 左侧 4px 强调色
+
                         ctx.drawQuad(x, y, x + w, y + setH, mix(0.5f, a))
                         ctx.drawQuad(x, y, x + 4f, y + setH, alpha(accentColor, a))
-                        // 剪裁设置内容
+
                         val innerBottom = min(y + setH, clipBot)
                         ctx.scissorStack.withPush(ctx.getBounds(x, y, x + w, innerBottom)) {
                             walkValues(childrenOfModule(m), 0, x + 4f + SET_PAD_L, y) { v, vx, vy, vh, indent ->
@@ -1503,7 +1457,7 @@ object ModuleLiquidClickgui : ClientModule(
                 }
             }
 
-            // 滚动条 (2px, 右缘)
+
             if (scrollbarWidth > 0f && contentH > bodyH) {
                 val thumbH = (bodyH * bodyH / contentH).coerceAtLeast(20f)
                 val track = bodyH - thumbH
@@ -1529,19 +1483,19 @@ object ModuleLiquidClickgui : ClientModule(
         val hoverF = modHoverAnim.getOrDefault(m, 0f)
         val enabled = m.enabled
 
-        // 悬停背景 (黑85%)
+
         if (hoverF > 0.01f) {
             ctx.drawQuad(x, y, x + w, y + ROW_H, mix(0.85f, (a * hoverF).toInt()))
         }
 
-        // 名称 (居中 12px, 超宽截断)
+
         val hasSettings = childrenOfModule(m).isNotEmpty()
         val name = shortenText(font, m.name, w - 8f, 12f)
         val nameW = font.width(name) * (12f / 9f)
         var nx = x + (w - nameW) / 2f
         if (nx < x + 4f) nx = x + 4f
 
-        // 颜色: 灰(未启用) / 白(悬停) / 强调色(启用)
+
         val col = when {
             enabled -> alpha(accentColor, a)
             hoverF > 0.01f -> {
@@ -1558,20 +1512,20 @@ object ModuleLiquidClickgui : ClientModule(
         }
         drawText(ctx, font, name, nx, y + (ROW_H - 14f) / 2f, col, 12f)
 
-        // 展开箭头 (右侧 40px 区, ▼ rotate -90°→0°)
+
         if (hasSettings) {
             val openF = modOpenAnim.getOrDefault(m, 0f)
             val ax = x + w - EXPAND_ZONE_W / 2f - 3f
             val ay = y + ROW_H / 2f
             val c = alpha(textColor, (a * (0.5f + 0.5f * openF)).toInt())
-            // 竖杆 + 斜翼(向下箭头)
+
             ctx.drawQuad(ax - 1f, ay - 4f, ax + 1f, ay + 1f, c)
             ctx.drawQuad(ax - 3f, ay - 2f, ax - 1f, ay, c)
             ctx.drawQuad(ax + 1f, ay - 2f, ax + 3f, ay, c)
             ctx.drawQuad(ax - 3f, ay - 0.5f, ax + 3f, ay + 1f, c)
         }
 
-        // 描述气泡目标检测(悬停行)
+
         if (descEnabled && over(x, y, w, ROW_H)) {
             updateDescTarget(m, x, y, w)
         }
@@ -1582,12 +1536,12 @@ object ModuleLiquidClickgui : ClientModule(
             descTarget = m
             descAnim = 0f
         }
-        // 右侧可视空间 > 300 则气泡在右侧 (GUI 逻辑坐标可视右缘)
+
         val guiRight = viewW / 2f + viewW / (2f * scale)
         descAnchorRight = (guiRight - (x + w)) > 300f
     }
 
-    // ======================== 定位高亮 ========================
+
 
     private fun drawHighlight(ctx: GuiGraphicsExtractor) {
         val m = highlightMod ?: return
@@ -1601,9 +1555,9 @@ object ModuleLiquidClickgui : ClientModule(
         ctx.drawQuad(r[0] + r[2] - 2f, r[1], r[0] + r[2], r[1] + r[3], b)
     }
 
-    // ======================== 描述气泡 ========================
 
-    /** 模块描述 (Value.description 是 Supplier<String?>, 兼容取值) */
+
+
     private fun modDesc(m: ClientModule): String {
         val d: Any? = m.description
         val str = if (d is java.util.function.Supplier<*>) {
@@ -1632,25 +1586,25 @@ object ModuleLiquidClickgui : ClientModule(
         val bh = 34f
         val cy = r[1] + r[3] / 2f
 
-        // fly 动画偏移 (±15)
+
         val slide = 15f * (1f - descAnim)
 
         val bx: Float
         val arrowLeft: Boolean
         if (descAnchorRight) {
             bx = r[0] + r[2] + DESC_OFFSET + slide
-            arrowLeft = true   // 箭头在左侧指向模块
+            arrowLeft = true
         } else {
             bx = r[0] - DESC_OFFSET - bw - slide
             arrowLeft = false
         }
         val by = cy - bh / 2f
 
-        // 气泡
+
         ctx.drawRoundedRect(bx, by, bx + bw, by + bh, 5f, mix(0.9f, a))
         drawText(ctx, font, text, bx + 10f, by + (bh - 14f) / 2f, alpha(textColor, a), size)
 
-        // 箭头 (8px 三角指向模块)
+
         val ac = mix(0.9f, a)
         val ay = cy
         if (arrowLeft) {
@@ -1668,7 +1622,7 @@ object ModuleLiquidClickgui : ClientModule(
         }
     }
 
-    // ======================== 搜索栏 ========================
+
 
     private fun drawSearch(ctx: GuiGraphicsExtractor, font: Font) {
         val a = (uiAlpha * 255).toInt()
@@ -1677,7 +1631,7 @@ object ModuleLiquidClickgui : ClientModule(
         val sy = searchY
         val inputH = 49f
 
-        // 投影
+
         val sh = Color4b(baseColor.r, baseColor.g, baseColor.b, (255 * 0.5f * uiAlpha).toInt())
         for (i in 0 until 4) {
             val f = (i + 1) / 4f
@@ -1693,7 +1647,7 @@ object ModuleLiquidClickgui : ClientModule(
         val r = searchRadius + (10f - searchRadius) * searchOpenAnim
         val resultsH = if (hasResults) min(searchResults.size * 39f, 250f) else if (searchQuery.isNotEmpty()) 39f else 0f
 
-        // 背景
+
         if (resultsH > 0.5f) {
             ctx.drawRoundedRect(sx, sy, sx + sw, sy + inputH + 2f + resultsH, r, mix(0.9f, a))
             ctx.drawQuad(sx + 2f, sy + inputH, sx + sw - 2f, sy + inputH + resultsH + 2f, mix(0.9f, a))
@@ -1701,11 +1655,11 @@ object ModuleLiquidClickgui : ClientModule(
             ctx.drawRoundedRect(sx, sy, sx + sw, sy + inputH, r, mix(0.9f, a))
         }
 
-        // 输入文字 / 占位符
+
         val showText = if (searchQuery.isEmpty()) "Search" else searchQuery
         val col = if (searchQuery.isEmpty()) alpha(dimmedColor, (a * 0.6f).toInt()) else alpha(textColor, a)
         drawText(ctx, font, showText, sx + 25f, sy + (inputH - 19f) / 2f, col, 16f)
-        // 光标(聚焦时闪烁)
+
         if (searchFocus && (System.currentTimeMillis() / 500) % 2 == 0L) {
             val cw = font.width(searchQuery) * (16f / 9f)
             ctx.drawQuad(sx + 25f + cw + 1f, sy + 16f, sx + 25f + cw + 2f, sy + inputH - 16f, alpha(textColor, a))
@@ -1713,12 +1667,12 @@ object ModuleLiquidClickgui : ClientModule(
 
         if (resultsH <= 0.5f) return
 
-        // 顶部 2px 强调色边框
+
         ctx.drawQuad(sx, sy + inputH, sx + sw, sy + inputH + 2f, alpha(accentColor, a))
 
         val listH = resultsH
         ctx.scissorStack.withPush(ctx.getBounds(sx, sy + inputH + 2f, sx + sw, sy + inputH + 2f + listH)) {
-            // 无结果占位行
+
             if (!hasResults && searchQuery.isNotEmpty()) {
                 drawText(
                     ctx, font, "No modules found", sx + 25f, sy + inputH + 2f + 10f,
@@ -1733,13 +1687,13 @@ object ModuleLiquidClickgui : ClientModule(
                     continue
                 }
                 val selected = idx == searchSelected
-                // 选中项 padding-left 10
+
                 val padL = if (selected) 10f else 0f
-                // 名称 (启用=强调色)
+
                 val nameCol = if (m.enabled) alpha(accentColor, a) else alpha(dimmedColor, a)
                 drawText(ctx, font, m.name, sx + 25f + padL, y + (39f - 19f) / 2f, nameCol, 16f)
                 val nameW = font.width(m.name) * (16f / 9f)
-                // 别名
+
                 if (m.aliases.isNotEmpty()) {
                     val alias = "(aka ${m.aliases.joinToString(", ")})"
                     val aw = font.width(alias) * (16f / 9f)
@@ -1748,7 +1702,7 @@ object ModuleLiquidClickgui : ClientModule(
                         drawText(ctx, font, alias, ax, y + (39f - 19f) / 2f, alpha(dimmedColor, (a * 0.6f).toInt()), 16f)
                     }
                 }
-                // 悬停提示 "Right-click to locate"
+
                 if (over(sx, y, sw, 39f)) {
                     val hint = "Right-click to locate"
                     val hw = font.width(hint) * (12f / 9f)
@@ -1759,12 +1713,9 @@ object ModuleLiquidClickgui : ClientModule(
         }
     }
 
-    // ======================== 设置区布局 (setting/*.svelte 还原) ========================
 
-    /**
-     * 设置布局遍历: 从 (originX, originY) 起逐行排列, emit(v, x, y, h, indent), 返回结束 y。
-     * GROUP / TOGGLE_GROUP / MODE 展开时递归子项(嵌套缩进 2px 边框 + 7px padding)。
-     */
+
+
     private fun walkValues(
         values: List<Value<*>>,
         indent: Int,
@@ -1785,7 +1736,7 @@ object ModuleLiquidClickgui : ClientModule(
                         else -> childrenOf(v)
                     }
                     if (children.isNotEmpty()) {
-                        y += 10f // .head.expanded { margin-bottom: 10px }
+                        y += 10f
                         y = walkValues(children, indent + 1, originX + NESTED_INDENT, y, emit)
                     }
                 }
@@ -1794,7 +1745,7 @@ object ModuleLiquidClickgui : ClientModule(
         return y
     }
 
-    /** 各类型设置行高 (与 Svelte 组件 padding/最小高一致) */
+
     private fun settingRowHeight(v: Value<*>, vi: VInfo, indent: Int): Float = when (vi.kind) {
         Kind.BOOL, Kind.TOGGLE_GROUP, Kind.GROUP -> SETTING_ROW_PAD * 2f + 14f
         Kind.SLIDER, Kind.DUAL -> SLIDER_H
@@ -1810,18 +1761,18 @@ object ModuleLiquidClickgui : ClientModule(
         else -> SETTING_ROW_PAD * 2f + 14f
     }
 
-    /** TOGGLE_GROUP 头部开关(第一个 boolean 子项) */
+
     private fun groupHeadSwitch(v: Value<*>): Value<*>? =
         childrenOf(v).firstOrNull { it.valueType == ValueType.BOOLEAN }
 
-    /** TOGGLE_GROUP 展开后的子项(跳过头部开关) */
+
     private fun groupNested(v: Value<*>): List<Value<*>> {
         val all = childrenOf(v)
         val head = groupHeadSwitch(v)
         return if (head != null) all.filter { it !== head } else all
     }
 
-    /** 开关切换: TOGGLE_GROUP 切换其头部 boolean, 普通布尔直接切换 */
+
     private fun toggleSwitch(v: Value<*>) {
         runCatching {
             if (info(v).kind == Kind.TOGGLE_GROUP) {
@@ -1833,7 +1784,7 @@ object ModuleLiquidClickgui : ClientModule(
         }
     }
 
-    /** 多选 chips 换行布局: 返回每行的 (choice, 宽) 列表 */
+
     private fun chipRows(font: Font, v: Value<*>, maxW: Float): List<List<Pair<Any?, Float>>> {
         val vi = info(v)
         val rows = ArrayList<List<Pair<Any?, Float>>>()
@@ -1841,7 +1792,7 @@ object ModuleLiquidClickgui : ClientModule(
         var curW = 0f
         for (c in vi.choices) {
             val label = taggedLabel(c)
-            val cw = strW(font, label, 12f) + 12f // padding 3x6
+            val cw = strW(font, label, 12f) + 12f
             val gap = if (cur.isEmpty()) 0f else 7f
             if (cur.isNotEmpty() && curW + gap + cw > maxW) {
                 rows.add(cur)
@@ -1855,16 +1806,16 @@ object ModuleLiquidClickgui : ClientModule(
         return rows
     }
 
-    /** 多选 chips 容器高度 (padding 7x2 + 行 20 + 行距 7) */
+
     private fun chipsHeight(v: Value<*>, indent: Int): Float {
         val maxW = panelWidth - 22f - NESTED_INDENT * indent - 16f
         val rows = chipRows(mc.font, v, maxW)
         return 14f + rows.size * 20f + (rows.size - 1).coerceAtLeast(0) * 7f
     }
 
-    // ======================== 基础绘制工具 ========================
 
-    /** 按像素字号绘制文本 (MC 字体基准 9px) */
+
+
     private fun drawText(
         ctx: GuiGraphicsExtractor, font: Font, text: String,
         x: Float, y: Float, color: Color4b, size: Float,
@@ -1880,7 +1831,7 @@ object ModuleLiquidClickgui : ClientModule(
 
     private fun strW(font: Font, text: String, size: Float): Float = font.width(text) * (size / 9f)
 
-    /** 数值显示: noUiSlider toFixed(4) 规则(去尾零) */
+
     private fun fmtNum(f: Float, isInt: Boolean): String =
         if (isInt) {
             f.roundToInt().toString()
@@ -1896,7 +1847,7 @@ object ModuleLiquidClickgui : ClientModule(
         (c1.a + (c2.a - c1.a) * t).toInt().coerceIn(0, 255),
     )
 
-    /** color-mix(in srgb, c N%, black) */
+
     private fun mixColor(c: Color4b, pct: Float, a: Int = 255): Color4b = Color4b(
         (c.r * pct).toInt().coerceIn(0, 255),
         (c.g * pct).toInt().coerceIn(0, 255),
@@ -1904,12 +1855,12 @@ object ModuleLiquidClickgui : ClientModule(
         a,
     )
 
-    /** color-mix(in srgb, c N%, transparent) */
+
     private fun alphaFrac(c: Color4b, frac: Float, a: Int): Color4b = Color4b(
         c.r, c.g, c.b, (255f * frac * a / 255f).toInt().coerceIn(0, 255),
     )
 
-    /** 阶梯对角线 */
+
     private fun diag(ctx: GuiGraphicsExtractor, x1: Float, y1: Float, x2: Float, y2: Float, t: Float, c: Color4b) {
         val steps = max(abs(x2 - x1), abs(y2 - y1)).toInt().coerceAtLeast(1)
         for (i in 0 until steps) {
@@ -1923,7 +1874,7 @@ object ModuleLiquidClickgui : ClientModule(
         }
     }
 
-    /** KEY 值存 InputConstants.Key, BIND 值存 InputBind */
+
     private fun keyLabel(v: Value<*>): String = runCatching {
         when (val cur: Any? = v.get()) {
             null -> "None"
@@ -1936,7 +1887,7 @@ object ModuleLiquidClickgui : ClientModule(
         }
     }.getOrDefault("None")
 
-    /** 写入按键: KEY 直接存 Key, BIND 存 InputBind */
+
     private fun setKeyValue(v: Value<*>, k: InputConstants.Key) {
         runCatching {
             when (val cur = v.get()) {
@@ -1946,7 +1897,7 @@ object ModuleLiquidClickgui : ClientModule(
         }
     }
 
-    // ======================== 分类图标 (icon-{category}.svg 矢量近似) ========================
+
 
     private fun drawCategoryIcon(ctx: GuiGraphicsExtractor, category: String, cx: Float, cy: Float, a: Int) {
         val c = alpha(textColor, a)
@@ -1954,54 +1905,54 @@ object ModuleLiquidClickgui : ClientModule(
         val x = cx - 8.5f
         val y = cy - 7.5f
         when (category.lowercase()) {
-            "combat" -> { // 交叉剑
+            "combat" -> {
                 diag(ctx, x + 1f, y + 1f, x + 16f, y + 14f, 1.8f, c)
                 diag(ctx, x + 16f, y + 1f, x + 1f, y + 14f, 1.8f, c)
             }
-            "player" -> { // 人形
+            "player" -> {
                 ctx.drawRoundedRect(x + 5.5f, y, x + 11.5f, y + 5.5f, 2.75f, c)
                 ctx.drawRoundedRect(x + 2f, y + 7.5f, x + 15f, y + 15f, 3.5f, c)
             }
-            "movement" -> { // 双箭头
+            "movement" -> {
                 for (off in 0..1) {
                     val ox = x + 2f + off * 6f
                     diag(ctx, ox, y + 1f, ox + 5f, y + 7.5f, 1.8f, c)
                     diag(ctx, ox, y + 14f, ox + 5f, y + 7.5f, 1.8f, c)
                 }
             }
-            "render" -> { // 眼睛
+            "render" -> {
                 diag(ctx, x + 0.5f, y + 7.5f, x + 8.5f, y + 1.5f, 1.6f, c)
                 diag(ctx, x + 8.5f, y + 1.5f, x + 16.5f, y + 7.5f, 1.6f, c)
                 diag(ctx, x + 0.5f, y + 7.5f, x + 8.5f, y + 13.5f, 1.6f, c)
                 diag(ctx, x + 8.5f, y + 13.5f, x + 16.5f, y + 7.5f, 1.6f, c)
                 ctx.drawRoundedRect(x + 7f, y + 5.5f, x + 10f, y + 9.5f, 1.5f, c)
             }
-            "world" -> { // 地球
+            "world" -> {
                 ctx.drawRoundedRect(x + 1f, y + 0.5f, x + 16f, y + 14.5f, 7f, c)
                 ctx.drawRoundedRect(x + 3f, y + 2.5f, x + 14f, y + 12.5f, 5f, bg)
                 ctx.drawQuad(x + 1.5f, y + 6.5f, x + 15.5f, y + 8.5f, c)
                 ctx.drawQuad(x + 7.5f, y + 1f, x + 9.5f, y + 14f, c)
             }
-            "misc" -> { // 三点
+            "misc" -> {
                 ctx.drawRoundedRect(x + 2f, y + 1f, x + 5.5f, y + 4.5f, 1.75f, c)
                 ctx.drawRoundedRect(x + 6.75f, y + 5.25f, x + 10.25f, y + 8.75f, 1.75f, c)
                 ctx.drawRoundedRect(x + 11.5f, y + 9.5f, x + 15f, y + 13f, 1.75f, c)
             }
-            "exploit" -> { // 闪电
+            "exploit" -> {
                 ctx.drawQuad(x + 9f, y, x + 16f, y + 3f, c)
                 ctx.drawQuad(x + 4f, y + 3.5f, x + 11f, y + 6.5f, c)
                 ctx.drawQuad(x + 6f, y + 6.5f, x + 13f, y + 9.5f, c)
                 ctx.drawQuad(x + 1f, y + 9.5f, x + 8f, y + 12.5f, c)
                 ctx.drawQuad(x + 1f, y + 12.5f, x + 5f, y + 15f, c)
             }
-            "fun" -> { // 笑脸
+            "fun" -> {
                 ctx.drawRoundedRect(x + 0.5f, y, x + 16.5f, y + 15f, 7.5f, c)
                 ctx.drawRoundedRect(x + 2.5f, y + 2f, x + 14.5f, y + 13f, 5.5f, bg)
                 ctx.drawRoundedRect(x + 4.5f, y + 5f, x + 6.5f, y + 7f, 1f, c)
                 ctx.drawRoundedRect(x + 10.5f, y + 5f, x + 12.5f, y + 7f, 1f, c)
                 ctx.drawQuad(x + 5f, y + 9.5f, x + 12f, y + 11f, c)
             }
-            "client" -> { // 显示器
+            "client" -> {
                 ctx.drawRoundedRect(x + 0.5f, y + 1f, x + 16.5f, y + 12f, 2f, c)
                 ctx.drawQuad(x + 7f, y + 12.5f, x + 10f, y + 15f, c)
             }
@@ -2009,7 +1960,7 @@ object ModuleLiquidClickgui : ClientModule(
         }
     }
 
-    // ======================== 设置组件渲染 ========================
+
 
     private fun drawSetting(
         ctx: GuiGraphicsExtractor, font: Font,
@@ -2037,10 +1988,10 @@ object ModuleLiquidClickgui : ClientModule(
         }
     }
 
-    /** Switch.svelte: 22x12 轨道 r4 + 12px 圆钮 */
+
     private fun drawSwitch(ctx: GuiGraphicsExtractor, v: Value<*>, on: Boolean, x: Float, y: Float, a: Int) {
         val cur = switchAnim.getOrDefault(v, if (on) 1f else 0f)
-        val t = approach(cur, if (on) 1f else 0f, 2.5f) // ease 0.4s
+        val t = approach(cur, if (on) 1f else 0f, 2.5f)
         switchAnim[v] = t
         val trackOff = mixColor(textColor, 0.45f, a)
         val trackOn = mixColor(accentColor, 0.4f, a)
@@ -2052,7 +2003,7 @@ object ModuleLiquidClickgui : ClientModule(
         )
     }
 
-    /** BooleanSetting: Switch + 名称 */
+
     private fun drawBoolSetting(
         ctx: GuiGraphicsExtractor, font: Font,
         v: Value<*>, x: Float, y: Float, h: Float, w: Float, p: Panel, a: Int,
@@ -2063,7 +2014,7 @@ object ModuleLiquidClickgui : ClientModule(
         switchRects[v] = floatArrayOf(x, y, w, h, p.index.toFloat())
     }
 
-    /** ConfigurableSetting: 标题 + 展开箭头 */
+
     private fun drawGroupSetting(
         ctx: GuiGraphicsExtractor, font: Font,
         v: Value<*>, x: Float, y: Float, h: Float, w: Float, p: Panel, a: Int,
@@ -2075,7 +2026,7 @@ object ModuleLiquidClickgui : ClientModule(
         groupRects[v] = floatArrayOf(x, y, w, h, p.index.toFloat())
     }
 
-    /** TogglableSetting: 头部 Switch(第一个子项) + 展开箭头 */
+
     private fun drawToggleGroupSetting(
         ctx: GuiGraphicsExtractor, font: Font,
         v: Value<*>, x: Float, y: Float, h: Float, w: Float, p: Panel, a: Int,
@@ -2096,20 +2047,20 @@ object ModuleLiquidClickgui : ClientModule(
         }
     }
 
-    /** Float/Int/Range Setting: 名称 + 可编辑数值 + 后缀 / 轨道滑条 */
+
     private fun drawSliderSetting(
         ctx: GuiGraphicsExtractor, font: Font,
         v: Value<*>, x: Float, y: Float, h: Float, w: Float, p: Panel, a: Int,
     ) {
         val vi = info(v)
         val bounds = vi.range ?: run {
-            // 无范围: 仅显示名称与值
+
             drawText(ctx, font, v.name, x, y + 7f, alpha(textColor, a), 12f)
             return
         }
         val (minV, maxV) = bounds
 
-        // 第一行: 名称(左) + 数值(右) + 后缀
+
         val editing = textEdit == v
         val valueStr = if (editing) textBuf else when (vi.kind) {
             Kind.DUAL -> {
@@ -2126,14 +2077,14 @@ object ModuleLiquidClickgui : ClientModule(
         if (vi.suffix.isNotEmpty()) {
             drawText(ctx, font, vi.suffix, x + w - strW(font, vi.suffix, 12f), y + 7f, alpha(textColor, a), 12f)
         }
-        // 编辑光标
+
         if (editing && (System.currentTimeMillis() / 500) % 2 == 0L) {
             ctx.drawQuad(valueX + valueW + 1f, y + 7f, valueX + valueW + 2f, y + 21f, alpha(textColor, a))
         }
-        // 数值区点击 → 编辑
+
         textRects[v] = floatArrayOf(valueX - 6f, y, valueW + suffixW + 10f, 24f, p.index.toFloat())
 
-        // 第二行: 轨道 (margin 10px, 高 2px, padding-right 10px)
+
         val trackX = x
         val trackW = w - 10f
         val trackY = y + 31f
@@ -2145,7 +2096,7 @@ object ModuleLiquidClickgui : ClientModule(
             val t2 = ((hi - minV) / (maxV - minV)).coerceIn(0f, 1f)
             ctx.drawQuad(trackX, trackY, trackX + trackW, trackY + 2f, trackC)
             ctx.drawQuad(trackX + t1 * trackW, trackY, trackX + t2 * trackW, trackY + 2f, fillC)
-            // 双圆钮
+
             ctx.drawRoundedRect(trackX + t1 * trackW - 6f, trackY - 5f, trackX + t1 * trackW + 6f, trackY + 7f, 6f, fillC)
             ctx.drawRoundedRect(trackX + t2 * trackW - 6f, trackY - 5f, trackX + t2 * trackW + 6f, trackY + 7f, 6f, fillC)
         } else {
@@ -2154,11 +2105,11 @@ object ModuleLiquidClickgui : ClientModule(
             ctx.drawQuad(trackX, trackY, trackX + t * trackW, trackY + 2f, fillC)
             ctx.drawRoundedRect(trackX + t * trackW - 6f, trackY - 5f, trackX + t * trackW + 6f, trackY + 7f, 6f, fillC)
         }
-        // 命中区仅覆盖轨道行(第二行), 点击名称/数值不会跳变数值
+
         sliderRects[v] = floatArrayOf(trackX, y + 22f, trackW, h - 22f, p.index.toFloat())
     }
 
-    /** Dropdown 触发器: 强调色底 r3, "name • value", 内嵌箭头 */
+
     private fun drawDropdownSetting(
         ctx: GuiGraphicsExtractor, font: Font,
         v: Value<*>, x: Float, y: Float, h: Float, w: Float, p: Panel, a: Int,
@@ -2173,21 +2124,21 @@ object ModuleLiquidClickgui : ClientModule(
 
         ctx.drawRoundedRect(hx, hy, hx + w, hy2, 3f, headC)
         if (open) {
-            // 展开时上圆角下直角
+
             ctx.drawQuad(hx, hy2 - 3f, hx + 3f, hy2, headC)
             ctx.drawQuad(hx + w - 3f, hy2 - 3f, hx + w, hy2, headC)
         }
 
-        // 文本 "name • value" (省略号截断, 右侧留箭头 20px)
+
         val label = "${v.name} • ${choiceLabel(v)}"
         val maxTextW = w - 20f - 20f - 10f
         val text = shortenText(font, label, maxTextW, 12f)
         drawText(ctx, font, text, hx + 10f, hy + (DROPDOWN_H - 14f) / 2f, alpha(textColor, a), 12f)
 
-        // 内嵌下拉箭头 (dropdownOpen, 右: 10px)
+
         drawDropdownArrow(ctx, v, hx + w - 15.5f, hy + DROPDOWN_H / 2f, a)
 
-        // 命中: 触发器(左键开选项/右键切嵌套) + 嵌套箭头区
+
         if (nested.isNotEmpty()) {
             dropdownHeadRects[v] = floatArrayOf(x, y, w - 20f, h, p.index.toFloat())
             drawExpandArrow(ctx, v, x + w - 9f, y + h / 2f, a)
@@ -2197,7 +2148,7 @@ object ModuleLiquidClickgui : ClientModule(
         }
     }
 
-    /** ExpandArrow: ▼(-90° 收起指向右 → 0° 展开指向下) */
+
     private fun drawExpandArrow(ctx: GuiGraphicsExtractor, v: Value<*>, cx: Float, cy: Float, a: Int) {
         val open = groupOpen[v] == true
         val cur = groupOpenAnim.getOrDefault(v, if (open) 1f else 0f)
@@ -2206,7 +2157,7 @@ object ModuleLiquidClickgui : ClientModule(
         drawChevron(ctx, cx, cy, t, a)
     }
 
-    /** Dropdown 内嵌箭头 (dropdownOpen 状态) */
+
     private fun drawDropdownArrow(ctx: GuiGraphicsExtractor, v: Value<*>, cx: Float, cy: Float, a: Int) {
         val open = dropdownOpen[v] == true
         val cur = dropdownAnim.getOrDefault(v, if (open) 1f else 0f)
@@ -2215,7 +2166,7 @@ object ModuleLiquidClickgui : ClientModule(
         drawChevron(ctx, cx, cy, t, a)
     }
 
-    /** chevron: t=0 指向右(收起), t=1 指向下(展开) */
+
     private fun drawChevron(ctx: GuiGraphicsExtractor, cx: Float, cy: Float, t: Float, a: Int) {
         val rad = Math.toRadians(90.0 * (1 - t))
         val dx = sin(rad).toFloat()
@@ -2230,7 +2181,7 @@ object ModuleLiquidClickgui : ClientModule(
         diag(ctx, tipX, tipY, tipX - dx * l - px * l, tipY - dy * l - py * l, 1.6f, c)
     }
 
-    /** MultiChooseSetting: 标题 + n/m + 箭头 + chips */
+
     private fun drawMultiSetting(
         ctx: GuiGraphicsExtractor, font: Font,
         v: Value<*>, x: Float, y: Float, h: Float, w: Float, p: Panel, a: Int, indent: Int,
@@ -2238,7 +2189,7 @@ object ModuleLiquidClickgui : ClientModule(
         val vi = info(v)
         val selected = multiSelected(v)
 
-        // 头部
+
         drawText(ctx, font, v.name, x, y + SETTING_ROW_PAD, alpha(textColor, a), 12f)
         val amount = "${selected.size}/${vi.choices.size}"
         drawText(ctx, font, amount, x + w - 20f - strW(font, amount, 12f), y + SETTING_ROW_PAD, alpha(textColor, a), 12f)
@@ -2247,7 +2198,7 @@ object ModuleLiquidClickgui : ClientModule(
 
         if (groupOpen[v] != true) return
 
-        // chips 容器: 左侧 2px 强调色边框 + padding 7
+
         val contY = y + SETTING_ROW_PAD * 2f + 14f + 10f
         val contH = chipsHeight(v, indent)
         ctx.drawQuad(x, contY, x + 2f, contY + contH, alpha(accentColor, a))
@@ -2274,7 +2225,7 @@ object ModuleLiquidClickgui : ClientModule(
         }
     }
 
-    /** TextSetting: 名称 + 输入框(黑36%底 + 底部 2px 强调色边) */
+
     private fun drawTextSetting(
         ctx: GuiGraphicsExtractor, font: Font,
         v: Value<*>, x: Float, y: Float, h: Float, w: Float, p: Panel, a: Int,
@@ -2301,20 +2252,20 @@ object ModuleLiquidClickgui : ClientModule(
         textRects[v] = floatArrayOf(x, y, w, h, p.index.toFloat())
     }
 
-    /** ColorSetting: 名称 + HEX + 色块 + 内联 HSV 取色器 */
+
     private fun drawColorSetting(
         ctx: GuiGraphicsExtractor, font: Font,
         v: Value<*>, x: Float, y: Float, h: Float, w: Float, p: Panel, a: Int,
     ) {
         val cur = colorOf(v)
 
-        // 色块 (30px 宽, 右缘, accent 边框)
+
         val swX = x + w - 30f
         val swY = y + 5f
         ctx.drawRoundedRect(swX, swY, x + w, y + 25f, 3f, alpha(cur, a))
         ctx.drawRoundedRect(swX, swY, x + w, y + 25f, 3f, Color4b.TRANSPARENT, alpha(accentColor, a), 1f)
 
-        // HEX (右对齐, 70px 区, 与色块间距 15)
+
         val hex = if (cur.a < 255) {
             String.format("#%02X%02X%02X%02X", cur.r, cur.g, cur.b, cur.a)
         } else {
@@ -2328,11 +2279,11 @@ object ModuleLiquidClickgui : ClientModule(
 
         if (colorOpen != v) return
 
-        // ---- 内联取色器 (pickr classic) ----
+
         val hue = colorHue.getOrDefault(v, rgbToHsv(cur).first)
         val (sv, vv) = colorSV.getOrDefault(v, 0f to 1f)
 
-        // SB 面板: 左→右 饱和度, 上→下 亮度递减
+
         val sbY = y + SETTING_ROW_PAD * 2f + 16f + PICKER_GAP
         val cols = 24
         val rows = 16
@@ -2346,13 +2297,13 @@ object ModuleLiquidClickgui : ClientModule(
                 )
             }
         }
-        // SB 光标 (白环)
+
         val cursorX = x + sv.coerceIn(0f, 1f) * w
         val cursorY = sbY + (1f - vv.coerceIn(0f, 1f)) * PICKER_SB_H
         ctx.drawRoundedRect(cursorX - 5f, cursorY - 5f, cursorX + 5f, cursorY + 5f, 5f, alpha(Color4b(255, 255, 255), a))
         ctx.drawRoundedRect(cursorX - 3f, cursorY - 3f, cursorX + 3f, cursorY + 3f, 3f, alpha(Color4b(0, 0, 0), a))
 
-        // 色相条
+
         val hueY = sbY + PICKER_SB_H + PICKER_GAP
         val segs = 32
         val sw = w / segs
@@ -2364,7 +2315,7 @@ object ModuleLiquidClickgui : ClientModule(
         }
         drawBarCursor(ctx, x + hue.coerceIn(0f, 1f) * w, hueY, a)
 
-        // 透明度条 (棋盘格 + 渐变)
+
         val alphaY = hueY + PICKER_BAR_H + PICKER_GAP
         drawCheckerboard(ctx, x, alphaY, w, PICKER_BAR_H, a)
         val aSegs = 16
@@ -2378,7 +2329,7 @@ object ModuleLiquidClickgui : ClientModule(
         }
         drawBarCursor(ctx, x + (cur.a / 255f) * w, alphaY, a)
 
-        // 命中区: [x, sbY, -, w, 总高, SB 高]
+
         pickerRect = floatArrayOf(x, sbY, 0f, w, alphaY + PICKER_BAR_H - sbY, PICKER_SB_H)
     }
 
@@ -2410,7 +2361,7 @@ object ModuleLiquidClickgui : ClientModule(
         }
     }
 
-    /** KeySetting: 全宽按钮(2px 强调色边框) "name: key" */
+
     private fun drawKeySetting(
         ctx: GuiGraphicsExtractor, font: Font,
         v: Value<*>, x: Float, y: Float, h: Float, w: Float, p: Panel, a: Int,
@@ -2426,7 +2377,7 @@ object ModuleLiquidClickgui : ClientModule(
         } else {
             label = "${v.name}:"
         }
-        // 组合文本居中: "name: key" (key 为 None 时灰显)
+
         val keyName = if (listening) "" else keyLabel(v)
         val sep = if (listening) "" else " "
         val full = if (listening) label else "$label$sep$keyName"
@@ -2434,7 +2385,7 @@ object ModuleLiquidClickgui : ClientModule(
         val fx = x + (w - fullW) / 2f
         drawText(ctx, font, full, fx, by + 6f, alpha(textColor, a), 12f)
         if (!listening && keyName == "None") {
-            // None 灰显 (重画覆盖)
+
             val nameW = strW(font, label, 12f) + strW(font, sep, 12f)
             ctx.drawQuad(fx + nameW, by + 6f, fx + nameW + strW(font, keyName, 12f) + 1f, by + 20f, Color4b.TRANSPARENT)
             drawText(ctx, font, keyName, fx + nameW, by + 6f, alpha(dimmedColor, a), 12f)
@@ -2442,7 +2393,7 @@ object ModuleLiquidClickgui : ClientModule(
         keyRects[v] = floatArrayOf(x, y, w, h, p.index.toFloat())
     }
 
-    /** 超宽文本截断 "..." */
+
     private fun shortenText(font: Font, s: String, maxW: Float, size: Float): String {
         if (maxW <= 4f || strW(font, s, size) <= maxW) return s
         var lo = 0
@@ -2454,7 +2405,7 @@ object ModuleLiquidClickgui : ClientModule(
         return s.substring(0, lo.coerceAtLeast(0)) + "..."
     }
 
-    // ======================== 下拉选项浮层 (portal, 最顶层) ========================
+
 
     private fun drawDropdown(ctx: GuiGraphicsExtractor, font: Font) {
         val v = dropdownValue ?: return
@@ -2469,7 +2420,7 @@ object ModuleLiquidClickgui : ClientModule(
         val padV = 6f
         val listH = padV * 2f + opts.size * DROPDOWN_OPT_H
 
-        // 容器: 黑底 + 强调色边框 1px(无上边框) + 下圆角 3
+
         ctx.drawRoundedRect(x - 1f, y, x + w + 1f, y + listH, 3f, mix(1f, a), alpha(accentColor, a), 1f)
         ctx.drawQuad(x - 1f, y, x + w + 1f, y + 1f, mix(1f, a))
 
@@ -2487,7 +2438,7 @@ object ModuleLiquidClickgui : ClientModule(
             drawText(ctx, font, label, x + (w - tw) / 2f, oy + (DROPDOWN_OPT_H - 14f) / 2f, col, 12f)
             oy += DROPDOWN_OPT_H
         }
-        // 命中区: 从首个选项起, 行高 DROPDOWN_OPT_H
+
         dropdownRect = floatArrayOf(x, y + padV, w, opts.size * DROPDOWN_OPT_H)
     }
 }
