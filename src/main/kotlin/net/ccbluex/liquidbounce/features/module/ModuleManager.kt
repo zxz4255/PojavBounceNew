@@ -232,7 +232,6 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModuleRadar
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleRotations
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSilentHotbar
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSkinChanger
-import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeArraylist
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeClickgui
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSolsticeWatermark
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleEpsilonNotification
@@ -244,12 +243,9 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModuleArmorHudRen
 import net.ccbluex.liquidbounce.features.module.modules.render.ModulePotionStatusRenderer
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleTargetHudRenderer
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSessionInfo
-import net.ccbluex.liquidbounce.features.module.modules.render.ModulePlayerList
-import net.ccbluex.liquidbounce.features.module.modules.render.ModuleNovolineTargetInfo
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleOpalNameTag
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleChestESP
-import net.ccbluex.liquidbounce.features.module.modules.render.ModuleOpalTargetInfo
-import net.ccbluex.liquidbounce.features.module.modules.render.ModuleChestView
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleLiquidClickgui
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSmoothCamera
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleStorageESP
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleTNTTimer
@@ -693,7 +689,6 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleAutoF5,
             ModuleChams,
             ModuleBedPlates,
-            ModuleSolsticeArraylist,
             ModuleSolsticeClickgui,
             ModuleSolsticeModernTargetInfo,
             ModuleRiseClickgui,
@@ -707,10 +702,8 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleChestESP,
             ModuleOpalNameTag,
             ModuleSessionInfo,
-            ModuleNovolineTargetInfo,
-            ModulePlayerList,
-            ModuleOpalTargetInfo,
             ModuleChestView,
+            ModuleLiquidClickgui,
             ModuleNoBob,
             ModuleNoFov,
             ModuleNoHurtCam,
