@@ -1384,7 +1384,6 @@ object ModuleRiseClickgui : ClientModule(
 
     /** 部分环境 Screen 收不到滚轮，额外监听 */
     @Suppress("unused")
-    @Suppress("unused")
     private val hotbarScrollHandler = handler<MouseScrollInHotbarEvent> { e ->
         if (!enabled || scaleAnim.value < 0.2) return@handler
         runCatching { e.cancelEvent() }
@@ -1399,6 +1398,7 @@ object ModuleRiseClickgui : ClientModule(
         if (kotlin.math.abs(v) > 1e-6) applyWheel(v)
     }
 
+    @Suppress("unused")
     private val wheelHandler = handler<MouseScrollEvent> { e ->
         if (!enabled || scaleAnim.value < 0.2) return@handler
         val v = runCatching {
