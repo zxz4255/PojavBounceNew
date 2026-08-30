@@ -47,6 +47,7 @@ import net.ccbluex.liquidbounce.config.types.list.ChoiceListValue
 import net.ccbluex.liquidbounce.config.types.list.MultiChoiceListValue
 import net.ccbluex.liquidbounce.config.types.list.Tagged
 import net.ccbluex.liquidbounce.event.events.MouseScrollEvent
+import net.ccbluex.liquidbounce.event.events.MouseScrollInHotbarEvent
 import net.ccbluex.liquidbounce.event.events.OverlayRenderEvent
 import net.ccbluex.liquidbounce.event.handler
 import net.ccbluex.liquidbounce.features.module.ClientModule
@@ -437,9 +438,8 @@ object ModuleRiseClickgui : ClientModule(
         }
 
         override fun mouseScrolled(mx: Double, my: Double, h: Double, v: Double): Boolean {
-            // 正滚上 / 负滚下；累加后在 applyScroll 消费
-            ModuleRiseClickgui.scrollAccum += v
-            if (v == 0.0 && h != 0.0) ModuleRiseClickgui.scrollAccum += h
+            val delta = if (kotlin.math.abs(v) > 1e-6) v else h
+            ModuleRiseClickgui.applyWheel(delta)
             return true
         }
     }
@@ -1384,18 +1384,40 @@ object ModuleRiseClickgui : ClientModule(
 
     /** 部分环境 Screen 收不到滚轮，额外监听 */
     @Suppress("unused")
-    private val wheelHandler = handler<MouseScrollEvent> { e ->
-        if (!enabled) return@handler
+    @Suppress("unused")
+    private val hotbarScrollHandler = handler<MouseScrollInHotbarEvent> { e ->
+        if (!enabled || scaleAnim.value < 0.2) return@handler
+        runCatching { e.cancelEvent() }
         val v = runCatching {
             e.javaClass.methods.firstOrNull {
-                it.parameterCount == 0 && (it.name == "getVertical" || it.name == "vertical")
+                it.parameterCount == 0 && (
+                    it.name.contains("vertical", true) || it.name.contains("delta", true) ||
+                        it.name.contains("amount", true) || it.name.contains("scroll", true)
+                    )
             }?.invoke(e) as? Number
-        }.getOrNull()?.toDouble() ?: runCatching {
-            val f = e.javaClass.getDeclaredField("vertical")
-            f.isAccessible = true
-            (f.get(e) as Number).toDouble()
-        }.getOrNull() ?: 0.0
-        scrollAccum += v
+        }.getOrNull()?.toDouble() ?: 0.0
+        if (kotlin.math.abs(v) > 1e-6) applyWheel(v)
+    }
+
+    private val wheelHandler = handler<MouseScrollEvent> { e ->
+        if (!enabled || scaleAnim.value < 0.2) return@handler
+        val v = runCatching {
+            e.javaClass.methods.firstOrNull {
+                it.parameterCount == 0 && (
+                    it.name == "getVertical" || it.name == "vertical" || it.name == "getDelta"
+                    )
+            }?.invoke(e) as? Number
+        }.getOrNull()?.toDouble()
+            ?: runCatching {
+                for (fn in listOf("vertical", "delta", "amount", "yOffset")) {
+                    val f = e.javaClass.getDeclaredField(fn)
+                    f.isAccessible = true
+                    val r = f.get(e)
+                    if (r is Number) return@runCatching r.toDouble()
+                }
+                null
+            }.getOrNull() ?: 0.0
+        if (kotlin.math.abs(v) > 1e-6) applyWheel(v)
     }
 
     @Suppress("unused")
@@ -1537,23 +1559,80 @@ object ModuleRiseClickgui : ClientModule(
     private var my0 = 0f
     private var frameDt = 0.016f
 
-    private fun applyScroll(dt: Float) {
+    /** 立即应用滚轮（Screen / 事件双入口） */
+    private fun applyWheel(rawDelta: Double) {
+        if (kotlin.math.abs(rawDelta) < 1e-6) return
+        // 先保证当前分类的 max 可用
+        ensureScrollMax()
         val idx = if (searchMode) -1 else selectedCat
         val maxS = (if (idx == -1) searchMax else catMax.getOrDefault(idx, 0f)).coerceAtMost(0f)
-        val wheel = scrollAccum
-        scrollAccum = 0.0
+        // 内容不够高则无需滚动
+        if (maxS >= -0.5f) return
+        val step = scrollStep.coerceAtLeast(12f)
+        // 多数平台：上滚 delta>0 → 内容应上移（scroll 更负）
+        val delta = (-rawDelta.toFloat()) * step
         if (idx == -1) {
-            searchScrollT = (searchScrollT - wheel.toFloat() * scrollStep).coerceIn(maxS, 0f)
+            searchScrollT = (searchScrollT + delta).coerceIn(maxS, 0f)
+            searchScroll = searchScrollT // 立即响应
+        } else {
+            val t = (catScrollT.getOrDefault(idx, 0f) + delta).coerceIn(maxS, 0f)
+            catScrollT[idx] = t
+            catScroll[idx] = t // 立即响应，不依赖平滑帧
+        }
+    }
+
+    /** 根据模块数量估算可滚范围（不依赖当帧绘制） */
+    private fun ensureScrollMax() {
+        val listH = (windowH - 7f).coerceAtLeast(1f)
+        if (searchMode) {
+            var contentH = 35f
+            for (m in searchResults) {
+                val ui = uiOf(m)
+                var h = cardH
+                if (ui.expanded) {
+                    if (ui.rows.isEmpty()) buildRows(ui.rows, moduleValues(m), 0)
+                    for (r in ui.rows) h += rowHeight(r.value)
+                }
+                contentH += h + cardGap
+            }
+            searchMax = -(contentH - cardGap - listH).coerceAtLeast(0f)
+        } else {
+            val cat = cats.getOrNull(selectedCat) ?: return
+            var contentH = 0f
+            for (m in modsIn(cat)) {
+                val ui = uiOf(m)
+                var h = cardH
+                if (ui.expanded) {
+                    if (ui.rows.isEmpty()) buildRows(ui.rows, moduleValues(m), 0)
+                    for (r in ui.rows) h += rowHeight(r.value)
+                }
+                contentH += h + cardGap
+            }
+            catMax[selectedCat] = -(contentH - cardGap - listH).coerceAtLeast(0f)
+        }
+    }
+
+    private fun applyScroll(dt: Float) {
+        // 平滑追赶（若本帧没有新滚轮，仍把 display 拉向 target）
+        val idx = if (searchMode) -1 else selectedCat
+        val maxS = (if (idx == -1) searchMax else catMax.getOrDefault(idx, 0f)).coerceAtMost(0f)
+        if (idx == -1) {
+            searchScrollT = searchScrollT.coerceIn(maxS, 0f)
             searchScroll += (searchScrollT - searchScroll) * (dt * scrollSmooth).coerceIn(0f, 1f)
             if (abs(searchScrollT - searchScroll) < 0.3f) searchScroll = searchScrollT
         } else {
-            val t0 = catScrollT.getOrDefault(idx, 0f)
-            val t = (t0 - wheel.toFloat() * scrollStep).coerceIn(maxS, 0f)
+            val t = catScrollT.getOrDefault(idx, 0f).coerceIn(maxS, 0f)
             catScrollT[idx] = t
             var c = catScroll.getOrDefault(idx, 0f)
             c += (t - c) * (dt * scrollSmooth).coerceIn(0f, 1f)
             if (abs(t - c) < 0.3f) c = t
-            catScroll[idx] = c
+            catScroll[idx] = c.coerceIn(maxS, 0f)
+        }
+        // 消费残留 accum（兼容旧路径）
+        if (kotlin.math.abs(scrollAccum) > 1e-6) {
+            val w = scrollAccum
+            scrollAccum = 0.0
+            applyWheel(w)
         }
     }
 
