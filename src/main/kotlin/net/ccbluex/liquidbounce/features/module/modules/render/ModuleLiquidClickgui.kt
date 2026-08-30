@@ -441,7 +441,15 @@ object ModuleLiquidClickgui : ClientModule(
         }
     }
 
-    private fun categoryLabel(m: ClientModule): String = m.category.name
+    private fun categoryLabel(m: ClientModule): String = try {
+        m.category.tag
+    } catch (_: Throwable) {
+        try {
+            m.category.toString().substringAfterLast('.').substringAfterLast('$')
+        } catch (_: Throwable) {
+            "Misc"
+        }
+    }
 
     private fun prefs(): Preferences? =
         runCatching { Preferences.userNodeForPackage(ModuleLiquidClickgui::class.java) }.getOrNull()
@@ -657,7 +665,7 @@ object ModuleLiquidClickgui : ClientModule(
         for ((v, choice, r) in chipRects) {
             if (inRectRow(r, p) && over(r[0], r[1], r[2], r[3])) {
                 if (left) {
-                    runCatching { (v as MultiChoiceListValue<Any>).toggle(choice) }
+                    runCatching { if (choice != null) (v as MultiChoiceListValue<Any>).toggle(choice) }
                 }
                 return true
             }
@@ -768,9 +776,9 @@ object ModuleLiquidClickgui : ClientModule(
     private fun selectOption(v: Value<*>, choice: Any?) {
         runCatching {
             when (info(v).kind) {
-                Kind.MODE -> v.setByString((choice as? Tagged)?.tag ?: choice.toString())
-                Kind.CHOICE -> (v as Value<Any>).set(choice)
-                else -> (v as Value<Any>).set(choice)
+                Kind.MODE -> v.setByString((choice as? Tagged)?.tag ?: choice?.toString() ?: return)
+                Kind.CHOICE -> if (choice != null) (v as Value<Any>).set(choice)
+                else -> if (choice != null) (v as Value<Any>).set(choice)
             }
         }
         dropdownValue = null
@@ -921,7 +929,8 @@ object ModuleLiquidClickgui : ClientModule(
             val sw = searchWidth
             val sx = viewW / 2f - sw / 2f
             if (mx >= sx && mx < sx + sw && my >= searchY && my < searchY + 49f + 250f + 2f) {
-                searchScroll = (searchScroll - v * 20f).coerceIn(
+                val dv = v.toFloat()
+                searchScroll = (searchScroll - dv * 20f).coerceIn(
                     0f,
                     (searchResults.size * 39f - 250f).coerceAtLeast(0f),
                 )
@@ -935,7 +944,7 @@ object ModuleLiquidClickgui : ClientModule(
             val bodyY = p.y + HEADER_H + 2f
             if (mx >= p.x && mx < p.x + panelWidth && my >= bodyY && my < bodyY + panelMaxHeight) {
                 val maxScroll = (p.contentH - panelMaxHeight).coerceAtLeast(0f)
-                p.scrollTarget = (p.scrollTarget - v * 20f).coerceIn(0f, maxScroll)
+                p.scrollTarget = (p.scrollTarget - v.toFloat() * 20f).coerceIn(0f, maxScroll)
                 saveScroll(p)
                 return true
             }
