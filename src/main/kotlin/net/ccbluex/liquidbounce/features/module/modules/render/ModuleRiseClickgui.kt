@@ -46,6 +46,7 @@ import net.ccbluex.liquidbounce.config.types.group.ValueGroup
 import net.ccbluex.liquidbounce.config.types.list.ChoiceListValue
 import net.ccbluex.liquidbounce.config.types.list.MultiChoiceListValue
 import net.ccbluex.liquidbounce.config.types.list.Tagged
+import net.ccbluex.liquidbounce.event.events.MouseScrollEvent
 import net.ccbluex.liquidbounce.event.events.OverlayRenderEvent
 import net.ccbluex.liquidbounce.event.handler
 import net.ccbluex.liquidbounce.features.module.ClientModule
@@ -436,7 +437,9 @@ object ModuleRiseClickgui : ClientModule(
         }
 
         override fun mouseScrolled(mx: Double, my: Double, h: Double, v: Double): Boolean {
+            // 正滚上 / 负滚下；累加后在 applyScroll 消费
             ModuleRiseClickgui.scrollAccum += v
+            if (v == 0.0 && h != 0.0) ModuleRiseClickgui.scrollAccum += h
             return true
         }
     }
@@ -449,7 +452,24 @@ object ModuleRiseClickgui : ClientModule(
     private fun over(x: Float, y: Float, w: Float, h: Float) =
         mx >= x && my >= y && mx < x + w && my < y + h
 
+    /** 同步鼠标到布局坐标系（与渲染缩放一致） */
+    private fun syncMouse() {
+        val sw = runCatching { mc.window.guiScaledWidth.toFloat() }.getOrDefault(960f)
+        val sh = runCatching { mc.window.guiScaledHeight.toFloat() }.getOrDefault(540f)
+        val gx = guiMouseX(sw)
+        val gy = guiMouseY(sh)
+        val s = scaleAnim.value.toFloat().coerceAtLeast(0.05f)
+        val tx = (px + windowW / 2f) * (1f - s)
+        val ty = (py + windowH / 2f) * (1f - s)
+        mx = (gx - tx) / s
+        my = (gy - ty) / s
+        mx0 = gx
+        my0 = gy
+    }
+
     private fun onClick(button: Int) {
+        // 必须先用当前鼠标 + 缩放逆变换更新 mx/my（否则点击/展开全错）
+        syncMouse()
         if (button == 0) leftDown = true
         // 顶栏拖动 (Rise: 前 15px)
         if (over(px, py, windowW, 15f)) {
@@ -1272,23 +1292,29 @@ object ModuleRiseClickgui : ClientModule(
             anim.run(if (i == selectedCat && selectedNow) 255.0 else 0.0)
             val a = anim.value
 
-            val cx = px + 10f + slide
+            val cx = px + 8f + slide
             val label = catLabel(cats[i])
             val wpx = strW(font, label, catSize)
+            val btnH = 16f
+            val btnY = cy - 4f
+            val btnW = max(wpx + 12f, 72f)
 
             if (a > 0.5f) {
                 ctx.drawRoundedRect(
-                    cx, cy - 5.5f, cx + wpx + 8f, cy + 9.5f, 5f,
+                    cx, btnY, cx + btnW, btnY + btnH, 5f,
                     accentAt(cy).darker(selDarken).alpha((min(a, op.toDouble()).toFloat() * uiAlpha).toInt().coerceIn(0, 255)),
                 )
             }
             val txtA = (min(if (i == selectedCat && selectedNow) 255.0 else 200.0, op.toDouble()).toFloat() * uiAlpha).toInt()
+            // 文字在按钮内垂直居中，并与按钮左对齐
+            val textY = btnY + (btnH - strH(catSize)) * 0.5f
             drawStr(
                 ctx, font, label,
-                cx + (a / 80f).toFloat() + 3f, cy, catSize,
+                cx + 6f + (a / 80f).toFloat(), textY, catSize,
                 textColor.alpha(txtA.coerceIn(0, 255)),
             )
-            catHits.add(floatArrayOf(cx - 11f, cy - 5f, 70f, 22f))
+            // 命中区与按钮矩形一致
+            catHits.add(floatArrayOf(cx, btnY, btnW, btnH))
         }
     }
 
@@ -1354,6 +1380,22 @@ object ModuleRiseClickgui : ClientModule(
             px + windowW - 4f, ty, px + windowW - 2f, ty + thumbH, 1.5f,
             Color4b(255, 255, 255, (60f * uiAlpha).toInt().coerceIn(0, 255)),
         )
+    }
+
+    /** 部分环境 Screen 收不到滚轮，额外监听 */
+    @Suppress("unused")
+    private val wheelHandler = handler<MouseScrollEvent> { e ->
+        if (!enabled) return@handler
+        val v = runCatching {
+            e.javaClass.methods.firstOrNull {
+                it.parameterCount == 0 && (it.name == "getVertical" || it.name == "vertical")
+            }?.invoke(e) as? Number
+        }.getOrNull()?.toDouble() ?: runCatching {
+            val f = e.javaClass.getDeclaredField("vertical")
+            f.isAccessible = true
+            (f.get(e) as Number).toDouble()
+        }.getOrNull() ?: 0.0
+        scrollAccum += v
     }
 
     @Suppress("unused")
@@ -1675,20 +1717,32 @@ object ModuleRiseClickgui : ClientModule(
 
     private fun clickModule(ui: ModUi, button: Int) {
         val mod = ui.mod
+        // 确保 rows 已构建（即使尚未渲染）
+        if (ui.rows.isEmpty()) {
+            buildRows(ui.rows, moduleValues(mod), 0)
+        }
         // 卡片本体 (Rise: 默认高 - 3)
         if (over(ui.x, ui.y, ui.w, cardH - 3f)) {
             ui.mouseDown = true
             when (button) {
                 0 -> mod.enabled = !mod.enabled
-                1 -> if (middleClickBind) bindMod = mod
-                2 -> if (ui.rows.isNotEmpty()) {
-                    ui.expanded = !ui.expanded
-                    sliderDrag = null
-                    colorDrag = null
+                // 右键展开/收起子项（GLFW: 1 = 右键）
+                1 -> {
+                    if (ui.rows.isNotEmpty() || moduleValues(mod).isNotEmpty()) {
+                        if (ui.rows.isEmpty()) buildRows(ui.rows, moduleValues(mod), 0)
+                        ui.expanded = !ui.expanded
+                        sliderDrag = null
+                        colorDrag = null
+                        editValue = null
+                        keyListen = null
+                    }
                 }
+                // 中键绑定
+                2 -> if (middleClickBind) bindMod = mod
             }
+            return // 点在卡片上时不再穿透到下面的值行
         }
-        // 值 (Rise: 仅展开时)
+        // 值 (仅展开时)
         if (ui.expanded) {
             for (r in ui.rows) {
                 if (clickValue(r.value, button)) break
@@ -1699,7 +1753,7 @@ object ModuleRiseClickgui : ClientModule(
     private fun clickValue(v: Value<*>, button: Int): Boolean {
         val rect = rowRects[v] ?: return false
         val left = button == 0
-        val right = button == 2
+        val right = button == 1 // GLFW 右键
         val vi = info(v)
 
         // 滑条区优先
