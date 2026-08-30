@@ -538,6 +538,16 @@ object ModuleLiquidClickgui : ClientModule(
         return lx >= x && ly >= y && lx < x + w && ly < y + h
     }
 
+    /** Search 以 (屏幕中心X, searchY) 为锚点缩放，位置不变、大小随 Scale */
+    private fun searchScale(): Float = scale.coerceIn(0.5f, 2f).coerceAtLeast(0.01f)
+
+    private fun searchLayoutMouse(mx: Float = mouseX, my: Float = mouseY): Pair<Float, Float> {
+        val s = searchScale()
+        val ax = viewW / 2f
+        val ay = searchY
+        return (ax + (mx - ax) / s) to (ay + (my - ay) / s)
+    }
+
     private fun inRect(r: FloatArray?) =
         r != null && over(r[0], r[1], r[2], r[3])
 
@@ -593,28 +603,38 @@ object ModuleLiquidClickgui : ClientModule(
             val sx = viewW / 2f - sw / 2f
             val resultsH = if (searchResults.isNotEmpty()) min(searchResults.size * 39f, 250f) + 2f
             else if (searchQuery.isNotEmpty()) 39f else 0f
+            val (slx, sly) = searchLayoutMouse()
+            val savedMx = mouseX
+            val savedMy = mouseY
+            mouseX = slx
+            mouseY = sly
+            var handled = false
             if (over(sx, searchY, sw, 49f + resultsH)) {
                 if (left) {
                     searchFocus = true
-
                     if (searchResults.isNotEmpty() && mouseY > searchY + 49f) {
                         val idx = ((mouseY - searchY - 49f - 2f) / 39f + searchScroll / 39f).toInt()
                         if (idx in searchResults.indices) {
-                            val m = searchResults[idx]
-                            m.enabled = !m.enabled
-                            return true
+                            searchResults[idx].enabled = !searchResults[idx].enabled
+                            handled = true
                         }
                     }
                 } else if (right && searchResults.isNotEmpty() && mouseY > searchY + 49f) {
                     val idx = ((mouseY - searchY - 49f - 2f) / 39f + searchScroll / 39f).toInt()
                     if (idx in searchResults.indices) {
                         locateModule(searchResults[idx])
-                        return true
+                        handled = true
                     }
+                } else {
+                    handled = true // 点在搜索栏上
                 }
-                return true
+                if (!handled && left) handled = true
+            } else if (left) {
+                searchFocus = false
             }
-            if (left) searchFocus = false
+            mouseX = savedMx
+            mouseY = savedMy
+            if (handled) return true
         }
 
 
@@ -969,7 +989,8 @@ object ModuleLiquidClickgui : ClientModule(
         if (searchEnabled && searchResults.isNotEmpty()) {
             val sw = searchWidth
             val sx = viewW / 2f - sw / 2f
-            if (mx >= sx && mx < sx + sw && my >= searchY && my < searchY + 49f + 250f + 2f) {
+            val (slx, sly) = searchLayoutMouse(mx, my)
+            if (slx >= sx && slx < sx + sw && sly >= searchY && sly < searchY + 49f + 250f + 2f) {
                 val dv = v.toFloat()
                 searchScroll = (searchScroll - dv * 20f).coerceIn(
                     0f,
@@ -1678,6 +1699,20 @@ object ModuleLiquidClickgui : ClientModule(
         val sx = viewW / 2f - sw / 2f
         val sy = searchY
         val inputH = 49f
+        val s = searchScale()
+        // 锚点固定：水平中心 + searchY，只缩放大小
+        ctx.pose().withPush {
+            translate(viewW / 2f, sy)
+            scale(s, s)
+            translate(-viewW / 2f, -sy)
+            drawSearchInner(ctx, font, a, sw, sx, sy, inputH)
+        }
+    }
+
+    private fun drawSearchInner(
+        ctx: GuiGraphicsExtractor, font: Font,
+        a: Int, sw: Float, sx: Float, sy: Float, inputH: Float,
+    ) {
 
 
         val sh = Color4b(baseColor.r, baseColor.g, baseColor.b, (255 * 0.5f * uiAlpha).toInt())
