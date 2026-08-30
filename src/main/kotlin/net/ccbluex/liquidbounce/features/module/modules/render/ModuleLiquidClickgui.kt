@@ -178,6 +178,8 @@ object ModuleLiquidClickgui : ClientModule(
     private var dropdownOptions = emptyList<Any?>()
     private var dropdownValue: Value<*>? = null
     private var colorOpen: Value<*>? = null
+    private var colorOpenPanel: Panel? = null
+    private var dropdownPanel: Panel? = null
     private var colorDragChannel = -1
     private val colorHue = IdentityHashMap<Value<*>, Float>()
     private val colorSV = IdentityHashMap<Value<*>, Pair<Float, Float>>()
@@ -402,7 +404,9 @@ object ModuleLiquidClickgui : ClientModule(
         keyListen = null
         sliderDrag = null
         colorOpen = null
+        colorOpenPanel = null
         dropdownValue = null
+        dropdownPanel = null
         descTarget = null
         super.onDisabled()
     }
@@ -559,10 +563,17 @@ object ModuleLiquidClickgui : ClientModule(
 
 
         colorOpen?.let { v ->
+            val panel = colorOpenPanel
+            val savedMx = mouseX
+            val savedMy = mouseY
+            if (panel != null) {
+                val (lx, ly) = toLayout(panel)
+                mouseX = lx
+                mouseY = ly
+            }
             val pr = pickerRect
             if (pr != null && over(pr[0], pr[1], pr[3], pr[4])) {
                 if (left) {
-
                     val sbBottom = pr[1] + pr[5]
                     val hueBottom = sbBottom + PICKER_GAP + PICKER_BAR_H
                     colorDragChannel = when {
@@ -572,30 +583,67 @@ object ModuleLiquidClickgui : ClientModule(
                     }
                     applyColorPicker(v)
                 }
+                mouseX = savedMx
+                mouseY = savedMy
                 return true
             }
-
-            if (pr == null || !over(pr[0] - pr[3], pr[1] - 30f, pr[3] * 3f, pr[4] + 34f)) {
+            // 点在颜色行上：保持打开，不切换关闭（避免刚开就关）
+            val cr = colorRects[v]
+            if (cr != null && over(cr[0], cr[1], cr[2], cr[3])) {
+                mouseX = savedMx
+                mouseY = savedMy
+                return true
+            } else if (pr == null || !over(pr[0] - 8f, pr[1] - 40f, pr[3] + 16f, pr[4] + 50f)) {
+                // 点在调色板外才关闭
                 colorOpen = null
+                colorOpenPanel = null
+                colorDragChannel = -1
+                mouseX = savedMx
+                mouseY = savedMy
+            } else {
+                // 点在扩大命中区内：开始拖
+                if (left && pr != null) {
+                    colorDragChannel = 0
+                    applyColorPicker(v)
+                }
+                mouseX = savedMx
+                mouseY = savedMy
+                return true
             }
         }
 
 
         dropdownValue?.let { dv ->
+            val panel = dropdownPanel
+            val savedMx = mouseX
+            val savedMy = mouseY
+            if (panel != null) {
+                val (lx, ly) = toLayout(panel)
+                mouseX = lx
+                mouseY = ly
+            }
             val dr = dropdownRect
+            val opts = info(dv).choices.ifEmpty { dropdownOptions }
             if (dr != null && left && over(dr[0], dr[1], dr[2], dr[3])) {
-                val idx = ((mouseY - dr[1]) / DROPDOWN_OPT_H).toInt().coerceIn(0, dropdownOptions.size - 1)
-                selectOption(dv, dropdownOptions[idx])
+                val idx = ((mouseY - dr[1]) / DROPDOWN_OPT_H).toInt().coerceIn(0, (opts.size - 1).coerceAtLeast(0))
+                selectOption(dv, opts.getOrNull(idx))
+                mouseX = savedMx
+                mouseY = savedMy
                 return true
             }
-
             val head = dropdownHeadRects[dv]
             val onHead = head != null && over(head[0], head[1], head[2], head[3])
-            dropdownValue = null
-            dropdownOpen[dv] = false
-
-            if (onHead) return true
+            mouseX = savedMx
+            mouseY = savedMy
+            if (!onHead) {
+                dropdownValue = null
+                dropdownOpen[dv] = false
+                dropdownPanel = null
+            } else {
+                return true
+            }
         }
+
 
 
         if (searchEnabled) {
@@ -714,7 +762,7 @@ object ModuleLiquidClickgui : ClientModule(
         }
         for ((v, r) in dropdownHeadRects) {
             if (inRectRow(r, p) && over(r[0], r[1], r[2], r[3])) {
-                if (left) openDropdown(v) else if (right) toggleGroup(v)
+                if (left) openDropdown(v, p) else if (right) toggleGroup(v)
                 return true
             }
         }
@@ -748,9 +796,10 @@ object ModuleLiquidClickgui : ClientModule(
                 if (left) {
                     if (colorOpen == v) {
                         colorOpen = null
+                        colorOpenPanel = null
                     } else {
                         colorOpen = v
-
+                        colorOpenPanel = p
                         val cur = colorOf(v)
                         val (h, s, vv) = rgbToHsv(cur)
                         colorHue[v] = h
@@ -817,13 +866,15 @@ object ModuleLiquidClickgui : ClientModule(
 
     }
 
-    private fun openDropdown(v: Value<*>) {
+    private fun openDropdown(v: Value<*>, panel: Panel? = null) {
         if (dropdownValue == v) {
             dropdownValue = null
             dropdownOpen[v] = false
+            dropdownPanel = null
         } else {
             dropdownValue?.let { dropdownOpen[it] = false }
             dropdownValue = v
+            dropdownPanel = panel
             dropdownOpen[v] = true
             dropdownOptions = info(v).choices
         }
@@ -838,6 +889,7 @@ object ModuleLiquidClickgui : ClientModule(
             }
         }
         dropdownValue = null
+        dropdownPanel = null
         dropdownOpen[v] = false
         infoCache.remove(v)
     }
@@ -956,25 +1008,38 @@ object ModuleLiquidClickgui : ClientModule(
     }
 
     internal fun onDrag(dx: Double, dy: Double) {
-        val p = dragPanel ?: return
         mouseX = guiMX()
         mouseY = guiMY()
-        val nx = mouseX - dragOffX
-        val ny = mouseY - dragOffY
-        val g = if (shiftIgnoreGrid || !snapEnabled) 0f else gridSize.toFloat().coerceAtLeast(1f)
-        p.x = if (g > 0f) (nx / g).roundToInt() * g else nx
-        p.y = if (g > 0f) (ny / g).roundToInt() * g else ny
-        // 拖动范围固定全屏，不随 Scale 缩小
-        p.x = p.x.coerceIn(0f, (viewW - panelWidth * 0.2f).coerceAtLeast(0f))
-        p.y = p.y.coerceIn(0f, (viewH - HEADER_H * 0.2f).coerceAtLeast(0f))
-        // 滑条拖动需要布局坐标
-        val s = scale.coerceIn(0.5f, 2f)
-        mouseX = p.x + (guiMX() - p.x) / s
-        mouseY = p.y + (guiMY() - p.y) / s
-        sliderDrag?.let { applySlider(it) }
-        if (colorDragChannel >= 0) colorOpen?.let { applyColorPicker(it) }
-        mouseX = guiMX()
-        mouseY = guiMY()
+
+        // 面板拖动（全屏范围）
+        dragPanel?.let { panel ->
+            val nx = mouseX - dragOffX
+            val ny = mouseY - dragOffY
+            val g = if (shiftIgnoreGrid || !snapEnabled) 0f else gridSize.toFloat().coerceAtLeast(1f)
+            panel.x = if (g > 0f) (nx / g).roundToInt() * g else nx
+            panel.y = if (g > 0f) (ny / g).roundToInt() * g else ny
+            panel.x = panel.x.coerceIn(0f, (viewW - panelWidth * 0.2f).coerceAtLeast(0f))
+            panel.y = panel.y.coerceIn(0f, (viewH - HEADER_H * 0.2f).coerceAtLeast(0f))
+        }
+
+        // 滑条 / 调色：不依赖 dragPanel，单独用布局坐标
+        if (sliderDrag != null || (colorDragChannel >= 0 && colorOpen != null)) {
+            val panel = colorOpenPanel
+                ?: sliderDrag?.let { sv ->
+                    val idx = sliderRects[sv]?.getOrNull(4)?.toInt()
+                    if (idx != null) panels.getOrNull(idx) else null
+                }
+                ?: panels.firstOrNull()
+            if (panel != null) {
+                val s = scale.coerceIn(0.5f, 2f).coerceAtLeast(0.01f)
+                mouseX = panel.x + (guiMX() - panel.x) / s
+                mouseY = panel.y + (guiMY() - panel.y) / s
+            }
+            sliderDrag?.let { applySlider(it) }
+            if (colorDragChannel >= 0) colorOpen?.let { applyColorPicker(it) }
+            mouseX = guiMX()
+            mouseY = guiMY()
+        }
     }
 
     internal fun onScroll(v: Double): Boolean {
@@ -1336,19 +1401,25 @@ object ModuleLiquidClickgui : ClientModule(
         // Search 固定在屏幕坐标，不受 Scale 影响
         if (searchEnabled) drawSearch(ctx, font)
 
-        // 面板以自身左上角缩放，位置仍是全屏坐标
+        // 面板以自身左上角缩放；下拉菜单在同一矩阵内绘制，避免跑到屏幕底部放大
         for (p in panels.sortedBy { it.z }) {
             ctx.pose().withPush {
                 translate(p.x, p.y)
                 scale(s, s)
                 translate(-p.x, -p.y)
                 drawPanel(ctx, font, p)
+                if (dropdownValue != null && dropdownPanel == p) {
+                    drawDropdown(ctx, font, layoutSpace = true)
+                }
             }
+        }
+        // 无所属面板时兜底
+        if (dropdownValue != null && dropdownPanel == null) {
+            drawDropdown(ctx, font, layoutSpace = true)
         }
 
         drawHighlight(ctx)
         if (descEnabled) drawDescription(ctx, font)
-        drawDropdown(ctx, font)
     }
 
     private fun updateAnimations(dt: Float) {
@@ -2490,38 +2561,44 @@ object ModuleLiquidClickgui : ClientModule(
 
 
 
-    private fun drawDropdown(ctx: GuiGraphicsExtractor, font: Font) {
+    private fun drawDropdown(ctx: GuiGraphicsExtractor, font: Font, layoutSpace: Boolean = true) {
         val v = dropdownValue ?: return
         val head = dropdownHeadRects[v] ?: return
-        val opts = info(v).choices
+        val opts = info(v).choices.ifEmpty { dropdownOptions }
         if (opts.isEmpty()) return
         val a = (uiAlpha * 255).toInt()
 
-        val x = head[0]
-        val y = head[1] + head[3]
-        val w = head[2]
+        // 与 Mode 头同在布局坐标（已在面板 Scale 矩阵内），贴在头下方展开
+        val hx = head[0]
+        val hy = head[1] + head[3]
+        val hw = head[2]
+        val optH = DROPDOWN_OPT_H
         val padV = 6f
-        val listH = padV * 2f + opts.size * DROPDOWN_OPT_H
+        val listH = padV * 2f + opts.size * optH
 
-
-        ctx.drawRoundedRect(x - 1f, y, x + w + 1f, y + listH, 3f, mix(1f, a), alpha(accentColor, a), 1f)
-        ctx.drawQuad(x - 1f, y, x + w + 1f, y + 1f, mix(1f, a))
+        ctx.drawRoundedRect(hx - 1f, hy, hx + hw + 1f, hy + listH, 3f, mix(1f, a), alpha(accentColor, a), 1f)
+        ctx.drawQuad(hx - 1f, hy, hx + hw + 1f, hy + 1f, mix(1f, a))
 
         val activeLabel = choiceLabel(v)
-        var oy = y + padV
+        // hover 用布局鼠标
+        val panel = dropdownPanel
+        val (lx, ly) = if (panel != null) toLayout(panel) else mouseX to mouseY
+        var oy = hy + padV
         for (o in opts) {
             val label = taggedLabel(o)
-            val hovered = over(x, oy, w, DROPDOWN_OPT_H)
+            val hovered = lx >= hx && lx < hx + hw && ly >= oy && ly < oy + optH
             val col = when {
                 label == activeLabel -> alpha(accentColor, a)
                 hovered -> alpha(textColor, a)
                 else -> alpha(dimmedColor, a)
             }
             val tw = strW(font, label, 12f)
-            drawText(ctx, font, label, x + (w - tw) / 2f, oy + (DROPDOWN_OPT_H - 14f) / 2f, col, 12f)
-            oy += DROPDOWN_OPT_H
+            drawText(ctx, font, label, hx + (hw - tw) / 2f, oy + (optH - 14f) / 2f, col, 12f)
+            oy += optH
         }
 
-        dropdownRect = floatArrayOf(x, y + padV, w, opts.size * DROPDOWN_OPT_H)
+        // 命中区：布局坐标 + 所属面板 index 在 [4]
+        val pi = panel?.index?.toFloat() ?: -1f
+        dropdownRect = floatArrayOf(hx, hy + padV, hw, opts.size * optH, pi)
     }
 }
