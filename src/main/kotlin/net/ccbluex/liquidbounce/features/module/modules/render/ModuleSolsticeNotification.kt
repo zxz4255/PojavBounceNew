@@ -16,7 +16,7 @@
  *  本文件改动:
  *   - 进度条动画改为「从左到右」：填充随 percentDone 由左侧向右推进
  *   - 进度条新增独立 Rainbow 模式：连续色谱按位置采样，视觉无分段拼接
- *   - 卡片左侧上下为圆角，右侧上下为直角（Solaris 轮廓）
+ *   - 卡片四角均为直角
  *   - 模块开/关时播放音频：liquidbounce:enable / liquidbounce:disable
  *     （对应源码 assets/liquidbounce/sounds/enable.ogg 与 disable.ogg，
  *       并需在 assets/liquidbounce/sounds.json 中注册同名事件）
@@ -49,7 +49,6 @@ import net.minecraft.sounds.SoundEvent
 import net.minecraft.util.Mth
 import kotlin.math.max
 import kotlin.math.roundToInt
-import kotlin.math.sqrt
 
 object ModuleSolsticeNotification : ClientModule(
     "SolsticeNotification",
@@ -282,33 +281,9 @@ object ModuleSolsticeNotification : ClientModule(
         x1: Float, y1: Float, x2: Float, y2: Float,
         radius: Float, color: Color4b,
     ) {
-        val w = x2 - x1
-        val h = y2 - y1
-        if (w <= 0.5f || h <= 0.5f) return
-        val rad = radius.coerceIn(0f, minOf(w, h) * 0.5f)
-        if (rad < 0.5f) {
-            ctx.drawQuad(x1, y1, x2, y2, color)
-            return
-        }
-        // 主体：圆角结束处 → 右缘（右侧上下均为直角）
-        ctx.drawQuad(x1 + rad, y1, x2, y2, color)
-        // 左侧中段（两个圆角之间的直条）
-        ctx.drawQuad(x1, y1 + rad, x1 + rad, y2 - rad, color)
-        // 左上 / 左下 四分之一圆：竖向列切片
-        val cx = x1 + rad
-        val cyT = y1 + rad
-        val cyB = y2 - rad
-        var sx = x1
-        while (sx < cx - 0.01f) {
-            val ex = (sx + 1f).coerceAtMost(cx)
-            val dx = cx - sx // 列外缘: 弧高只小不大, 绝不超出圆弧轮廓
-            val dy = sqrt(rad * rad - dx * dx).coerceAtLeast(0f)
-            if (dy > 0.05f) {
-                ctx.drawQuad(sx, cyT - dy, ex, cyT, color)
-                ctx.drawQuad(sx, cyB, ex, cyB + dy, color)
-            }
-            sx = ex
-        }
+        // 左侧上下两角改为直角 → 整卡矩形
+        if (x2 - x1 <= 0.5f || y2 - y1 <= 0.5f) return
+        ctx.drawQuad(x1, y1, x2, y2, color)
     }
 
     /**
@@ -328,28 +303,12 @@ object ModuleSolsticeNotification : ClientModule(
     ) {
         if (fillW <= 0.5f || boxW <= 1f) return
         val a = (245 * aMul).toInt().coerceIn(0, 255)
-        val r = radius.coerceIn(0f, minOf(boxW, y2 - y1) * 0.5f)
-        val cyT = y1 + r
-        val cyB = y2 - r
-        val cornerEnd = x + r
         val end = x + fillW
         var sx = x
         while (sx < end - 0.01f) {
-            val inCorner = r >= 0.5f && sx < cornerEnd - 0.01f
-            val ex = (sx + if (inCorner) 1f else bodyStep).coerceAtMost(end)
+            val ex = (sx + bodyStep).coerceAtMost(end)
             val u = (((sx + ex) * 0.5f - x) / boxW).coerceIn(0f, 1f)
-            val col = colorAt(u).alpha(a)
-            if (inCorner) {
-                val dx = cornerEnd - sx
-                val h = sqrt(r * r - dx * dx).coerceAtLeast(0f)
-                if (h > 0.05f) {
-                    ctx.drawQuad(sx, cyT - h, ex, cyT, col)
-                    ctx.drawQuad(sx, cyB, ex, cyB + h, col)
-                }
-                ctx.drawQuad(sx, cyT, ex, cyB, col)
-            } else {
-                ctx.drawQuad(sx, y1, ex, y2, col)
-            }
+            ctx.drawQuad(sx, y1, ex, y2, colorAt(u).alpha(a))
             sx = ex
         }
     }
