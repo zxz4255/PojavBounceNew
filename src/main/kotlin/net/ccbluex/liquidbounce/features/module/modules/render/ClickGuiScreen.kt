@@ -1,29 +1,21 @@
 package net.ccbluex.liquidbounce.features.module.modules.render
 
-import net.minecraft.client.gui.Font
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.input.KeyEvent
 import net.minecraft.network.chat.Component
 import org.lwjgl.glfw.GLFW
 
-/**
- * 原 LiquidBounce 风格 ClickGUI 已废弃。
- * 打开后仅显示废弃提示，按 ESC 关闭。
- */
 class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
 
-    private val message = "X该 Clickgui 已废弃X"
+    private val message = "X该clickgui 已废弃X"
 
     override fun isPauseScreen(): Boolean = false
 
     override fun shouldCloseOnEsc(): Boolean = true
 
     override fun extractBackground(ctx: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, delta: Float) {
-        // 半透明黑底
-        val w = width
-        val h = height
-        ctx.fill(0, 0, w, h, 0xCC000000.toInt())
+        ctx.fill(0, 0, width, height, 0xCC000000.toInt())
     }
 
     override fun extractRenderState(ctx: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, delta: Float) {
@@ -31,7 +23,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
         val sw = width
         val sh = height
 
-        // 大字居中（放大绘制）
         val scale = 3.5f
         val tw = font.width(message) * scale
         val th = font.lineHeight * scale
@@ -61,7 +52,6 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
             ctx.text(font, message, (sw - font.width(message)) / 2, sh / 2, 0xFFFF5555.toInt())
         }
 
-        // 副标题提示
         val tip = "Press ESC to close"
         ctx.text(
             font, tip,
@@ -80,14 +70,40 @@ class ClickGuiScreen : Screen(Component.literal("ClickGUI")) {
     }
 
     override fun onClose() {
+        setScreenCompat(null)
+    }
+
+    private fun setScreenCompat(screen: Screen?) {
         val mc = minecraft ?: return
-        try {
-            mc.javaClass.getMethod("setScreen", Screen::class.java).invoke(mc, null as Screen?)
-        } catch (_: Exception) {
+        // 兼容不同映射：setScreen / openScreen / displayGuiScreen / gui.setScreen
+        val candidates = listOf(
+            arrayOf("setScreen", Screen::class.java),
+            arrayOf("openScreen", Screen::class.java),
+            arrayOf("displayGuiScreen", Screen::class.java),
+        )
+        for ((name, arg) in candidates) {
             try {
-                mc.setScreen(null)
+                val m = mc.javaClass.getMethod(name as String, arg as Class<*>)
+                m.invoke(mc, screen)
+                return
             } catch (_: Exception) {
             }
+        }
+        try {
+            val guiField = mc.javaClass.declaredFields.firstOrNull {
+                it.name.equals("gui", true) || it.type.simpleName.contains("Gui", true)
+            }
+            if (guiField != null) {
+                guiField.isAccessible = true
+                val gui = guiField.get(mc) ?: return
+                val m = gui.javaClass.methods.firstOrNull {
+                    it.parameterCount == 1 &&
+                        it.parameterTypes[0].isAssignableFrom(Screen::class.java) &&
+                        (it.name.equals("setScreen", true) || it.name.contains("Screen", true))
+                }
+                m?.invoke(gui, screen)
+            }
+        } catch (_: Exception) {
         }
     }
 }
