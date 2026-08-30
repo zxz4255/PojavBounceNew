@@ -76,8 +76,8 @@ object ModuleSolsticeNotification : ClientModule(
     private val cornerRadius by float("Corner Radius", 5f, 0f..16f)
 
     private val glow by boolean("Glow", true)
-    private val glowRadius by float("Glow Radius", 14f, 2f..48f)
-    private val glowStrength by float("Glow Strength", 0.65f, 0.05f..1.5f)
+    private val glowRadius by float("Glow Radius", 16f, 2f..48f)
+    private val glowStrength by float("Glow Strength", 0.85f, 0.05f..1.5f)
     private val glowLayers by int("Glow Layers", 12, 3..24)
     private val glowSoftness by float("Glow Softness", 1.35f, 0.5f..3f)
     private val glowSpread by float("Glow Spread", 1.0f, 0.3f..2.5f)
@@ -315,20 +315,19 @@ object ModuleSolsticeNotification : ClientModule(
     }
 
     /**
-     * Natural outer glow: gaussian-like radial falloff, multi-layer rounded fills.
-     * Tunable radius / strength / softness / spread / inner core / optional pulse.
+     * 外圈辉光：分层四边+外框矩形扩散（不用圆角 API，全平台稳定可见）。
+     * 每张卡片在显示期间都画满辉光。
      */
     private fun drawGlow(
         ctx: net.minecraft.client.gui.GuiGraphicsExtractor,
         x1: Float, y1: Float, x2: Float, y2: Float,
         base: Color4b, base2: Color4b, alphaMul: Float, gradient: Boolean,
     ) {
-        if (!glow) return
+        if (!glow || alphaMul <= 0.02f) return
         val layers = glowLayers.coerceIn(3, 24)
-        val maxR = (glowRadius * glowSpread).coerceAtLeast(1.5f)
+        val maxR = (glowRadius * glowSpread).coerceAtLeast(4f)
         val strength = glowStrength.coerceIn(0.05f, 1.5f)
         val soft = glowSoftness.coerceIn(0.5f, 3f)
-        val inner = glowInner.coerceIn(0f, 0.8f)
         val aScale = glowAlpha.coerceIn(0.1f, 1.5f)
 
         var pulse = 1f
@@ -337,38 +336,45 @@ object ModuleSolsticeNotification : ClientModule(
             pulse = (0.82f + 0.18f * kotlin.math.sin(t * glowPulseSpeed).toFloat())
         }
 
+        // 从外到内画，外层更淡
         for (i in layers downTo 1) {
-            val u = i / layers.toFloat()
-            val r = maxR * u
-            val gauss = kotlin.math.exp(-(u * u) * (2.8f / soft)).toFloat()
-            val core = 1f + inner * (1f - u)
-            val fall = (gauss * core).coerceIn(0f, 1.6f)
-            val a = (fall * strength * pulse * aScale * 200f * alphaMul)
+            val u = i / layers.toFloat() // 1=最外
+            val e = maxR * u
+            // 更平缓的衰减，保证内圈也够亮
+            val fall = (1f - u).coerceIn(0f, 1f)
+            val fall2 = fall * fall * (3f - 2f * fall) // smoothstep
+            val softMul = (0.55f + 0.45f / soft).coerceIn(0.4f, 1.4f)
+            val a = (fall2 * softMul * strength * pulse * aScale * 255f * alphaMul)
                 .toInt()
-                .coerceIn(0, 220)
-            if (a < 2) continue
+                .coerceIn(0, 230)
+            if (a < 3) continue
 
-            // layer color: solid base, or lerp base→base2 by radius (outer uses base2)
             val src = if (gradient) {
-                val s = u // outer = more base2
                 Color4b(
-                    lerp(base.r.toFloat(), base2.r.toFloat(), s).toInt().coerceIn(0, 255),
-                    lerp(base.g.toFloat(), base2.g.toFloat(), s).toInt().coerceIn(0, 255),
-                    lerp(base.b.toFloat(), base2.b.toFloat(), s).toInt().coerceIn(0, 255),
+                    lerp(base.r.toFloat(), base2.r.toFloat(), u).toInt().coerceIn(0, 255),
+                    lerp(base.g.toFloat(), base2.g.toFloat(), u).toInt().coerceIn(0, 255),
+                    lerp(base.b.toFloat(), base2.b.toFloat(), u).toInt().coerceIn(0, 255),
                     255,
                 )
             } else base
 
-            val desat = (u * 0.10f).coerceIn(0f, 0.2f)
-            val rC = (src.r + (255 - src.r) * desat).toInt().coerceIn(0, 255)
-            val gC = (src.g + (255 - src.g) * desat).toInt().coerceIn(0, 255)
-            val bC = (src.b + (255 - src.b) * desat).toInt().coerceIn(0, 255)
-            val col = Color4b(rC, gC, bC, a)
+            val col = Color4b(src.r, src.g, src.b, a)
+            // 整圈外框（比四边拼接更明显）
+            ctx.drawQuad(x1 - e, y1 - e, x2 + e, y1, col) // 上
+            ctx.drawQuad(x1 - e, y2, x2 + e, y2 + e, col) // 下
+            ctx.drawQuad(x1 - e, y1, x1, y2, col) // 左
+            ctx.drawQuad(x2, y1, x2 + e, y2, col) // 右
+        }
 
-            val rad = (cornerRadius + r * 0.55f).coerceAtLeast(cornerRadius)
-            // 辉光是模糊光晕: 每层用单次圆角矩形(每层 1 个图元)即可,
-            // 逐列拼形会导致 12 层 × ~13 列 ≈ 156 图元/通知, 严重拖帧
-            ctx.drawRoundedRect(x1 - r, y1 - r, x2 + r, y2 + r, rad, col)
+        // 紧贴卡片的一圈实线，保证“有没有辉光”一眼能看出来
+        val rimA = (140f * strength * aScale * pulse * alphaMul).toInt().coerceIn(0, 200)
+        if (rimA > 2) {
+            val rim = Color4b(base.r, base.g, base.b, rimA)
+            val t = 1.5f
+            ctx.drawQuad(x1 - t, y1 - t, x2 + t, y1, rim)
+            ctx.drawQuad(x1 - t, y2, x2 + t, y2 + t, rim)
+            ctx.drawQuad(x1 - t, y1, x1, y2, rim)
+            ctx.drawQuad(x2, y1, x2 + t, y2, rim)
         }
     }
 
@@ -476,8 +482,12 @@ object ModuleSolsticeNotification : ClientModule(
                 Type.INFO -> Unit
             }
             val aMul = n.slide
-            // 辉光：所有通知在显示期间都满辉光；仅关闭退场时随 slide 淡出
-            val glowMul = if (n.isTimeUp) aMul.coerceIn(0f, 1f) else 1f
+            // 辉光：显示中始终满；关闭时淡出；slide 再低也保底，避免“没辉光”
+            val glowMul = if (n.isTimeUp) {
+                aMul.coerceIn(0f, 1f)
+            } else {
+                max(aMul, 0.9f)
+            }
             val cLeft = theme.alpha((220 * aMul).toInt().coerceIn(0, 255))
             val cRight = getThemedColor(boxTop * 2f + boxW * 1.2f)
                 .alpha((200 * aMul).toInt().coerceIn(0, 255))
