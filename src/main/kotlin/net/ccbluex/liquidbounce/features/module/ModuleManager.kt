@@ -702,7 +702,6 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleChestESP,
             ModuleOpalNameTag,
             ModuleSessionInfo,
-            ModuleChestView,
             ModuleLiquidClickgui,
             ModuleNoBob,
             ModuleNoFov,
