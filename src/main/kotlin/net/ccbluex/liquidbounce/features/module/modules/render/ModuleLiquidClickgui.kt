@@ -259,6 +259,29 @@ object ModuleLiquidClickgui : ClientModule(
             ValueType.BIND -> i.kind = Kind.BIND
             else -> i.kind = Kind.OTHER
         }
+        // 兼容：部分构建 ValueType 不含 COLOR / 类型被标成 TEXT/OTHER
+        if (i.kind == Kind.OTHER || i.kind == Kind.TEXT) {
+            val typeName = runCatching { v.valueType.name }.getOrDefault("")
+            if (typeName.equals("COLOR", true) || typeName.contains("COLOR", true)) {
+                i.kind = Kind.COLOR
+            }
+        }
+        if (i.kind != Kind.COLOR) {
+            val actual = unwrapValue(v)
+            if (isColorLike(actual)) {
+                i.kind = Kind.COLOR
+            } else if (i.kind == Kind.OTHER) {
+                // 名称启发：Accent / Color / Theme 等
+                val n = v.name.lowercase()
+                if ((n.contains("color") || n.contains("accent") || n.contains("theme") ||
+                        n.endsWith(" col") || n.contains("glow")) &&
+                    actual is Number
+                ) {
+                    // 数字型颜色(ARGB int)也当 color
+                    i.kind = Kind.COLOR
+                }
+            }
+        }
         if (v is RangedValue) {
             val a = (v.range.start as? Number)?.toFloat()
             val b = (v.range.endInclusive as? Number)?.toFloat()
@@ -266,6 +289,26 @@ object ModuleLiquidClickgui : ClientModule(
             i.suffix = v.suffix
         }
         return i
+    }
+
+    private fun unwrapValue(v: Value<*>): Any? {
+        var obj: Any? = runCatching { v.get() }.getOrNull()
+        var depth = 0
+        while (obj is Value<*> && depth < 5) {
+            obj = runCatching { obj.get() }.getOrNull()
+            depth++
+        }
+        return obj
+    }
+
+    private fun isColorLike(o: Any?): Boolean {
+        if (o == null) return false
+        if (o is Color4b) return true
+        val sn = o.javaClass.simpleName
+        if (sn.contains("Color", true) || sn.contains("Colour", true)) return true
+        // java.awt.Color
+        if (o is java.awt.Color) return true
+        return false
     }
 
     private fun childrenOf(v: Value<*>?): List<Value<*>> {
@@ -336,8 +379,38 @@ object ModuleLiquidClickgui : ClientModule(
         (v as MultiChoiceListValue<*>).get()
     }.getOrDefault(emptySet<Any>())
 
-    private fun colorOf(v: Value<*>): Color4b =
-        (v.get() as? Color4b) ?: Color4b(255, 255, 255, 255)
+    private fun colorOf(v: Value<*>): Color4b {
+        val actual = unwrapValue(v)
+        return when (actual) {
+            is Color4b -> actual
+            is java.awt.Color -> Color4b(actual.red, actual.green, actual.blue, actual.alpha)
+            is Number -> {
+                val argb = actual.toInt()
+                Color4b(
+                    (argb ushr 16) and 0xFF,
+                    (argb ushr 8) and 0xFF,
+                    argb and 0xFF,
+                    (argb ushr 24) and 0xFF,
+                )
+            }
+            else -> {
+                // 反射读 r/g/b/a
+                runCatching {
+                    val cls = actual!!.javaClass
+                    fun n(name: String) = cls.methods.firstOrNull {
+                        it.parameterCount == 0 && it.name.equals(name, true)
+                    }?.invoke(actual) as? Number
+                    val r = n("getRed") ?: n("r") ?: n("getR")
+                    val g = n("getGreen") ?: n("g") ?: n("getG")
+                    val b = n("getBlue") ?: n("b") ?: n("getB")
+                    val a = n("getAlpha") ?: n("a") ?: n("getA")
+                    if (r != null && g != null && b != null) {
+                        Color4b(r.toInt(), g.toInt(), b.toInt(), a?.toInt() ?: 255)
+                    } else null
+                }.getOrNull() ?: Color4b(255, 255, 255, 255)
+            }
+        }
+    }
 
     private fun hsvToRgb(h: Float, s: Float, v: Float, a: Int): Color4b {
         val i = (h * 6f).toInt()
@@ -452,7 +525,7 @@ object ModuleLiquidClickgui : ClientModule(
         }
         panelsBuilt = true
         modChildren.clear()
-        infoCache.clear()
+        infoCache.clear() // 重新识别 COLOR 等类型
         panels.forEach { p ->
             p.modules.forEach { m ->
                 modOpenAnim[m] = if (modOpen[m] == true) 1f else 0f
@@ -1912,7 +1985,13 @@ object ModuleLiquidClickgui : ClientModule(
         Kind.TEXT -> SETTING_ROW_PAD + 14f + 5f + 26f + SETTING_ROW_PAD
         Kind.COLOR -> SETTING_ROW_PAD * 2f + 16f + (if (colorOpen == v) PICKER_TOTAL else 0f)
         Kind.KEY, Kind.BIND -> SETTING_ROW_PAD * 2f + 26f
-        else -> SETTING_ROW_PAD * 2f + 14f
+        else -> {
+            if (isColorLike(unwrapValue(v))) {
+                SETTING_ROW_PAD * 2f + 16f + (if (colorOpen == v) PICKER_TOTAL else 0f)
+            } else {
+                SETTING_ROW_PAD * 2f + 14f
+            }
+        }
     }
 
 
@@ -2135,9 +2214,15 @@ object ModuleLiquidClickgui : ClientModule(
             Kind.COLOR -> drawColorSetting(ctx, font, v, x, y, h, w, p, a)
             Kind.KEY, Kind.BIND -> drawKeySetting(ctx, font, v, x, y, h, w, p, a)
             else -> {
-                drawText(ctx, font, v.name, x, y + (h - 14f) / 2f, alpha(textColor, a), 12f)
-                val s = runCatching { v.get().toString() }.getOrDefault("")
-                drawText(ctx, font, s, x + w - strW(font, s, 12f), y + (h - 14f) / 2f, alpha(dimmedColor, a), 12f)
+                if (isColorLike(unwrapValue(v))) {
+                    // 缓存误判为 OTHER 时仍按颜色绘制
+                    infoCache.remove(v)
+                    drawColorSetting(ctx, font, v, x, y, h, w, p, a)
+                } else {
+                    drawText(ctx, font, v.name, x, y + (h - 14f) / 2f, alpha(textColor, a), 12f)
+                    val s = runCatching { v.get().toString() }.getOrDefault("")
+                    drawText(ctx, font, s.take(24), x + w - strW(font, s.take(24), 12f), y + (h - 14f) / 2f, alpha(dimmedColor, a), 12f)
+                }
             }
         }
     }
