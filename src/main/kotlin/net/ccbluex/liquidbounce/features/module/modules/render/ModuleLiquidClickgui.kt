@@ -513,12 +513,9 @@ object ModuleLiquidClickgui : ClientModule(
 
     internal fun onMouse(button: Int, down: Boolean): Boolean {
         if (down) {
+            // 全屏坐标；Scale 只缩放面板外观
             mouseX = guiMX()
             mouseY = guiMY()
-
-            val s = scale
-            mouseX = viewW / 2f + (mouseX - viewW / 2f) / s
-            mouseY = viewH / 2f + (mouseY - viewH / 2f) / s
             if (button == 0) leftDown = true
             return click(button)
         }
@@ -529,6 +526,17 @@ object ModuleLiquidClickgui : ClientModule(
 
     private fun over(x: Float, y: Float, w: Float, h: Float) =
         mouseX >= x && mouseY >= y && mouseX < x + w && mouseY < y + h
+
+    /** 将全屏鼠标转为某面板布局坐标（面板以左上角按 Scale 缩放） */
+    private fun toLayout(p: Panel): Pair<Float, Float> {
+        val s = scale.coerceIn(0.5f, 2f).coerceAtLeast(0.01f)
+        return (p.x + (mouseX - p.x) / s) to (p.y + (mouseY - p.y) / s)
+    }
+
+    private fun overLayout(p: Panel, x: Float, y: Float, w: Float, h: Float): Boolean {
+        val (lx, ly) = toLayout(p)
+        return lx >= x && ly >= y && lx < x + w && ly < y + h
+    }
 
     private fun inRect(r: FloatArray?) =
         r != null && over(r[0], r[1], r[2], r[3])
@@ -624,20 +632,28 @@ object ModuleLiquidClickgui : ClientModule(
 
         val sorted = panels.sortedByDescending { it.z }
         for (p in sorted) {
+            // 命中测试用布局坐标（绘制按左上角 Scale）
+            val screenMx = mouseX
+            val screenMy = mouseY
+            val (lx, ly) = toLayout(p)
+            mouseX = lx
+            mouseY = ly
 
             val hr = headerRects[p]
             if (hr != null && over(hr[0], hr[1], hr[2], hr[3])) {
-
                 val btnL = p.x + hr[2] - 15f - 12f - 4f
                 val onExpandBtn = mouseX >= btnL
                 if (left && !onExpandBtn) {
                     p.z = ++maxZ
                     dragPanel = p
-                    dragOffX = mouseX - p.x
-                    dragOffY = mouseY - p.y
+                    // 拖动偏移用屏幕坐标，与 onDrag 一致
+                    dragOffX = screenMx - p.x
+                    dragOffY = screenMy - p.y
                 } else if (left && onExpandBtn || right) {
                     togglePanel(p)
                 }
+                mouseX = screenMx
+                mouseY = screenMy
                 return true
             }
 
@@ -645,9 +661,14 @@ object ModuleLiquidClickgui : ClientModule(
                 val bodyY = p.y + HEADER_H + 2f
                 val bodyH = p.extAnim * panelMaxHeight
                 if (over(p.x, bodyY, panelWidth, bodyH)) {
-                    if (handlePanelContent(p, bodyY, bodyH, left, right)) return true
+                    val hit = handlePanelContent(p, bodyY, bodyH, left, right)
+                    mouseX = screenMx
+                    mouseY = screenMy
+                    if (hit) return true
                 }
             }
+            mouseX = screenMx
+            mouseY = screenMy
         }
         return true
     }
@@ -916,24 +937,29 @@ object ModuleLiquidClickgui : ClientModule(
 
     internal fun onDrag(dx: Double, dy: Double) {
         val p = dragPanel ?: return
-        val s = scale
-        mouseX = viewW / 2f + (guiMX() - viewW / 2f) / s
-        mouseY = viewH / 2f + (guiMY() - viewH / 2f) / s
+        mouseX = guiMX()
+        mouseY = guiMY()
         val nx = mouseX - dragOffX
         val ny = mouseY - dragOffY
         val g = if (shiftIgnoreGrid || !snapEnabled) 0f else gridSize.toFloat().coerceAtLeast(1f)
         p.x = if (g > 0f) (nx / g).roundToInt() * g else nx
         p.y = if (g > 0f) (ny / g).roundToInt() * g else ny
-        p.x = p.x.coerceIn(0f, (viewW / s - panelWidth).coerceAtLeast(0f))
-        p.y = p.y.coerceIn(0f, (viewH / s - HEADER_H).coerceAtLeast(0f))
+        // 拖动范围固定全屏，不随 Scale 缩小
+        p.x = p.x.coerceIn(0f, (viewW - panelWidth * 0.2f).coerceAtLeast(0f))
+        p.y = p.y.coerceIn(0f, (viewH - HEADER_H * 0.2f).coerceAtLeast(0f))
+        // 滑条拖动需要布局坐标
+        val s = scale.coerceIn(0.5f, 2f)
+        mouseX = p.x + (guiMX() - p.x) / s
+        mouseY = p.y + (guiMY() - p.y) / s
         sliderDrag?.let { applySlider(it) }
         if (colorDragChannel >= 0) colorOpen?.let { applyColorPicker(it) }
+        mouseX = guiMX()
+        mouseY = guiMY()
     }
 
     internal fun onScroll(v: Double): Boolean {
-        val s = scale
-        val mx = viewW / 2f + (guiMX() - viewW / 2f) / s
-        val my = viewH / 2f + (guiMY() - viewH / 2f) / s
+        val mx = guiMX()
+        val my = guiMY()
 
         dropdownValue?.let {
             dropdownValue = null
@@ -953,11 +979,15 @@ object ModuleLiquidClickgui : ClientModule(
             }
         }
 
+        val s = scale.coerceIn(0.5f, 2f)
         val sorted = panels.sortedByDescending { it.z }
         for (p in sorted) {
             if (p.extAnim < 0.9f) continue
-            val bodyY = p.y + HEADER_H + 2f
-            if (mx >= p.x && mx < p.x + panelWidth && my >= bodyY && my < bodyY + panelMaxHeight) {
+            // 屏幕上的可视区域 = 以 p 为原点 scale 后的矩形
+            val bodyY = p.y + (HEADER_H + 2f) * s
+            val bodyH = p.extAnim * panelMaxHeight * s
+            val bodyW = panelWidth * s
+            if (mx >= p.x && mx < p.x + bodyW && my >= bodyY && my < bodyY + bodyH) {
                 val maxScroll = (p.contentH - panelMaxHeight).coerceAtLeast(0f)
                 p.scrollTarget = (p.scrollTarget - v.toFloat() * 20f).coerceIn(0f, maxScroll)
                 saveScroll(p)
@@ -1253,15 +1283,13 @@ object ModuleLiquidClickgui : ClientModule(
         val font = mc.font
         viewW = ctx.guiWidth().toFloat()
         viewH = ctx.guiHeight().toFloat()
-        val s = scale
+        val s = scale.coerceIn(0.5f, 2f)
 
-
-        mouseX = viewW / 2f + (guiMX() - viewW / 2f) / s
-        mouseY = viewH / 2f + (guiMY() - viewH / 2f) / s
-
+        // 全屏鼠标坐标：Search 与拖动范围不随 Scale 缩小
+        mouseX = guiMX()
+        mouseY = guiMY()
 
         updateAnimations(dt)
-
 
         rowRects.clear()
         headerRects.clear()
@@ -1275,41 +1303,31 @@ object ModuleLiquidClickgui : ClientModule(
         sliderRects.clear()
         descTarget = null
 
-
         if (dimBackground && dimAlpha > 0f) {
             ctx.drawQuad(0f, 0f, viewW, viewH, alpha(Color4b(0, 0, 0, 255), (dimAlpha * 255 * uiAlpha).toInt()))
         }
 
-
         val dragging = dragPanel != null
+        if (dragging && snapEnabled && showGridWhileDrag) {
+            drawGrid(ctx, 1f)
+        }
 
-        ctx.pose().withPush {
-            translate(viewW / 2f, viewH / 2f)
-            scale(s, s)
-            translate(-viewW / 2f, -viewH / 2f)
+        // Search 固定在屏幕坐标，不受 Scale 影响
+        if (searchEnabled) drawSearch(ctx, font)
 
-
-            if (dragging && snapEnabled && showGridWhileDrag) {
-                drawGrid(ctx, s)
-            }
-
-
-            if (searchEnabled) drawSearch(ctx, font)
-
-
-            for (p in panels.sortedBy { it.z }) {
+        // 面板以自身左上角缩放，位置仍是全屏坐标
+        for (p in panels.sortedBy { it.z }) {
+            ctx.pose().withPush {
+                translate(p.x, p.y)
+                scale(s, s)
+                translate(-p.x, -p.y)
                 drawPanel(ctx, font, p)
             }
-
-
-            drawHighlight(ctx)
-
-
-            if (descEnabled) drawDescription(ctx, font)
-
-
-            drawDropdown(ctx, font)
         }
+
+        drawHighlight(ctx)
+        if (descEnabled) drawDescription(ctx, font)
+        drawDropdown(ctx, font)
     }
 
     private fun updateAnimations(dt: Float) {
