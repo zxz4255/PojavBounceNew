@@ -475,6 +475,7 @@ object ModuleSolsticeNotification : ClientModule(
             val boxTop = y - boxH
             val boxBottom = y - 10f
 
+            // 进度条主题色（Warning/Error 仍可区分类型）
             var theme = getThemedColor(boxTop * 2f)
             when (n.type) {
                 Type.WARNING -> theme = Color4b(255, 204, 0, 255)
@@ -482,7 +483,6 @@ object ModuleSolsticeNotification : ClientModule(
                 Type.INFO -> Unit
             }
             val aMul = n.slide
-            // 辉光：显示中始终满；关闭时淡出；slide 再低也保底，避免“没辉光”
             val glowMul = if (n.isTimeUp) {
                 aMul.coerceIn(0f, 1f)
             } else {
@@ -491,9 +491,17 @@ object ModuleSolsticeNotification : ClientModule(
             val cLeft = theme.alpha((220 * aMul).toInt().coerceIn(0, 255))
             val cRight = getThemedColor(boxTop * 2f + boxW * 1.2f)
                 .alpha((200 * aMul).toInt().coerceIn(0, 255))
+            // 辉光严格跟随设置：CUSTOM/GRADIENT 永远用 Glow Color；
+            // THEME 用 Theme A/B 循环色（不受 Warning 黄/红覆盖）；
+            // 仅 TYPE 模式才按通知类型上色
             val (g1, g2, gGrad) = when (glowColorMode) {
-                GlowColorMode.CUSTOM -> Triple(glowColor, glowColor2, false)
-                GlowColorMode.THEME -> Triple(theme, getThemedColor(boxTop * 2f + 40f), false)
+                GlowColorMode.CUSTOM -> Triple(glowColor, glowColor, false)
+                GlowColorMode.GRADIENT -> Triple(glowColor, glowColor2, true)
+                GlowColorMode.THEME -> Triple(
+                    getThemedColor(boxTop * 2f),
+                    getThemedColor(boxTop * 2f + 40f),
+                    true,
+                )
                 GlowColorMode.TYPE -> Triple(
                     when (n.type) {
                         Type.WARNING -> Color4b(255, 204, 0, 255)
@@ -503,7 +511,6 @@ object ModuleSolsticeNotification : ClientModule(
                     glowColor2,
                     false,
                 )
-                GlowColorMode.GRADIENT -> Triple(glowColor, glowColor2, true)
             }
             drawGlow(ctx, x, boxTop, x + boxW, boxBottom, g1, g2, glowMul, gGrad)
 
