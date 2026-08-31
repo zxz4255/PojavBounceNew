@@ -1689,13 +1689,22 @@ object ModuleLiquidClickgui : ClientModule(
         val w = panelWidth
 
 
+        // 已展开的模块按「完整子项高度」计入可滚空间，避免动画未结束/底部展开时 maxScroll 偏小导致截断
         var contentH = 0f
         for (m in p.modules) {
             contentH += ROW_H
-            contentH += settingsHeightNow(m, modOpenAnim.getOrDefault(m, 0f))
+            val openF = modOpenAnim.getOrDefault(m, 0f)
+            if (modOpen[m] == true) {
+                contentH += settingsHeight(m) // 目标全高，保证能滚到底
+            } else if (openF > 0.001f) {
+                contentH += settingsHeight(m) * quintOut(openF) // 收起动画仍用插值
+            }
         }
         p.contentH = contentH
         val maxScroll = (contentH - bodyH).coerceAtLeast(0f)
+        // 展开后若当前滚动不够，自动补一点，露出被挡的子项
+        if (p.scrollTarget > maxScroll) p.scrollTarget = maxScroll
+        if (p.scroll > maxScroll) p.scroll = maxScroll
         p.scrollTarget = p.scrollTarget.coerceIn(0f, maxScroll)
 
         ctx.scissorStack.withPush(ctx.getBounds(x, clipTop, x + w, clipBot)) {
@@ -1710,18 +1719,26 @@ object ModuleLiquidClickgui : ClientModule(
                 y += ROW_H
 
 
-                if (openF > 0.001f) {
-                    val setH = settingsHeight(m) * quintOut(openF)
-                    if (y + setH > clipTop && y < clipBot) {
-
-                        ctx.drawQuad(x, y, x + w, y + setH, mix(0.5f, a))
-                        ctx.drawQuad(x, y, x + 4f, y + setH, alpha(accentColor, a))
-
-                        val innerBottom = min(y + setH, clipBot)
-                        ctx.scissorStack.withPush(ctx.getBounds(x, y, x + w, innerBottom)) {
-                            walkValues(childrenOfModule(m), 0, x + 4f + SET_PAD_L, y) { v, vx, vy, vh, indent ->
-                                if (vy + vh > y && vy < y + setH) {
-                                    drawSetting(ctx, font, v, vx, vy, vh, indent, p, a)
+                if (openF > 0.001f || modOpen[m] == true) {
+                    val fullH = settingsHeight(m)
+                    // 布局占位用全高（已展开时），与 contentH/滚动一致，避免下面模块被挡且滚不到
+                    val setH = if (modOpen[m] == true) fullH else fullH * quintOut(openF)
+                    val drawH = fullH * quintOut(
+                        if (modOpen[m] == true) openF.coerceAtLeast(0.001f).coerceAtMost(1f).let { if (it < 0.05f) 1f else it } else openF
+                    )
+                    // 已打开时绘制也用全高，避免子项在动画中途被裁掉看不见
+                    val visH = if (modOpen[m] == true) fullH else setH
+                    if (y + visH > clipTop && y < clipBot) {
+                        ctx.drawQuad(x, y, x + w, y + visH, mix(0.5f, a))
+                        ctx.drawQuad(x, y, x + 4f, y + visH, alpha(accentColor, a))
+                        val innerTop = maxOf(y, clipTop)
+                        val innerBottom = min(y + visH, clipBot)
+                        if (innerBottom > innerTop) {
+                            ctx.scissorStack.withPush(ctx.getBounds(x, innerTop, x + w, innerBottom)) {
+                                walkValues(childrenOfModule(m), 0, x + 4f + SET_PAD_L, y) { v, vx, vy, vh, indent ->
+                                    if (vy + vh > innerTop && vy < innerBottom) {
+                                        drawSetting(ctx, font, v, vx, vy, vh, indent, p, a)
+                                    }
                                 }
                             }
                         }
