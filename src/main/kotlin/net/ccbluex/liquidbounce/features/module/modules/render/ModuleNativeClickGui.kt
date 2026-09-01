@@ -37,7 +37,7 @@ import kotlin.math.roundToInt
 object ModuleNativeClickGui : ClientModule(
     "NativeClickGUI",
     ModuleCategories.RENDER,
-    bind = InputConstants.KEY_RIGHT_BRACKET,
+    bind = InputConstants.KEY_RBRACKET,
     disableActivation = true
 ) {
 
