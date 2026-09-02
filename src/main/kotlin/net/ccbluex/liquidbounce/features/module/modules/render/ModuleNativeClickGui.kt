@@ -1,708 +1,553 @@
-/*
- * This file is part of LiquidBounce (https://github.com/CCBlueX/LiquidBounce)
- *
- * Copyright (c) 2015 - 2026 CCBlueX
- *
- * LiquidBounce is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- */
-package net.ccbluex.liquidbounce.features.module.modules.render
+package net.ccbluex.liquidbounce.features.module.modules.exploit
 
-import com.mojang.blaze3d.platform.InputConstants
-import net.ccbluex.liquidbounce.config.types.RangedValue
-import net.ccbluex.liquidbounce.config.types.Value
-import net.ccbluex.liquidbounce.config.types.ValueType
-import net.ccbluex.liquidbounce.config.types.group.ToggleableValueGroup
-import net.ccbluex.liquidbounce.features.module.ClientModule
-import net.ccbluex.liquidbounce.features.module.ModuleCategories
-import net.ccbluex.liquidbounce.features.module.ModuleCategory
-import net.ccbluex.liquidbounce.features.module.ModuleManager
-import net.ccbluex.liquidbounce.utils.client.mc
-import net.ccbluex.liquidbounce.utils.text.asPlainText
-import net.minecraft.client.gui.GuiGraphicsExtractor
-import net.minecraft.client.gui.screens.Screen
-import net.minecraft.client.input.CharacterEvent
-import net.minecraft.client.input.KeyEvent
-import net.minecraft.client.input.MouseButtonEvent
-import net.minecraft.util.ARGB
-import kotlin.math.roundToInt
+import net.ccbluex.liquidbounce.event.EventManager
+import net.ccbluex.liquidbounce.event.EventState
+import net.ccbluex.liquidbounce.event.events.*
+import net.ccbluex.liquidbounce.features.module.Category
+import net.ccbluex.liquidbounce.features.module.Module
+import net.minecraft.client.Minecraft
+import net.minecraft.client.player.LocalPlayer
+import net.minecraft.core.BlockPos
+import net.minecraft.core.Direction
+import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket
+import net.minecraft.network.protocol.game.ServerboundUseItemOnPacket
+import net.minecraft.world.InteractionHand
+import net.minecraft.world.phys.BlockHitResult
+import net.minecraft.world.phys.Vec3
+import kotlin.random.Random
 
 /**
- * NativeClickGUI module
- *
- * This is a structural port of the real ClickGUI (src-theme/src/routes/clickgui) to vanilla
- * GuiGraphics rendering - no browser/CEF involved. It replicates the actual interaction model:
- *
- *  - One draggable, freely-positioned panel per module category (see Panel.svelte)
- *  - Grid snapping while dragging, bypassed by holding shift (see Panel.svelte snapToGrid)
- *  - Right-click (or the arrow button) collapses/expands a panel's module list
- *  - Left-click on a module toggles it; right-click/arrow expands its inline settings (Module.svelte)
- *  - A hover tooltip shows the module description + aliases (Module.svelte setDescription)
- *  - A search bar fuzzy-filters by name/alias and jumps to + expands the matching panel (Search.svelte)
- *
- * Not ported 1:1: color pickers, curve editors, vector inputs, and virtualized lists - those
- * settings fall back to a plain text readout. Boolean/Float/Int(Range)/Choice are fully interactive.
+ * EC Disabler - 复刻 Zen Client 的 FakeECDisabler 功能
  */
-object ModuleNativeClickGui : ClientModule(
-    "NativeClickGUI",
-    ModuleCategories.RENDER,
-    bind = InputConstants.KEY_RBRACKET,
-    disableActivation = true
-) {
+object ModuleECDisabler : Module("ECDisabler", Category.EXPLOIT) {
 
-    override val running get() = true
+    private val ecRandom = Random
+    private var ecTick = 0
+    private var ecX = 0.0
+    private var ecY = 0.0
+    private var ecZ = 0.0
+    private var ecFlag1 = false
+    private var ecFlag2 = true
 
-    // Mirrors the real ModuleClickGui's own settings (see ModuleClickGui.kt)
-    val scale by float("Scale", 1f, 0.5f..2f)
-    val searchBarAutoFocus by boolean("SearchBarAutoFocus", true)
-
-    object Snapping : ToggleableValueGroup(this, "Snapping", true) {
-        val gridSize by int("GridSize", 10, 1..100)
-    }
+    private val ecMode = choices("Mode", Fuckec1, arrayOf(
+        Fuckec1, Fuckec2, Fuckec3, Fuckec4, Fuckec5,
+        Fuckec6, Fuckec7, Fuckec8, Fuckec9, Fuckec10
+    ))
 
     init {
-        tree(Snapping)
-    }
-
-    override fun onEnabled() {
-        if (mc.gui.screen() !is NativeClickGuiScreen) {
-            mc.gui.setScreen(NativeClickGuiScreen())
-        } else {
-            mc.gui.setScreen(null)
-        }
-        super.onEnabled()
-        enabled = false
-    }
-}
-
-// ---- Session-persistent UI state (mirrors what Panel.svelte/Module.svelte keep in localStorage) ----
-
-private class PanelState(var x: Float, var y: Float) {
-    var expanded = false
-    var scrollOffset = 0
-    var zIndex = 0
-}
-
-private object PanelRegistry {
-    private val states = linkedMapOf<String, PanelState>()
-    private var nextZ = 0
-
-    fun get(category: ModuleCategory, panelIndex: Int): PanelState =
-        states.getOrPut(category.tag) { PanelState(x = 20f, y = panelIndex * 40f + 20f) }
-
-    fun bringToFront(state: PanelState) {
-        state.zIndex = ++nextZ
-    }
-
-    /** Panels sorted back-to-front, so later ones draw (and hit-test) on top. */
-    fun ordered(categories: Collection<ModuleCategory>): List<Pair<ModuleCategory, PanelState>> =
-        categories.mapIndexed { i, c -> c to get(c, i) }.sortedBy { it.second.zIndex }
-}
-
-private object ExpandedModules {
-    val names = mutableSetOf<String>()
-    fun isExpanded(name: String) = name in names
-    fun toggle(name: String) {
-        if (!names.add(name)) names.remove(name)
-    }
-}
-
-private val PANEL_HEADER_BG = ARGB.color(235, 22, 22, 26)
-private val PANEL_BODY_BG = ARGB.color(220, 16, 16, 19)
-private val ROW_HOVER = ARGB.color(180, 34, 34, 40)
-private val SETTINGS_BG = ARGB.color(200, 12, 12, 15)
-private val SETTINGS_BORDER = ARGB.color(255, 60, 110, 210)
-private val TEXT_DIM = ARGB.color(255, 165, 165, 172)
-private val TEXT_ENABLED = ARGB.color(255, 90, 170, 255)
-private val TEXT_MAIN = -1
-private val ACCENT = ARGB.color(255, 90, 170, 255)
-private val GRID_COLOR = ARGB.color(60, 255, 255, 255)
-private val TOOLTIP_BG = ARGB.color(235, 10, 10, 12)
-private val SEARCH_BG = ARGB.color(220, 20, 20, 24)
-private val SEARCH_HIGHLIGHT = ARGB.color(255, 90, 170, 255)
-
-private const val PANEL_WIDTH = 172
-private const val HEADER_HEIGHT = 22
-private const val ROW_HEIGHT = 18
-private const val SETTING_ROW_HEIGHT = 16
-private const val MAX_EXPANDED_HEIGHT = 260
-
-/**
- * A native, vanilla-rendered structural port of the real (browser-based) ClickGUI.
- */
-class NativeClickGuiScreen : Screen("ClickGUI".asPlainText()) {
-
-    private val searchQuery = StringBuilder()
-    private var searchFocused = ModuleNativeClickGui.searchBarAutoFocus
-    private var highlightedModule: String? = null
-
-    private var draggingPanel: PanelState? = null
-    private var dragOffsetX = 0f
-    private var dragOffsetY = 0f
-    private var ignoreGrid = false
-
-    private var draggingValue: RangedValue<*>? = null
-    private var draggingValueBounds: Rect? = null
-
-    private var hoveredTooltip: Triple<String, String, List<String>>? = null // (name, description, aliases)
-    private var hoveredTooltipX = 0
-    private var hoveredTooltipY = 0
-
-    private class Rect(val x: Int, val y: Int, val w: Int, val h: Int) {
-        operator fun contains(px: Int, py: Int) = px in x until (x + w) && py in y until (y + h)
-    }
-
-    private val scale get() = ModuleNativeClickGui.scale
-    private fun s(px: Int) = (px * scale).roundToInt()
-
-    override fun extractRenderState(context: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) {
-        hoveredTooltip = null
-        drawSearchBar(context, mouseX, mouseY)
-
-        val categories = ModuleCategories.entries
-        val draggingNow = draggingPanel != null
-
-        for ((category, state) in PanelRegistry.ordered(categories)) {
-            drawPanel(context, category, state, mouseX, mouseY, draggingNow)
-        }
-
-        hoveredTooltip?.let { (name, description, aliases) ->
-            drawTooltip(context, name, description, aliases, hoveredTooltipX, hoveredTooltipY)
-        }
-    }
-
-    // ---- Search bar ----
-
-    private fun matchingModules(): List<ClientModule> {
-        val q = searchQuery.toString().lowercase().replace(" ", "")
-        if (q.isEmpty()) return emptyList()
-        return ModuleManager.filter { module ->
-            module.name.lowercase().contains(q) || module.aliases.any { it.lowercase().contains(q) }
-        }
-    }
-
-    private fun drawSearchBar(context: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
-        val barWidth = s(220)
-        val barHeight = s(18)
-        val x = (width - barWidth) / 2
-        val y = s(8)
-
-        context.fill(x, y, x + barWidth, y + barHeight, SEARCH_BG)
-        if (searchFocused) {
-            context.fill(x, y + barHeight, x + barWidth, y + barHeight + 1, SEARCH_HIGHLIGHT)
-        }
-
-        val display = if (searchQuery.isEmpty()) "Search..." else searchQuery.toString()
-        context.text(
-            font,
-            display.asPlainText(),
-            x + 6,
-            y + (barHeight - font.lineHeight) / 2,
-            if (searchQuery.isEmpty()) TEXT_DIM else TEXT_MAIN,
-            false
-        )
-
-        val results = matchingModules()
-        if (results.isNotEmpty()) {
-            var ry = y + barHeight + 2
-            for (module in results.take(8)) {
-                val hovered = mouseX in x..(x + barWidth) && mouseY in ry..(ry + s(16))
-                if (hovered) {
-                    context.fill(x, ry, x + barWidth, ry + s(16), ROW_HOVER)
-                }
-                context.text(
-                    font,
-                    module.name.asPlainText(),
-                    x + 6,
-                    ry + (s(16) - font.lineHeight) / 2,
-                    if (module.enabled) TEXT_ENABLED else TEXT_MAIN,
-                    false
-                )
-                ry += s(16)
-            }
-        }
-    }
-
-    // ---- Panels ----
-
-    private fun drawPanel(
-        context: GuiGraphicsExtractor,
-        category: ModuleCategory,
-        state: PanelState,
-        mouseX: Int,
-        mouseY: Int,
-        draggingNow: Boolean
-    ) {
-        val x = state.x.roundToInt()
-        val y = state.y.roundToInt()
-        val w = s(PANEL_WIDTH)
-        val headerH = s(HEADER_HEIGHT)
-
-        context.fill(x, y, x + w, y + headerH, PANEL_HEADER_BG)
-        context.text(
-            font,
-            category.tag.asPlainText(),
-            x + s(8),
-            y + (headerH - font.lineHeight) / 2,
-            TEXT_MAIN,
-            false
-        )
-
-        val arrow = if (state.expanded) "v" else ">"
-        context.text(
-            font,
-            arrow.asPlainText(),
-            x + w - s(14),
-            y + (headerH - font.lineHeight) / 2,
-            TEXT_DIM,
-            false
-        )
-
-        if (draggingNow && draggingPanel === state && snappingEnabled()) {
-            drawSnapGrid(context)
-        }
-
-        if (!state.expanded) return
-
-        val modules = ModuleManager.filter { it.category == category }
-        var rowY = y + headerH
-        val bodyTop = rowY
-        var bodyBottom = rowY
-
-        for (module in modules) {
-            if (bodyBottom - bodyTop >= s(MAX_EXPANDED_HEIGHT)) break
-
-            val rowH = s(ROW_HEIGHT)
-            val hovered = mouseX in x..(x + w) && mouseY in rowY..(rowY + rowH)
-
-            context.fill(x, rowY, x + w, rowY + rowH, if (hovered) ROW_HOVER else PANEL_BODY_BG)
-
-            val nameColor = when {
-                module.enabled -> TEXT_ENABLED
-                hovered -> TEXT_MAIN
-                else -> TEXT_DIM
-            }
-            context.text(
-                font,
-                module.name.asPlainText(),
-                x + s(8),
-                rowY + (rowH - font.lineHeight) / 2,
-                nameColor,
-                false
-            )
-
-            val settings = visibleSettings(module)
-            if (settings.isNotEmpty()) {
-                val arrowChar = if (ExpandedModules.isExpanded(module.name)) "-" else "+"
-                context.text(
-                    font,
-                    arrowChar.asPlainText(),
-                    x + w - s(14),
-                    rowY + (rowH - font.lineHeight) / 2,
-                    TEXT_DIM,
-                    false
-                )
-            }
-
-            if (hovered) {
-                hoveredTooltip = Triple(module.name, module.description.get() ?: "", module.aliases)
-                hoveredTooltipX = x + w + s(4)
-                hoveredTooltipY = rowY
-            }
-
-            rowY += rowH
-            bodyBottom = rowY
-
-            if (ExpandedModules.isExpanded(module.name) && settings.isNotEmpty()) {
-                for (value in settings) {
-                    if (bodyBottom - bodyTop >= s(MAX_EXPANDED_HEIGHT)) break
-                    val settingH = s(SETTING_ROW_HEIGHT)
-                    drawSetting(context, value, x, rowY, w, settingH, mouseX, mouseY)
-                    rowY += settingH
-                    bodyBottom = rowY
-                }
-            }
-        }
-    }
-
-    /** Boolean/Bind/Hidden are excluded, matching Module.svelte's `hasSettings` filter. */
-    private fun visibleSettings(module: ClientModule): List<Value<*>> =
-        module.settings.values.filter { it.name != "Enabled" && it.name != "Bind" && it.name != "Hidden" }
-
-    private fun drawSnapGrid(context: GuiGraphicsExtractor) {
-        val grid = s(ModuleNativeClickGui.Snapping.gridSize)
-        if (grid <= 0) return
-        var gx = 0
-        while (gx < width) {
-            context.fill(gx, 0, gx + 1, height, GRID_COLOR)
-            gx += grid
-        }
-        var gy = 0
-        while (gy < height) {
-            context.fill(0, gy, width, gy + 1, GRID_COLOR)
-            gy += grid
-        }
-    }
-
-    private fun snappingEnabled() = ModuleNativeClickGui.Snapping.enabled
-
-    // ---- Settings widgets ----
-
-    private fun drawSetting(
-        context: GuiGraphicsExtractor,
-        value: Value<*>,
-        x: Int,
-        y: Int,
-        w: Int,
-        h: Int,
-        mouseX: Int,
-        mouseY: Int
-    ) {
-        context.fill(x, y, x + w, y + h, SETTINGS_BG)
-        context.fill(x, y, x + 2, y + h, SETTINGS_BORDER)
-
-        context.text(
-            font,
-            value.name.asPlainText(),
-            x + s(6),
-            y + (h - font.lineHeight) / 2,
-            TEXT_DIM,
-            false
-        )
-
-        when (value.valueType) {
-            ValueType.BOOLEAN -> {
-                @Suppress("UNCHECKED_CAST")
-                val boolValue = value as Value<Boolean>
-                val boxSize = h - s(6)
-                val boxX = x + w - boxSize - s(6)
-                val boxY = y + s(3)
-                context.fill(boxX, boxY, boxX + boxSize, boxY + boxSize, ARGB.color(255, 55, 55, 60))
-                if (boolValue.get()) {
-                    context.fill(boxX + 2, boxY + 2, boxX + boxSize - 2, boxY + boxSize - 2, ACCENT)
-                }
-            }
-
-            ValueType.FLOAT, ValueType.INT -> {
-                if (value is RangedValue<*>) {
-                    val sliderW = s(80)
-                    val sliderX = x + w - sliderW - s(6)
-                    val sliderY = y + h / 2 - 1
-
-                    context.fill(sliderX, sliderY, sliderX + sliderW, sliderY + 2, ARGB.color(255, 70, 70, 76))
-                    val fraction = sliderFraction(value)
-                    val knobX = sliderX + (sliderW * fraction).roundToInt()
-                    context.fill(knobX - 2, y + 2, knobX + 2, y + h - 2, ACCENT)
-
-                    val text = value.get().toString()
-                    context.text(
-                        font,
-                        text.asPlainText(),
-                        sliderX - font.width(text) - s(4),
-                        y + (h - font.lineHeight) / 2,
-                        TEXT_MAIN,
-                        false
-                    )
-                }
-            }
-
-            ValueType.CHOICE, ValueType.CHOOSE -> {
-                // Simplified: click cycles through options (real UI uses a dropdown with nested
-                // per-choice settings; those nested settings aren't rendered here).
-                val text = value.get().toString()
-                context.text(
-                    font,
-                    text.asPlainText(),
-                    x + w - font.width(text) - s(6),
-                    y + (h - font.lineHeight) / 2,
-                    ACCENT,
-                    false
-                )
-            }
-
-            else -> {
-                val text = value.get().toString()
-                context.text(
-                    font,
-                    text.asPlainText(),
-                    x + w - font.width(text) - s(6),
-                    y + (h - font.lineHeight) / 2,
-                    TEXT_MAIN,
-                    false
-                )
-            }
-        }
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun sliderFraction(value: RangedValue<*>): Float = when (val current = value.get()) {
-        is Float -> {
-            val r = value.range as ClosedRange<Float>
-            ((current - r.start) / (r.endInclusive - r.start)).coerceIn(0f, 1f)
-        }
-        is Int -> {
-            val r = value.range as ClosedRange<Int>
-            ((current - r.start).toFloat() / (r.endInclusive - r.start)).coerceIn(0f, 1f)
-        }
-        else -> 0f
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun applySliderFraction(value: RangedValue<*>, fraction: Float) {
-        val clamped = fraction.coerceIn(0f, 1f)
-        when (value.get()) {
-            is Float -> {
-                val r = value.range as ClosedRange<Float>
-                (value as Value<Float>).set(r.start + (r.endInclusive - r.start) * clamped)
-            }
-            is Int -> {
-                val r = value.range as ClosedRange<Int>
-                (value as Value<Int>).set(r.start + ((r.endInclusive - r.start) * clamped).roundToInt())
-            }
-        }
-    }
-
-    // ---- Tooltip ----
-
-    private fun drawTooltip(
-        context: GuiGraphicsExtractor,
-        name: String,
-        description: String,
-        aliases: List<String>,
-        x: Int,
-        y: Int
-    ) {
-        var text = description
-        if (aliases.isNotEmpty()) {
-            text += " (aka ${aliases.joinToString(", ")})"
-        }
-        if (text.isBlank()) return
-
-        val boxWidth = (font.width(text) + s(10)).coerceAtMost(s(200))
-        val boxHeight = s(16)
-        val boxX = if (x + boxWidth > width) x - boxWidth - s(8) else x
-        val boxY = y.coerceIn(0, (height - boxHeight).coerceAtLeast(0))
-
-        context.fill(boxX, boxY, boxX + boxWidth, boxY + boxHeight, TOOLTIP_BG)
-        context.text(font, text.asPlainText(), boxX + s(5), boxY + (boxHeight - font.lineHeight) / 2, TEXT_MAIN, false)
-    }
-
-    // ---- Input handling ----
-
-    override fun mouseClicked(click: MouseButtonEvent, doubled: Boolean): Boolean {
-        val mouseX = click.x.toInt()
-        val mouseY = click.y.toInt()
-        val rightClick = click.button() == InputConstants.MOUSE_BUTTON_RIGHT
-
-        val barWidth = s(220)
-        val x0 = (width - barWidth) / 2
-        val y0 = s(8)
-        searchFocused = mouseX in x0..(x0 + barWidth) && mouseY in y0..(y0 + s(18))
-        if (searchFocused) {
-            return true
-        }
-
-        val results = matchingModules()
-        if (results.isNotEmpty()) {
-            var ry = y0 + s(18) + 2
-            for (module in results.take(8)) {
-                if (mouseX in x0..(x0 + barWidth) && mouseY in ry..(ry + s(16))) {
-                    jumpTo(module)
-                    return true
-                }
-                ry += s(16)
+        // Tick 事件
+        handler<TickEvent> { event ->
+            val player = Minecraft.getInstance().player ?: return@handler
+            ecTick++
+
+            when (ecMode.getActiveMode()) {
+                Fuckec1 -> tickFuckec1(player)
+                Fuckec2 -> tickFuckec2(player)
+                Fuckec3 -> tickFuckec3(player)
+                Fuckec4 -> tickFuckec4(player)
+                Fuckec5 -> tickFuckec5(player)
+                Fuckec6 -> tickFuckec6(player)
+                Fuckec7 -> tickFuckec7(player)
+                Fuckec8 -> tickFuckec8(player)
+                Fuckec9 -> tickFuckec9(player)
+                Fuckec10 -> tickFuckec10(player)
             }
         }
 
-        for ((category, state) in PanelRegistry.ordered(ModuleCategories.entries).asReversed()) {
-            if (handlePanelClick(category, state, mouseX, mouseY, rightClick)) {
-                PanelRegistry.bringToFront(state)
-                return true
+        // PreMotion 事件
+        handler<PlayerNetworkMovementTickEvent> { event ->
+            if (event.state != EventState.PRE) return@handler
+            val player = Minecraft.getInstance().player ?: return@handler
+
+            when (ecMode.getActiveMode()) {
+                Fuckec1 -> preMotionFuckec1(player)
+                Fuckec2 -> preMotionFuckec2(player)
+                Fuckec3 -> preMotionFuckec3(player)
+                Fuckec4 -> preMotionFuckec4(player)
+                Fuckec5 -> preMotionFuckec5(player)
+                Fuckec6 -> preMotionFuckec6(player)
+                Fuckec7 -> preMotionFuckec7(player)
+                Fuckec8 -> preMotionFuckec8(player)
+                Fuckec9 -> preMotionFuckec9(player)
+                Fuckec10 -> preMotionFuckec10(player)
             }
         }
 
-        return true
-    }
+        // Packet 事件（发送）
+        handler<PacketEvent> { event ->
+            if (event.origin != TransferOrigin.OUTGOING) return@handler
+            val player = Minecraft.getInstance().player ?: return@handler
+            val packet = event.packet
 
-    private fun jumpTo(module: ClientModule) {
-        highlightedModule = module.name
-        searchQuery.clear()
-        val index = ModuleCategories.entries.toList().indexOf(module.category).coerceAtLeast(0)
-        val state = PanelRegistry.get(module.category, index)
-        state.expanded = true
-        ExpandedModules.names.add(module.name)
-        PanelRegistry.bringToFront(state)
-    }
-
-    private fun handlePanelClick(
-        category: ModuleCategory,
-        state: PanelState,
-        mouseX: Int,
-        mouseY: Int,
-        rightClick: Boolean
-    ): Boolean {
-        val x = state.x.roundToInt()
-        val y = state.y.roundToInt()
-        val w = s(PANEL_WIDTH)
-        val headerH = s(HEADER_HEIGHT)
-
-        if (mouseX in x..(x + w) && mouseY in y..(y + headerH)) {
-            if (rightClick) {
-                state.expanded = !state.expanded
-            } else {
-                draggingPanel = state
-                dragOffsetX = mouseX - state.x
-                dragOffsetY = mouseY - state.y
-            }
-            return true
-        }
-
-        if (!state.expanded) return false
-
-        val modules = ModuleManager.filter { it.category == category }
-        var rowY = y + headerH
-        val bodyTop = rowY
-
-        for (module in modules) {
-            if (rowY - bodyTop >= s(MAX_EXPANDED_HEIGHT)) break
-            val rowH = s(ROW_HEIGHT)
-
-            if (mouseX in x..(x + w) && mouseY in rowY..(rowY + rowH)) {
-                val settings = visibleSettings(module)
-                val arrowZone = x + w - s(16)
-                if (rightClick || (settings.isNotEmpty() && mouseX >= arrowZone)) {
-                    if (settings.isNotEmpty()) ExpandedModules.toggle(module.name)
-                } else {
-                    module.enabled = !module.enabled
-                }
-                return true
-            }
-            rowY += rowH
-
-            if (ExpandedModules.isExpanded(module.name)) {
-                for (value in visibleSettings(module)) {
-                    if (rowY - bodyTop >= s(MAX_EXPANDED_HEIGHT)) break
-                    val settingH = s(SETTING_ROW_HEIGHT)
-                    if (mouseY in rowY..(rowY + settingH) && mouseX in x..(x + w)) {
-                        handleSettingClick(value, mouseX, x, w, rowY, settingH)
-                        return true
+            when (ecMode.getActiveMode()) {
+                Fuckec1 -> {
+                    if (packet is ServerboundMovePlayerPacket.Rot && ecRandom.nextBoolean()) {
+                        event.cancel()
                     }
-                    rowY += settingH
+                }
+                Fuckec2 -> {
+                    if (packet is ServerboundMovePlayerPacket.Pos && ecTick % 2 == 0) {
+                        event.cancel()
+                    }
+                }
+                Fuckec3 -> {
+                    if (packet is ServerboundMovePlayerPacket && player.onGround() && ecRandom.nextFloat() < 0.3f) {
+                        event.cancel()
+                    }
+                }
+                Fuckec4 -> {
+                    if (packet is ServerboundUseItemOnPacket && ecRandom.nextBoolean()) {
+                        event.cancel()
+                    }
+                }
+                Fuckec5 -> {
+                    if (packet is ServerboundMovePlayerPacket.StatusOnly && ecTick % 3 == 0) {
+                        event.cancel()
+                    }
+                }
+                Fuckec6 -> {
+                    if (packet is ServerboundMovePlayerPacket && ecRandom.nextDouble() > 0.7) {
+                        event.cancel()
+                    }
+                }
+                Fuckec7 -> {
+                    if (packet is ServerboundMovePlayerPacket.Pos && player.fallDistance > 0.1f) {
+                        event.cancel()
+                    }
+                }
+                Fuckec8 -> {
+                    if (packet is ServerboundMovePlayerPacket.Rot && ecTick % 4 == 0) {
+                        event.cancel()
+                    }
+                }
+                Fuckec9 -> {
+                    if (packet is ServerboundMovePlayerPacket && ecRandom.nextBoolean()) {
+                        event.cancel()
+                    }
+                }
+                Fuckec10 -> {
+                    // Bypass
                 }
             }
         }
 
-        return false
-    }
+        // Strafe 事件
+        handler<PlayerStrafeEvent> { event ->
+            val player = Minecraft.getInstance().player ?: return@handler
 
-    @Suppress("UNCHECKED_CAST")
-    private fun handleSettingClick(value: Value<*>, mouseX: Int, x: Int, w: Int, rowY: Int, rowH: Int) {
-        when (value.valueType) {
-            ValueType.BOOLEAN -> (value as Value<Boolean>).set(!value.get())
-            ValueType.FLOAT, ValueType.INT -> {
-                if (value is RangedValue<*>) {
-                    val sliderW = s(80)
-                    val sliderX = x + w - sliderW - s(6)
-                    val fraction = (mouseX - sliderX).toFloat() / sliderW
-                    applySliderFraction(value, fraction)
-                    draggingValue = value
-                    draggingValueBounds = Rect(sliderX, rowY, sliderW, rowH)
+            when (ecMode.getActiveMode()) {
+                Fuckec1 -> {
+                    val ecFactor = 0.8 + ecRandom.nextDouble() * 0.4
+                    event.velocity = event.velocity.scale(ecFactor.toFloat())
+                }
+                Fuckec2 -> {
+                    if (ecRandom.nextBoolean()) {
+                        event.velocity = event.velocity.scale(1.1f)
+                    }
+                }
+                Fuckec3 -> {
+                    if (player.onGround() && ecRandom.nextFloat() < 0.2f) {
+                        event.velocity = Vec3.ZERO
+                    }
+                }
+                Fuckec4 -> {
+                    // FUCK EC4
+                }
+                Fuckec5 -> {
+                    if (ecTick % 2 == 0) {
+                        event.velocity = event.velocity.scale(1.05f)
+                    }
+                }
+                Fuckec6 -> {
+                    if (ecRandom.nextBoolean()) {
+                        event.velocity = event.velocity.scale(-1.0f)
+                    }
+                }
+                Fuckec7 -> {
+                    if (player.isInWater) {
+                        event.velocity = event.velocity.scale(0.5f)
+                    }
+                }
+                Fuckec8 -> {
+                    if (ecRandom.nextFloat() < 0.1f) {
+                        event.velocity = event.velocity.scale(0.8f)
+                    }
+                }
+                Fuckec9 -> {
+                    if (ecRandom.nextBoolean()) {
+                        event.velocity = event.velocity.scale(0.9f)
+                    }
+                }
+                Fuckec10 -> {
+                    if (ecRandom.nextBoolean()) {
+                        event.velocity = event.velocity.scale(1.2f)
+                    }
                 }
             }
-            else -> {}
-        }
-    }
-
-    override fun mouseDragged(click: MouseButtonEvent, offsetX: Double, offsetY: Double): Boolean {
-        draggingPanel?.let { panel ->
-            val rawX = click.x.toFloat() - dragOffsetX
-            val rawY = click.y.toFloat() - dragOffsetY
-            panel.x = snap(rawX)
-            panel.y = snap(rawY)
-            panel.x = panel.x.coerceIn(0f, (width - s(PANEL_WIDTH)).toFloat().coerceAtLeast(0f))
-            panel.y = panel.y.coerceIn(0f, (height - s(HEADER_HEIGHT)).toFloat().coerceAtLeast(0f))
-            return true
         }
 
-        draggingValue?.let { value ->
-            val bounds = draggingValueBounds ?: return true
-            val fraction = (click.x.toFloat() - bounds.x) / bounds.w
-            applySliderFraction(value, fraction)
-            return true
-        }
-
-        return false
-    }
-
-    private fun snap(value: Float): Float {
-        if (ignoreGrid || !ModuleNativeClickGui.Snapping.enabled) return value
-        val grid = s(ModuleNativeClickGui.Snapping.gridSize).coerceAtLeast(1)
-        return (value / grid).roundToInt() * grid.toFloat()
-    }
-
-    override fun mouseReleased(click: MouseButtonEvent): Boolean {
-        draggingPanel = null
-        draggingValue = null
-        draggingValueBounds = null
-        return true
-    }
-
-    override fun mouseScrolled(
-        mouseX: Double,
-        mouseY: Double,
-        horizontalAmount: Double,
-        verticalAmount: Double
-    ): Boolean {
-        for ((category, state) in PanelRegistry.ordered(ModuleCategories.entries).asReversed()) {
-            val x = state.x.roundToInt()
-            val y = state.y.roundToInt()
-            val w = s(PANEL_WIDTH)
-            if (mouseX.toInt() in x..(x + w) && mouseY.toInt() in y..(y + s(HEADER_HEIGHT) + s(MAX_EXPANDED_HEIGHT))) {
-                state.scrollOffset = (state.scrollOffset - (verticalAmount * ROW_HEIGHT).toInt()).coerceAtLeast(0)
-                return true
+        // 接收数据包
+        handler<PacketEvent> { event ->
+            if (event.origin != TransferOrigin.INCOMING) return@handler
+            if (event.packet is ClientboundPlayerPositionPacket) {
+                // 空处理
             }
         }
-        return false
     }
 
-    override fun charTyped(input: CharacterEvent): Boolean {
-        if (!searchFocused) return false
-        val char = input.codepoint().toChar()
-        if (char.isLetterOrDigit() || char == ' ') {
-            searchQuery.append(char)
+    override fun enable() {
+        val player = Minecraft.getInstance().player
+        if (player != null) {
+            ecX = player.getX()
+            ecY = player.getY()
+            ecZ = player.getZ()
         }
-        return true
+        ecTick = 0
+        ecFlag1 = false
+        ecFlag2 = true
     }
 
-    override fun keyPressed(input: KeyEvent): Boolean {
-        when (input.key) {
-            InputConstants.KEY_ESCAPE -> {
-                if (searchFocused && searchQuery.isNotEmpty()) {
-                    searchQuery.clear()
-                } else {
-                    onClose()
-                }
-                return true
-            }
-            InputConstants.KEY_BACKSPACE -> {
-                if (searchFocused && searchQuery.isNotEmpty()) {
-                    searchQuery.deleteCharAt(searchQuery.length - 1)
-                }
-                return true
-            }
-            InputConstants.KEY_RETURN -> {
-                matchingModules().firstOrNull()?.let(::jumpTo)
-                return true
-            }
-            InputConstants.KEY_LSHIFT, InputConstants.KEY_RSHIFT -> {
-                ignoreGrid = true
-                return true
+    // ========== 10种模式定义 ==========
+
+    private object Fuckec1 : Mode("FUCKEC1")
+    private object Fuckec2 : Mode("FUCKEC2")
+    private object Fuckec3 : Mode("FUCKEC3")
+    private object Fuckec4 : Mode("FUCKEC4")
+    private object Fuckec5 : Mode("FUCKEC5")
+    private object Fuckec6 : Mode("FUCKEC6")
+    private object Fuckec7 : Mode("FUCKEC7")
+    private object Fuckec8 : Mode("FUCKEC8")
+    private object Fuckec9 : Mode("FUCKEC9")
+    private object Fuckec10 : Mode("FUCKEC10")
+
+    // ========== Tick 模式处理函数 ==========
+
+    private fun tickFuckec1(player: LocalPlayer) {
+        if (ecRandom.nextBoolean()) {
+            ecX += (ecRandom.nextDouble() - 0.5) * 0.001
+        }
+        if (ecTick % 3 == 0) {
+            player.connection.send(
+                ServerboundMovePlayerPacket.Rot(
+                    180 + ecRandom.nextFloat() * 10,
+                    45 + ecRandom.nextFloat() * 10,
+                    player.onGround(),
+                    player.horizontalCollision
+                )
+            )
+        }
+    }
+
+    private fun tickFuckec2(player: LocalPlayer) {
+        if (ecTick % 2 == 0) {
+            player.connection.send(
+                ServerboundMovePlayerPacket.Pos(
+                    ecX, ecY, ecZ, false, player.horizontalCollision
+                )
+            )
+            player.connection.send(
+                ServerboundMovePlayerPacket.Pos(
+                    ecX, ecY, ecZ, true, player.horizontalCollision
+                )
+            )
+        }
+        ecY = player.getY()
+    }
+
+    private fun tickFuckec3(player: LocalPlayer) {
+        if (ecRandom.nextFloat() < 0.1f) {
+            val ecDx = (ecRandom.nextDouble() - 0.5) * 0.02
+            val ecDz = (ecRandom.nextDouble() - 0.5) * 0.02
+            player.connection.send(
+                ServerboundMovePlayerPacket.Pos(
+                    player.getX() + ecDx, player.getY(), player.getZ() + ecDz,
+                    false, player.horizontalCollision
+                )
+            )
+        }
+    }
+
+    private fun tickFuckec4(player: LocalPlayer) {
+        if (ecTick % 5 == 0) {
+            val ecFar = BlockPos(2000000 + ecRandom.nextInt(1000000), 64, 2000000 + ecRandom.nextInt(1000000))
+            val ecHit = BlockHitResult(
+                Vec3(ecFar.getX().toDouble(), ecFar.getY().toDouble(), ecFar.getZ().toDouble()),
+                Direction.UP, ecFar, false
+            )
+            player.connection.send(ServerboundUseItemOnPacket(InteractionHand.MAIN_HAND, ecHit, 0))
+        }
+    }
+
+    private fun tickFuckec5(player: LocalPlayer) {
+        if (ecRandom.nextBoolean()) {
+            player.connection.send(
+                ServerboundMovePlayerPacket.Rot(
+                    0f, 90f, player.onGround(), player.horizontalCollision
+                )
+            )
+            player.connection.send(
+                ServerboundMovePlayerPacket.Pos(
+                    player.getX() + 0.01, player.getY() - 0.01, player.getZ() + 0.01,
+                    true, player.horizontalCollision
+                )
+            )
+        }
+    }
+
+    private fun tickFuckec6(player: LocalPlayer) {
+        if (ecTick % 4 == 0) {
+            player.connection.send(
+                ServerboundMovePlayerPacket.StatusOnly(true, player.horizontalCollision)
+            )
+            player.connection.send(
+                ServerboundMovePlayerPacket.StatusOnly(false, player.horizontalCollision)
+            )
+        }
+    }
+
+    private fun tickFuckec7(player: LocalPlayer) {
+        for (i in 0 until 3) {
+            player.connection.send(
+                ServerboundMovePlayerPacket.Rot(
+                    ecRandom.nextFloat() * 360,
+                    ecRandom.nextFloat() * 90,
+                    player.onGround(),
+                    player.horizontalCollision
+                )
+            )
+        }
+    }
+
+    private fun tickFuckec8(player: LocalPlayer) {
+        if (ecTick % 3 == 0) {
+            player.connection.send(
+                ServerboundMovePlayerPacket.PosRot(
+                    player.getX(), player.getY() + 0.05, player.getZ(),
+                    45f, 45f, false, player.horizontalCollision
+                )
+            )
+            val ecFar2 = BlockPos(3000000, 64, 3000000)
+            val ecHit2 = BlockHitResult(
+                Vec3(3000000.0, 64.0, 3000000.0),
+                Direction.UP, ecFar2, false
+            )
+            player.connection.send(ServerboundUseItemOnPacket(InteractionHand.MAIN_HAND, ecHit2, 0))
+        }
+    }
+
+    private fun tickFuckec9(player: LocalPlayer) {
+        var ecTmp = 0.0
+        for (i in 0 until 10) ecTmp += ecRandom.nextDouble()
+        if (ecTmp > 5) {
+            player.connection.send(
+                ServerboundMovePlayerPacket.Rot(
+                    180f, 0f, player.onGround(), player.horizontalCollision
+                )
+            )
+        }
+    }
+
+    private fun tickFuckec10(player: LocalPlayer) {
+        val ecChoice = ecRandom.nextInt(3)
+        when (ecChoice) {
+            0 -> player.connection.send(
+                ServerboundMovePlayerPacket.Pos(
+                    player.getX() + 0.001, player.getY(), player.getZ() - 0.001,
+                    true, player.horizontalCollision
+                )
+            )
+            1 -> player.connection.send(
+                ServerboundMovePlayerPacket.Rot(
+                    90 + ecRandom.nextFloat() * 20,
+                    30 + ecRandom.nextFloat() * 20,
+                    player.onGround(),
+                    player.horizontalCollision
+                )
+            )
+            else -> {
+                val ecFar3 = BlockPos(4000000, 128, 4000000)
+                val ecHit3 = BlockHitResult(
+                    Vec3(4000000.0, 128.0, 4000000.0),
+                    Direction.UP, ecFar3, false
+                )
+                player.connection.send(ServerboundUseItemOnPacket(InteractionHand.MAIN_HAND, ecHit3, 0))
             }
         }
-        return super.keyPressed(input)
     }
 
-    override fun isPauseScreen() = false
+    // ========== PreMotion 模式处理函数 ==========
+
+    private fun preMotionFuckec1(player: LocalPlayer) {
+        player.connection.send(
+            ServerboundMovePlayerPacket.Rot(
+                Float.MAX_VALUE, Float.MAX_VALUE,
+                player.onGround(), player.horizontalCollision
+            )
+        )
+        player.connection.send(
+            ServerboundMovePlayerPacket.Rot(
+                player.yRot, player.xRot,
+                player.onGround(), player.horizontalCollision
+            )
+        )
+    }
+
+    private fun preMotionFuckec2(player: LocalPlayer) {
+        player.connection.send(
+            ServerboundMovePlayerPacket.Pos(
+                player.getX(), player.getY(), player.getZ(),
+                false, player.horizontalCollision
+            )
+        )
+        player.connection.send(
+            ServerboundMovePlayerPacket.Pos(
+                player.getX() + 0.0001, player.getY(), player.getZ() - 0.0001,
+                true, player.horizontalCollision
+            )
+        )
+    }
+
+    private fun preMotionFuckec3(player: LocalPlayer) {
+        player.connection.send(
+            ServerboundMovePlayerPacket.Pos(
+                player.getX(), player.getY() + 100, player.getZ(),
+                false, player.horizontalCollision
+            )
+        )
+        player.connection.send(
+            ServerboundMovePlayerPacket.Pos(
+                player.getX(), player.getY(), player.getZ(),
+                true, player.horizontalCollision
+            )
+        )
+    }
+
+    private fun preMotionFuckec4(player: LocalPlayer) {
+        val ecFar = BlockPos(5000000, 64, 5000000)
+        val ecHit = BlockHitResult(
+            Vec3(5000000.0, 64.0, 5000000.0),
+            Direction.UP, ecFar, false
+        )
+        player.connection.send(ServerboundUseItemOnPacket(InteractionHand.MAIN_HAND, ecHit, 0))
+        player.connection.send(
+            ServerboundMovePlayerPacket.Pos(
+                player.getX(), player.getY(), player.getZ(),
+                false, player.horizontalCollision
+            )
+        )
+    }
+
+    private fun preMotionFuckec5(player: LocalPlayer) {
+        player.connection.send(
+            ServerboundMovePlayerPacket.StatusOnly(true, player.horizontalCollision)
+        )
+        player.connection.send(
+            ServerboundMovePlayerPacket.StatusOnly(false, player.horizontalCollision)
+        )
+        player.connection.send(
+            ServerboundMovePlayerPacket.Rot(
+                90f, 45f, player.onGround(), player.horizontalCollision
+            )
+        )
+    }
+
+    private fun preMotionFuckec6(player: LocalPlayer) {
+        val ecDx = ecRandom.nextDouble() * 0.01
+        val ecDz = ecRandom.nextDouble() * 0.01
+        player.connection.send(
+            ServerboundMovePlayerPacket.Pos(
+                player.getX() + ecDx, player.getY(), player.getZ() + ecDz,
+                false, player.horizontalCollision
+            )
+        )
+        player.connection.send(
+            ServerboundMovePlayerPacket.Rot(
+                180f, 0f, player.onGround(), player.horizontalCollision
+            )
+        )
+        player.connection.send(
+            ServerboundMovePlayerPacket.Pos(
+                player.getX(), player.getY(), player.getZ(),
+                true, player.horizontalCollision
+            )
+        )
+    }
+
+    private fun preMotionFuckec7(player: LocalPlayer) {
+        player.connection.send(
+            ServerboundMovePlayerPacket.Pos(
+                player.getX(), player.getY() + 0.42, player.getZ(),
+                false, player.horizontalCollision
+            )
+        )
+        player.connection.send(
+            ServerboundMovePlayerPacket.Pos(
+                player.getX(), player.getY(), player.getZ(),
+                true, player.horizontalCollision
+            )
+        )
+    }
+
+    private fun preMotionFuckec8(player: LocalPlayer) {
+        for (i in 0 until 5) {
+            player.connection.send(
+                ServerboundMovePlayerPacket.Rot(
+                    ecRandom.nextFloat() * 360,
+                    ecRandom.nextFloat() * 90,
+                    player.onGround(),
+                    player.horizontalCollision
+                )
+            )
+        }
+        val ecFar2 = BlockPos(6000000, 64, 6000000)
+        val ecHit2 = BlockHitResult(
+            Vec3(6000000.0, 64.0, 6000000.0),
+            Direction.UP, ecFar2, false
+        )
+        player.connection.send(ServerboundUseItemOnPacket(InteractionHand.MAIN_HAND, ecHit2, 0))
+    }
+
+    private fun preMotionFuckec9(player: LocalPlayer) {
+        player.connection.send(
+            ServerboundMovePlayerPacket.Rot(
+                45f, 45f, player.onGround(), player.horizontalCollision
+            )
+        )
+        player.connection.send(
+            ServerboundMovePlayerPacket.Pos(
+                player.getX() + 0.02, player.getY() - 0.02, player.getZ() + 0.02,
+                true, player.horizontalCollision
+            )
+        )
+        player.connection.send(
+            ServerboundMovePlayerPacket.Rot(
+                180f, 0f, player.onGround(), player.horizontalCollision
+            )
+        )
+    }
+
+    private fun preMotionFuckec10(player: LocalPlayer) {
+        val ecRnd = ecRandom.nextInt(3)
+        when (ecRnd) {
+            0 -> player.connection.send(
+                ServerboundMovePlayerPacket.PosRot(
+                    player.getX(), player.getY() + 0.1, player.getZ(),
+                    0f, 90f, false, player.horizontalCollision
+                )
+            )
+            1 -> {
+                val ecFar3 = BlockPos(7000000, 64, 7000000)
+                val ecHit3 = BlockHitResult(
+                    Vec3(7000000.0, 64.0, 7000000.0),
+                    Direction.UP, ecFar3, false
+                )
+                player.connection.send(ServerboundUseItemOnPacket(InteractionHand.MAIN_HAND, ecHit3, 0))
+            }
+            else -> player.connection.send(
+                ServerboundMovePlayerPacket.Rot(
+                    90f, 90f, player.onGround(), player.horizontalCollision
+                )
+            )
+        }
+    }
 }
