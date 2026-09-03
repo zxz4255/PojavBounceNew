@@ -119,16 +119,16 @@ private object PanelRegistry {
 
     fun get(category: ModuleCategory, panelIndex: Int): PanelState = states.getOrPut(category.tag) {
         val config = ModuleNativeClickGui.configFor(category)
-        val hasSavedPosition = config.posX.get() >= 0f && config.posY.get() >= 0f
+        val hasSavedPosition = config.posX >= 0f && config.posY >= 0f
         val defaultX = 20f
         val defaultY = panelIndex * 40f + 20f
 
         PanelState(
             category = category,
-            x = if (hasSavedPosition) config.posX.get() else defaultX,
-            y = if (hasSavedPosition) config.posY.get() else defaultY
+            x = if (hasSavedPosition) config.posX else defaultX,
+            y = if (hasSavedPosition) config.posY else defaultY
         ).also { state ->
-            state.expanded = config.expanded.get()
+            state.expanded = config.expanded
         }
     }
 
@@ -143,9 +143,9 @@ private object PanelRegistry {
     /** Writes position + expand state to disk. Call on drag-release / expand-toggle, not every frame. */
     fun save(category: ModuleCategory, state: PanelState) {
         val config = ModuleNativeClickGui.configFor(category)
-        config.posX.set(state.x)
-        config.posY.set(state.y)
-        config.expanded.set(state.expanded)
+        config.posX = state.x
+        config.posY = state.y
+        config.expanded = state.expanded
         ModuleNativeClickGui.persist()
     }
 }
@@ -163,7 +163,7 @@ private object ExpandedModules {
             current.remove(module.name)
         }
 
-        config.expandedModules.set(current.joinToString(","))
+        config.expandedModules = current.joinToString(",")
         ModuleNativeClickGui.persist()
     }
 
@@ -172,13 +172,13 @@ private object ExpandedModules {
         val config = ModuleNativeClickGui.configFor(module.category)
         val current = expandedSetFor(module.category).toMutableSet()
         if (current.add(module.name)) {
-            config.expandedModules.set(current.joinToString(","))
+            config.expandedModules = current.joinToString(",")
             ModuleNativeClickGui.persist()
         }
     }
 
     private fun expandedSetFor(category: ModuleCategory): Set<String> =
-        ModuleNativeClickGui.configFor(category).expandedModules.get()
+        ModuleNativeClickGui.configFor(category).expandedModules
             .split(",")
             .filter { it.isNotBlank() }
             .toSet()
