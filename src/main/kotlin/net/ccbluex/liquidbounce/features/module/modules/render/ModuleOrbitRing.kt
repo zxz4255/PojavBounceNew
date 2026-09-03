@@ -164,7 +164,8 @@ object ModuleOrbitRing : ClientModule(
         time += dt
 
         val partial = event.partialTicks
-        val cam = event.camera.position
+        // Camera.position 字段私有，必须用 getPosition()
+        val cam = event.camera.getPosition()
         val segs = segments.coerceIn(16, 128)
         val a = (255 * alpha).toInt().coerceIn(20, 255)
         val spinAng = if (spin) time * spinSpeed * 2f * PI.toFloat() else 0f
