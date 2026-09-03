@@ -70,7 +70,7 @@ object ModuleNativeClickGui : ClientModule(
      * [tree] like [Snapping], so it round-trips through the same modules.json the rest of the
      * client's settings use (see ModuleManager.modulesConfig / ConfigSystem).
      */
-    private class PanelConfigGroup(tag: String) : ValueGroup("ClickGuiPanel$tag") {
+    class PanelConfigGroup(tag: String) : ValueGroup("ClickGuiPanel$tag") {
         val posX by float("X", -1f, -1f..8000f)
         val posY by float("Y", -1f, -1f..8000f)
         val expanded by boolean("Expanded", false)
