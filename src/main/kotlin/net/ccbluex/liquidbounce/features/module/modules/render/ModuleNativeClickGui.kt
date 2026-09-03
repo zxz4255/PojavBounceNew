@@ -71,10 +71,10 @@ object ModuleNativeClickGui : ClientModule(
      * client's settings use (see ModuleManager.modulesConfig / ConfigSystem).
      */
     class PanelConfigGroup(tag: String) : ValueGroup("ClickGuiPanel$tag") {
-        val posX by float("X", -1f, -1f..8000f)
-        val posY by float("Y", -1f, -1f..8000f)
-        val expanded by boolean("Expanded", false)
-        val expandedModules by text("ExpandedModules", "")
+        var posX by float("X", -1f, -1f..8000f)
+        var posY by float("Y", -1f, -1f..8000f)
+        var expanded by boolean("Expanded", false)
+        var expandedModules by text("ExpandedModules", "")
     }
 
     private val panelConfigs: Map<String, PanelConfigGroup> = ModuleCategories.entries.associate { category ->
