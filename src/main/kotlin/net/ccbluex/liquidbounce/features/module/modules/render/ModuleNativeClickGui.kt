@@ -11,10 +11,12 @@
 package net.ccbluex.liquidbounce.features.module.modules.render
 
 import com.mojang.blaze3d.platform.InputConstants
+import net.ccbluex.liquidbounce.config.ConfigSystem
 import net.ccbluex.liquidbounce.config.types.RangedValue
 import net.ccbluex.liquidbounce.config.types.Value
 import net.ccbluex.liquidbounce.config.types.ValueType
 import net.ccbluex.liquidbounce.config.types.group.ToggleableValueGroup
+import net.ccbluex.liquidbounce.config.types.group.ValueGroup
 import net.ccbluex.liquidbounce.features.module.ClientModule
 import net.ccbluex.liquidbounce.features.module.ModuleCategories
 import net.ccbluex.liquidbounce.features.module.ModuleCategory
@@ -62,8 +64,34 @@ object ModuleNativeClickGui : ClientModule(
         val gridSize by int("GridSize", 10, 1..100)
     }
 
+    /**
+     * One persisted config group per module category - holds panel position, expand state and
+     * which of that category's modules currently have their settings expanded. Registered via
+     * [tree] like [Snapping], so it round-trips through the same modules.json the rest of the
+     * client's settings use (see ModuleManager.modulesConfig / ConfigSystem).
+     */
+    private class PanelConfigGroup(tag: String) : ValueGroup("ClickGuiPanel$tag") {
+        val posX by float("X", -1f, -1f..8000f)
+        val posY by float("Y", -1f, -1f..8000f)
+        val expanded by boolean("Expanded", false)
+        val expandedModules by text("ExpandedModules", "")
+    }
+
+    private val panelConfigs: Map<String, PanelConfigGroup> = ModuleCategories.entries.associate { category ->
+        category.tag to PanelConfigGroup(category.tag)
+    }
+
+    fun configFor(category: ModuleCategory): PanelConfigGroup =
+        panelConfigs.getValue(category.tag)
+
+    /** Call after any change that should survive a client restart. */
+    fun persist() {
+        ConfigSystem.store(ModuleManager.modulesConfig)
+    }
+
     init {
         tree(Snapping)
+        panelConfigs.values.forEach { tree(it) }
     }
 
     override fun onEnabled() {
@@ -77,9 +105,9 @@ object ModuleNativeClickGui : ClientModule(
     }
 }
 
-// ---- Session-persistent UI state (mirrors what Panel.svelte/Module.svelte keep in localStorage) ----
+// ---- Persisted UI state, backed by ModuleNativeClickGui.configFor() (survives client restarts) ----
 
-private class PanelState(var x: Float, var y: Float) {
+private class PanelState(val category: ModuleCategory, var x: Float, var y: Float) {
     var expanded = false
     var scrollOffset = 0
     var zIndex = 0
@@ -89,8 +117,20 @@ private object PanelRegistry {
     private val states = linkedMapOf<String, PanelState>()
     private var nextZ = 0
 
-    fun get(category: ModuleCategory, panelIndex: Int): PanelState =
-        states.getOrPut(category.tag) { PanelState(x = 20f, y = panelIndex * 40f + 20f) }
+    fun get(category: ModuleCategory, panelIndex: Int): PanelState = states.getOrPut(category.tag) {
+        val config = ModuleNativeClickGui.configFor(category)
+        val hasSavedPosition = config.posX.get() >= 0f && config.posY.get() >= 0f
+        val defaultX = 20f
+        val defaultY = panelIndex * 40f + 20f
+
+        PanelState(
+            category = category,
+            x = if (hasSavedPosition) config.posX.get() else defaultX,
+            y = if (hasSavedPosition) config.posY.get() else defaultY
+        ).also { state ->
+            state.expanded = config.expanded.get()
+        }
+    }
 
     fun bringToFront(state: PanelState) {
         state.zIndex = ++nextZ
@@ -99,14 +139,49 @@ private object PanelRegistry {
     /** Panels sorted back-to-front, so later ones draw (and hit-test) on top. */
     fun ordered(categories: Collection<ModuleCategory>): List<Pair<ModuleCategory, PanelState>> =
         categories.mapIndexed { i, c -> c to get(c, i) }.sortedBy { it.second.zIndex }
+
+    /** Writes position + expand state to disk. Call on drag-release / expand-toggle, not every frame. */
+    fun save(category: ModuleCategory, state: PanelState) {
+        val config = ModuleNativeClickGui.configFor(category)
+        config.posX.set(state.x)
+        config.posY.set(state.y)
+        config.expanded.set(state.expanded)
+        ModuleNativeClickGui.persist()
+    }
 }
 
 private object ExpandedModules {
-    val names = mutableSetOf<String>()
-    fun isExpanded(name: String) = name in names
-    fun toggle(name: String) {
-        if (!names.add(name)) names.remove(name)
+
+    fun isExpanded(module: ClientModule): Boolean = expandedSetFor(module.category).contains(module.name)
+
+    /** Toggles and immediately persists, matching Module.svelte's per-module localStorage write. */
+    fun toggle(module: ClientModule) {
+        val config = ModuleNativeClickGui.configFor(module.category)
+        val current = expandedSetFor(module.category).toMutableSet()
+
+        if (!current.add(module.name)) {
+            current.remove(module.name)
+        }
+
+        config.expandedModules.set(current.joinToString(","))
+        ModuleNativeClickGui.persist()
     }
+
+    /** Forces the module's settings open (used when a search result is selected) and persists. */
+    fun expand(module: ClientModule) {
+        val config = ModuleNativeClickGui.configFor(module.category)
+        val current = expandedSetFor(module.category).toMutableSet()
+        if (current.add(module.name)) {
+            config.expandedModules.set(current.joinToString(","))
+            ModuleNativeClickGui.persist()
+        }
+    }
+
+    private fun expandedSetFor(category: ModuleCategory): Set<String> =
+        ModuleNativeClickGui.configFor(category).expandedModules.get()
+            .split(",")
+            .filter { it.isNotBlank() }
+            .toSet()
 }
 
 private val PANEL_HEADER_BG = ARGB.color(235, 22, 22, 26)
@@ -150,9 +225,7 @@ class NativeClickGuiScreen : Screen("ClickGUI".asPlainText()) {
     private var hoveredTooltipX = 0
     private var hoveredTooltipY = 0
 
-    private class Rect(val x: Int, val y: Int, val w: Int, val h: Int) {
-        operator fun contains(px: Int, py: Int) = px in x until (x + w) && py in y until (y + h)
-    }
+    private class Rect(val x: Int, val y: Int, val w: Int, val h: Int)
 
     private val scale get() = ModuleNativeClickGui.scale
     private fun s(px: Int) = (px * scale).roundToInt()
@@ -295,7 +368,7 @@ class NativeClickGuiScreen : Screen("ClickGUI".asPlainText()) {
 
             val settings = visibleSettings(module)
             if (settings.isNotEmpty()) {
-                val arrowChar = if (ExpandedModules.isExpanded(module.name)) "-" else "+"
+                val arrowChar = if (ExpandedModules.isExpanded(module)) "-" else "+"
                 context.text(
                     font,
                     arrowChar.asPlainText(),
@@ -315,7 +388,7 @@ class NativeClickGuiScreen : Screen("ClickGUI".asPlainText()) {
             rowY += rowH
             bodyBottom = rowY
 
-            if (ExpandedModules.isExpanded(module.name) && settings.isNotEmpty()) {
+            if (ExpandedModules.isExpanded(module) && settings.isNotEmpty()) {
                 for (value in settings) {
                     if (bodyBottom - bodyTop >= s(MAX_EXPANDED_HEIGHT)) break
                     val settingH = s(SETTING_ROW_HEIGHT)
@@ -532,8 +605,9 @@ class NativeClickGuiScreen : Screen("ClickGUI".asPlainText()) {
         val index = ModuleCategories.entries.toList().indexOf(module.category).coerceAtLeast(0)
         val state = PanelRegistry.get(module.category, index)
         state.expanded = true
-        ExpandedModules.names.add(module.name)
+        ExpandedModules.expand(module)
         PanelRegistry.bringToFront(state)
+        PanelRegistry.save(module.category, state)
     }
 
     private fun handlePanelClick(
@@ -551,6 +625,7 @@ class NativeClickGuiScreen : Screen("ClickGUI".asPlainText()) {
         if (mouseX in x..(x + w) && mouseY in y..(y + headerH)) {
             if (rightClick) {
                 state.expanded = !state.expanded
+                PanelRegistry.save(category, state)
             } else {
                 draggingPanel = state
                 dragOffsetX = mouseX - state.x
@@ -573,7 +648,7 @@ class NativeClickGuiScreen : Screen("ClickGUI".asPlainText()) {
                 val settings = visibleSettings(module)
                 val arrowZone = x + w - s(16)
                 if (rightClick || (settings.isNotEmpty() && mouseX >= arrowZone)) {
-                    if (settings.isNotEmpty()) ExpandedModules.toggle(module.name)
+                    if (settings.isNotEmpty()) ExpandedModules.toggle(module)
                 } else {
                     module.enabled = !module.enabled
                 }
@@ -581,7 +656,7 @@ class NativeClickGuiScreen : Screen("ClickGUI".asPlainText()) {
             }
             rowY += rowH
 
-            if (ExpandedModules.isExpanded(module.name)) {
+            if (ExpandedModules.isExpanded(module)) {
                 for (value in visibleSettings(module)) {
                     if (rowY - bodyTop >= s(MAX_EXPANDED_HEIGHT)) break
                     val settingH = s(SETTING_ROW_HEIGHT)
