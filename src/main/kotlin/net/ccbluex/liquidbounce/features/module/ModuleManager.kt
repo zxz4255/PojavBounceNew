@@ -63,7 +63,6 @@ import net.ccbluex.liquidbounce.features.module.modules.combat.killaura.ModuleKi
 import net.ccbluex.liquidbounce.features.module.modules.combat.tpaura.ModuleTpAura
 import net.ccbluex.liquidbounce.features.module.modules.combat.velocity.ModuleVelocity
 import net.ccbluex.liquidbounce.features.module.modules.exploit.ModuleAbortBreaking
-import net.ccbluex.liquidbounce.features.module.modules.exploit.ModuleECDisabler
 import net.ccbluex.liquidbounce.features.module.modules.exploit.ModuleAudioPlayer
 import net.ccbluex.liquidbounce.features.module.modules.exploit.ModuleAntiHunger
 import net.ccbluex.liquidbounce.features.module.modules.exploit.ModuleAntiReducedDebugInfo
@@ -519,7 +518,6 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
 
             // Exploit
             ModuleAbortBreaking,
-            ModuleECDisabler,
             ModuleAudioPlayer,
             ModuleAntiReducedDebugInfo,
             ModuleAntiHunger,
