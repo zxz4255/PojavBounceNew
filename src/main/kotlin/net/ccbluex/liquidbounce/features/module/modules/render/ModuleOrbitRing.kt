@@ -153,6 +153,65 @@ object ModuleOrbitRing : ClientModule(
         return Triple(x.toFloat(), y.toFloat(), z.toFloat())
     }
 
+    /**
+     * 兼容不同映射：不直接调用 Camera.getPosition / position()。
+     * 反射取相机坐标，失败则用玩家眼睛位置兜底。
+     */
+    private fun cameraXYZ(): Triple<Double, Double, Double> {
+        fun xyzFrom(any: Any): Triple<Double, Double, Double>? {
+            // Vec3 / Vec3d：字段或 getter
+            val cx = runCatching {
+                any.javaClass.methods.firstOrNull { it.name == "x" && it.parameterCount == 0 }?.invoke(any) as? Double
+                    ?: any.javaClass.methods.firstOrNull { it.name == "getX" && it.parameterCount == 0 }?.invoke(any) as? Double
+                    ?: any.javaClass.getField("x").getDouble(any)
+            }.getOrNull() ?: return null
+            val cy = runCatching {
+                any.javaClass.methods.firstOrNull { it.name == "y" && it.parameterCount == 0 }?.invoke(any) as? Double
+                    ?: any.javaClass.methods.firstOrNull { it.name == "getY" && it.parameterCount == 0 }?.invoke(any) as? Double
+                    ?: any.javaClass.getField("y").getDouble(any)
+            }.getOrNull() ?: return null
+            val cz = runCatching {
+                any.javaClass.methods.firstOrNull { it.name == "z" && it.parameterCount == 0 }?.invoke(any) as? Double
+                    ?: any.javaClass.methods.firstOrNull { it.name == "getZ" && it.parameterCount == 0 }?.invoke(any) as? Double
+                    ?: any.javaClass.getField("z").getDouble(any)
+            }.getOrNull() ?: return null
+            return Triple(cx, cy, cz)
+        }
+
+        // 1) gameRenderer.mainCamera / getMainCamera → position / getPosition / getPos / 字段
+        runCatching {
+            val gr = mc.gameRenderer
+            val cam = gr.javaClass.methods.firstOrNull {
+                it.parameterCount == 0 && (it.name == "mainCamera" || it.name == "getMainCamera" || it.name == "camera" || it.name == "getCamera")
+            }?.invoke(gr) ?: return@runCatching null
+
+            val pos = cam.javaClass.methods.firstOrNull {
+                it.parameterCount == 0 && (it.name == "position" || it.name == "getPosition" || it.name == "getPos" || it.name == "pos")
+            }?.invoke(cam)
+
+            if (pos != null) xyzFrom(pos)?.let { return it }
+
+            // 直接读 Camera 私有 position 字段
+            val field = cam.javaClass.declaredFields.firstOrNull {
+                it.name.equals("position", true) || it.name.equals("pos", true)
+            }
+            if (field != null) {
+                field.isAccessible = true
+                val v = field.get(cam)
+                if (v != null) xyzFrom(v)?.let { return it }
+            }
+            null
+        }
+
+        // 2) event 没有相机时用玩家眼睛
+        val p = mc.player
+        return if (p != null) {
+            Triple(p.x, p.y + p.eyeHeight.toDouble(), p.z)
+        } else {
+            Triple(0.0, 0.0, 0.0)
+        }
+    }
+
     @Suppress("unused")
     private val renderHandler = handler<WorldRenderEvent> { event ->
         val world = mc.level ?: return@handler
@@ -164,8 +223,7 @@ object ModuleOrbitRing : ClientModule(
         time += dt
 
         val partial = event.partialTicks
-        // Camera.position 字段私有，必须用 getPosition()
-        val cam = event.camera.getPosition()
+        val (camX, camY, camZ) = cameraXYZ()
         val segs = segments.coerceIn(16, 128)
         val a = (255 * alpha).toInt().coerceIn(20, 255)
         val spinAng = if (spin) time * spinSpeed * 2f * PI.toFloat() else 0f
@@ -188,7 +246,7 @@ object ModuleOrbitRing : ClientModule(
 
         event.renderEnvironment {
             for (entity in targets) {
-                val (ex, ey, ez) = entityPos(entity, partial, cam.x, cam.y, cam.z)
+                val (ex, ey, ez) = entityPos(entity, partial, camX, camY, camZ)
                 val midY = ey + entity.bbHeight * 0.5f + height + bobOff
                 when (shape) {
                     Shape.RING ->
