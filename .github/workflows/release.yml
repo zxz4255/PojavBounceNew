@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '25'          # 保持你的 Java 25
+          java-version: '25'
 
       - run: chmod +x gradlew
 
@@ -25,30 +25,43 @@ jobs:
 
       - run: ./gradlew build -x test -x detekt --no-daemon
 
-      # 查找并解压 ZIP
+      # 🔍 调试：打印整个工作目录的 ZIP 和 JAR 文件
+      - name: 列出所有产物
+        run: |
+          echo "=== 当前目录 ==="
+          ls -la
+          echo "=== build/ 目录 ==="
+          ls -la build/ || true
+          echo "=== build/libs/ ==="
+          ls -la build/libs/ || true
+          echo "=== build/distributions/ ==="
+          ls -la build/distributions/ || true
+          echo "=== 全盘搜索 *.zip ==="
+          find . -name "*.zip" -type f 2>/dev/null
+
+      # 查找 ZIP 并解压（逻辑同前）
       - name: 查找并解压 ZIP
         run: |
-          ZIP_FILE=$(find build/libs/ build/distributions/ -name "*.zip" -type f 2>/dev/null | head -n 1)
+          ZIP_FILE=$(find . -name "*.zip" -type f | grep -v ".gradle" | head -n 1)
           if [ -z "$ZIP_FILE" ]; then
-            echo "❌ 未找到 ZIP 文件，请检查构建产物路径。"
+            echo "❌ 未找到 ZIP 文件，请检查构建产物。"
             exit 1
           fi
           echo "✅ 找到 ZIP：$ZIP_FILE"
           mkdir extracted
           unzip -q "$ZIP_FILE" -d extracted/
 
-      # 提取 JAR 并重命名
       - name: 提取 JAR 并重命名
         run: |
           JAR_FILE=$(find extracted -name "liquidbounce-*.jar" -type f | head -n 1)
           if [ -z "$JAR_FILE" ]; then
-            echo "❌ 未找到 liquidbounce-*.jar，请检查 ZIP 内容。"
+            echo "❌ 未找到 liquidbounce-*.jar，列出所有 .jar 文件："
+            find extracted -name "*.jar" -type f
             exit 1
           fi
           echo "✅ 提取到 JAR：$JAR_FILE"
           cp "$JAR_FILE" ./liquidbounce.jar
 
-      # 只上传 JAR 到 Release
       - name: 创建 Release 并上传 JAR
         uses: softprops/action-gh-release@v2
         with:
