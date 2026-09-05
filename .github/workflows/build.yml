@@ -23,8 +23,16 @@ jobs:
 
       - run: ./gradlew build -x test -x detekt --no-daemon
 
+      # 提取主 JAR（排除 sources），并重命名为固定名称
+      - name: 提取主 JAR
+        run: |
+          JAR=$(ls build/libs/liquidbounce-*.jar | grep -v sources | head -n 1)
+          if [ -z "$JAR" ]; then echo "❌ 未找到主 JAR"; exit 1; fi
+          cp "$JAR" ./liquidbounce.jar
+
+      # 只上传这个重命名后的 JAR（只有这一个文件）
       - uses: actions/upload-artifact@v4
         with:
           name: liquidbounce
-          path: build/libs/*.jar
+          path: liquidbounce.jar   # 现在只上传一个文件
           retention-days: 90
