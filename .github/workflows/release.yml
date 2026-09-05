@@ -2,12 +2,15 @@ name: Release
 
 on:
   push:
+    branches: [ nextgen, main, master ]
+    paths:
+      - '.github/workflows/release.yml'   # 只有 release.yml 改动才触发分支构建
     tags:
-      - '*'              # 任意标签触发
-  workflow_dispatch:     # 允许手动触发
+      - '*'                               # 任意标签触发正式 Release
+  workflow_dispatch:                      # 保留手动触发
 
 jobs:
-  release:
+  build-and-release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,47 +28,24 @@ jobs:
 
       - run: ./gradlew build -x test -x detekt --no-daemon
 
-      # 🔍 调试：打印整个工作目录的 ZIP 和 JAR 文件
-      - name: 列出所有产物
-        run: |
-          echo "=== 当前目录 ==="
-          ls -la
-          echo "=== build/ 目录 ==="
-          ls -la build/ || true
-          echo "=== build/libs/ ==="
-          ls -la build/libs/ || true
-          echo "=== build/distributions/ ==="
-          ls -la build/distributions/ || true
-          echo "=== 全盘搜索 *.zip ==="
-          find . -name "*.zip" -type f 2>/dev/null
+      # 直接列出 build/libs 确认 JAR 存在
+      - name: 列出构建产物
+        run: ls -la build/libs/
 
-      # 查找 ZIP 并解压（逻辑同前）
-      - name: 查找并解压 ZIP
-        run: |
-          ZIP_FILE=$(find . -name "*.zip" -type f | grep -v ".gradle" | head -n 1)
-          if [ -z "$ZIP_FILE" ]; then
-            echo "❌ 未找到 ZIP 文件，请检查构建产物。"
-            exit 1
-          fi
-          echo "✅ 找到 ZIP：$ZIP_FILE"
-          mkdir extracted
-          unzip -q "$ZIP_FILE" -d extracted/
+      # 上传 JAR 作为 Artifact（方便分支推送时下载测试）
+      - name: 上传 JAR 作为 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: liquidbounce
+          path: build/libs/liquidbounce-*.jar
+          retention-days: 90
 
-      - name: 提取 JAR 并重命名
-        run: |
-          JAR_FILE=$(find extracted -name "liquidbounce-*.jar" -type f | head -n 1)
-          if [ -z "$JAR_FILE" ]; then
-            echo "❌ 未找到 liquidbounce-*.jar，列出所有 .jar 文件："
-            find extracted -name "*.jar" -type f
-            exit 1
-          fi
-          echo "✅ 提取到 JAR：$JAR_FILE"
-          cp "$JAR_FILE" ./liquidbounce.jar
-
+      # 仅在推送标签时创建正式 Release
       - name: 创建 Release 并上传 JAR
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: liquidbounce.jar
+          files: build/libs/liquidbounce-*.jar
           draft: false
           prerelease: false
           generate_release_notes: true
