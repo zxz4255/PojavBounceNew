@@ -1,26 +1,38 @@
-name: Create Release
+name: Release
 
 on:
   push:
     tags:
-      - 'v*'              # 推送 v1.17 这类标签时触发
+      - '*'              # 任意标签触发
 
 jobs:
   release:
     runs-on: ubuntu-latest
-    needs: build          # 等待 build.yml 完成
     steps:
-      - name: 下载构建产物
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
         with:
-          name: liquidbounce
-          path: ./artifacts
+          submodules: recursive
 
-      - name: 创建 Release 并上传
-        uses: softprops/action-gh-release@v1
+      - uses: actions/setup-java@v4
         with:
-          files: ./artifacts/*.jar
+          distribution: 'temurin'
+          java-version: '25'   # 如果 Gradle 不支持，可改为 21 或 17
+
+      - run: chmod +x gradlew
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - run: ./gradlew build -x test -x detekt --no-daemon
+
+      # 调试：列出 build/libs 下的文件，方便确认产物名称
+      - run: ls -la build/libs/
+
+      - name: 创建 Release 并上传 ZIP
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/libs/*.zip   # ← 改成 *.zip
           draft: false
           prerelease: false
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
