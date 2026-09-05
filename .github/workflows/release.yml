@@ -3,7 +3,8 @@ name: Release
 on:
   push:
     tags:
-      - '*'              # 任意标签触发
+      - '*'              # 任意标签触发（包括 v1.17、1.17 等）
+  workflow_dispatch:     # 允许手动触发，方便测试
 
 jobs:
   release:
@@ -16,7 +17,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '25'   # 如果 Gradle 不支持，可改为 21 或 17
+          java-version: '21'          # 建议用 21（稳定），如必须 25 可改
 
       - run: chmod +x gradlew
 
@@ -24,13 +25,34 @@ jobs:
 
       - run: ./gradlew build -x test -x detekt --no-daemon
 
-      # 调试：列出 build/libs 下的文件，方便确认产物名称
-      - run: ls -la build/libs/
+      # ① 查找 ZIP 文件（通常在 build/libs/ 或 build/distributions/）
+      - name: 查找并解压 ZIP
+        run: |
+          ZIP_FILE=$(find build/libs/ build/distributions/ -name "*.zip" -type f 2>/dev/null | head -n 1)
+          if [ -z "$ZIP_FILE" ]; then
+            echo "❌ 未找到 ZIP 文件，请检查构建产物路径。"
+            exit 1
+          fi
+          echo "✅ 找到 ZIP：$ZIP_FILE"
+          mkdir extracted
+          unzip -q "$ZIP_FILE" -d extracted/
 
-      - name: 创建 Release 并上传 ZIP
+      # ② 提取 liquidbounce-*.jar（版本号可能变化，用通配符）
+      - name: 提取 JAR 并重命名为固定名称
+        run: |
+          JAR_FILE=$(find extracted -name "liquidbounce-*.jar" -type f | head -n 1)
+          if [ -z "$JAR_FILE" ]; then
+            echo "❌ 未找到 liquidbounce-*.jar，请检查 ZIP 内容。"
+            exit 1
+          fi
+          echo "✅ 提取到 JAR：$JAR_FILE"
+          cp "$JAR_FILE" ./liquidbounce.jar   # 重命名，方便上传
+
+      # ③ 只上传这个 JAR 到 Release
+      - name: 创建 Release 并上传 JAR
         uses: softprops/action-gh-release@v2
         with:
-          files: build/libs/*.zip   # ← 改成 *.zip
+          files: liquidbounce.jar      # 只上传提取出的 JAR
           draft: false
           prerelease: false
           generate_release_notes: true
