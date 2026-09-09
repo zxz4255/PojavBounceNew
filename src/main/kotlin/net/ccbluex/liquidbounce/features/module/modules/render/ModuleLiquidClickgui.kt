@@ -870,6 +870,7 @@ object ModuleLiquidClickgui : ClientModule(
                     if (colorOpen == v) {
                         colorOpen = null
                         colorOpenPanel = null
+                        refreshPanelScroll(p)
                     } else {
                         colorOpen = v
                         colorOpenPanel = p
@@ -877,6 +878,8 @@ object ModuleLiquidClickgui : ClientModule(
                         val (h, s, vv) = rgbToHsv(cur)
                         colorHue[v] = h
                         colorSV[v] = s to vv
+                        // 取色器展开会增高，刷新可滚高度
+                        refreshPanelScroll(p, r[1] + r[3] + PICKER_TOTAL)
                     }
                 }
                 return true
@@ -979,7 +982,53 @@ object ModuleLiquidClickgui : ClientModule(
     }
 
     private fun toggleGroup(v: Value<*>) {
-        groupOpen[v] = !(groupOpen[v] == true)
+        val opening = !(groupOpen[v] == true)
+        groupOpen[v] = opening
+        // 子项展开后必须按真实高度刷新 contentH + 滚动，否则固定 body 会裁掉下面的设置
+        val panel = panels.firstOrNull { p ->
+            p.modules.any { m -> modOpen[m] == true && valueBelongsToModule(v, m) }
+        } ?: colorOpenPanel ?: dropdownPanel
+        if (panel != null) {
+            var prefer: Float? = null
+            if (opening) {
+                var y = 0f
+                outer@ for (m in panel.modules) {
+                    if (modOpen[m] != true) {
+                        y += ROW_H
+                        continue
+                    }
+                    y += ROW_H
+                    val start = y
+                    walkValues(childrenOfModule(m), 0, 0f, 0f) { vv, _, vy, vh, _ ->
+                        if (vv === v) {
+                            // 滚到该组展开后的大致底部，露出新增子项
+                            prefer = start + vy + vh + 80f
+                        }
+                    }
+                    y += settingsHeight(m)
+                    if (prefer != null) break@outer
+                }
+            }
+            refreshPanelScroll(panel, prefer)
+        }
+    }
+
+    private fun valueBelongsToModule(target: Value<*>, m: ClientModule): Boolean {
+        fun dfs(list: List<Value<*>>): Boolean {
+            for (v in list) {
+                if (v === target) return true
+                val vi = info(v)
+                if (vi.kind == Kind.GROUP || vi.kind == Kind.TOGGLE_GROUP || vi.kind == Kind.MODE) {
+                    val children = when (vi.kind) {
+                        Kind.TOGGLE_GROUP -> groupNested(v)
+                        else -> childrenOf(v)
+                    }
+                    if (dfs(children)) return true
+                }
+            }
+            return false
+        }
+        return dfs(childrenOfModule(m))
     }
 
     private fun saveModuleOpen() {
@@ -1194,7 +1243,10 @@ object ModuleLiquidClickgui : ClientModule(
             val bodyH = p.extAnim * panelMaxHeight * s
             val bodyW = panelWidth * s
             if (mx >= p.x && mx < p.x + bodyW && my >= bodyY && my < bodyY + bodyH) {
-                val maxScroll = (p.contentH - panelMaxHeight).coerceAtLeast(0f)
+                // 每次滚轮前按当前展开状态重算 contentH，避免子项展开后滚不动
+                val contentH = panelContentHeight(p)
+                p.contentH = contentH
+                val maxScroll = (contentH - panelMaxHeight).coerceAtLeast(0f)
                 p.scrollTarget = (p.scrollTarget - v.toFloat() * 20f).coerceIn(0f, maxScroll)
                 saveScroll(p)
                 return true
@@ -1405,12 +1457,50 @@ object ModuleLiquidClickgui : ClientModule(
         cur + (target - cur) * (1f - (0.001f).pow(frameDt * speed)).coerceIn(0f, 1f)
 
 
+    /**
+     * 按当前 groupOpen / colorOpen 计算模块设置区真实总高度。
+     * 必须用 walkValues 的返回 y（含嵌套子项 + 10f 间距），
+     * 不能只累加 emit 的 rowH（会漏掉间距，多级展开后越裁越多）。
+     */
     private fun settingsHeight(m: ClientModule): Float {
+        val start = 0f
+        val end = walkValues(childrenOfModule(m), 0, 0f, start) { _, _, _, _, _ -> }
+        return (end - start).coerceAtLeast(0f)
+    }
+
+    /** 面板内全部模块 + 已展开设置的内容总高度（滚动上限依据） */
+    private fun panelContentHeight(p: Panel): Float {
         var h = 0f
-        walkValues(childrenOfModule(m), 0, 0f, 0f) { _, _, _, rowH, _ -> h += rowH }
+        for (m in p.modules) {
+            h += ROW_H
+            if (modOpen[m] == true) {
+                h += settingsHeight(m)
+            } else {
+                val openF = modOpenAnim.getOrDefault(m, 0f)
+                if (openF > 0.001f) h += settingsHeight(m) * quintOut(openF)
+            }
+        }
         return h
     }
 
+    /**
+     * 子项展开后刷新 contentH，并把视口滚到能看到新区域。
+     */
+    private fun refreshPanelScroll(p: Panel, preferY: Float? = null) {
+        val contentH = panelContentHeight(p)
+        p.contentH = contentH
+        val view = panelMaxHeight
+        val maxScroll = (contentH - view).coerceAtLeast(0f)
+        var scroll = p.scrollTarget
+        if (preferY != null) {
+            if (preferY > scroll + view - 40f) scroll = preferY - view + 48f
+            if (preferY < scroll + 8f) scroll = preferY - 8f
+        }
+        p.scrollTarget = scroll.coerceIn(0f, maxScroll)
+        p.scroll = p.scroll + (p.scrollTarget - p.scroll) * 0.9f
+        if (p.scroll > maxScroll) p.scroll = maxScroll
+        if (p.scrollTarget > maxScroll) p.scrollTarget = maxScroll
+    }
 
     private fun settingsHeightNow(m: ClientModule, openF: Float): Float {
         if (openF <= 0.001f) return 0f
@@ -1689,23 +1779,14 @@ object ModuleLiquidClickgui : ClientModule(
         val w = panelWidth
 
 
-        // 已展开的模块按「完整子项高度」计入可滚空间，避免动画未结束/底部展开时 maxScroll 偏小导致截断
-        var contentH = 0f
-        for (m in p.modules) {
-            contentH += ROW_H
-            val openF = modOpenAnim.getOrDefault(m, 0f)
-            if (modOpen[m] == true) {
-                contentH += settingsHeight(m) // 目标全高，保证能滚到底
-            } else if (openF > 0.001f) {
-                contentH += settingsHeight(m) * quintOut(openF) // 收起动画仍用插值
-            }
-        }
+        // 按当前子项展开状态重算内容高度（含嵌套 + 间距），不再用固定高度截断
+        val contentH = panelContentHeight(p)
         p.contentH = contentH
         val maxScroll = (contentH - bodyH).coerceAtLeast(0f)
-        // 展开后若当前滚动不够，自动补一点，露出被挡的子项
         if (p.scrollTarget > maxScroll) p.scrollTarget = maxScroll
         if (p.scroll > maxScroll) p.scroll = maxScroll
         p.scrollTarget = p.scrollTarget.coerceIn(0f, maxScroll)
+        p.scroll = p.scroll.coerceIn(0f, maxScroll)
 
         ctx.scissorStack.withPush(ctx.getBounds(x, clipTop, x + w, clipBot)) {
             var y = clipTop - p.scroll
