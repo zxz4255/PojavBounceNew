@@ -2134,7 +2134,9 @@ object ModuleLiquidClickgui : ClientModule(
         ctx: GuiGraphicsExtractor, font: Font,
         a: Int, sw: Float, sx: Float, sy: Float, inputH: Float,
     ) {
-
+        val hasResults = searchResults.isNotEmpty()
+        val r = searchRadius + (10f - searchRadius) * searchOpenAnim
+        val resultsH = if (hasResults) min(searchResults.size * 39f, 250f) else if (searchQuery.isNotEmpty()) 39f else 0f
 
         val sh = Color4b(baseColor.r, baseColor.g, baseColor.b, (255 * 0.5f * uiAlpha).toInt())
         for (i in 0 until 4) {
@@ -2146,10 +2148,6 @@ object ModuleLiquidClickgui : ClientModule(
             fillSmooth(ctx, sx - off, sy, sx + off, sy + inputH, c, off.coerceAtLeast(1f))
             fillSmooth(ctx, sx + sw - off, sy, sx + sw + off, sy + inputH, c, off.coerceAtLeast(1f))
         }
-
-        val hasResults = searchResults.isNotEmpty()
-        val r = searchRadius + (10f - searchRadius) * searchOpenAnim
-        val resultsH = if (hasResults) min(searchResults.size * 39f, 250f) else if (searchQuery.isNotEmpty()) 39f else 0f
 
 
         if (resultsH > 0.5f) {
