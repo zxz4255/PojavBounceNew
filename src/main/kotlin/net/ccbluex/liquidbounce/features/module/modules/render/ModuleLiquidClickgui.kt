@@ -34,12 +34,14 @@ import org.lwjgl.glfw.GLFW
 import java.util.IdentityHashMap
 import java.util.prefs.Preferences
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 object ModuleLiquidClickgui : ClientModule(
     "LiquidClickgui",
@@ -55,12 +57,22 @@ object ModuleLiquidClickgui : ClientModule(
     private val panelWidth by float("Panel Width", 250f, 180f..420f)
     private val panelMaxHeight by float("Panel Max Height", 545f, 200f..900f)
     private val panelSpacing by float("Panel Spacing", 50f, 20f..140f)
-    private val panelRadius by float("Panel Radius", 5f, 0f..14f)
     private val headerPadding by float("Header Padding", 10f, 4f..20f)
+
+    /** Independent per-corner radius for the panel's four true outer corners (see drawPanel). */
+    object CornerRadius : ValueGroup("Corner Radius") {
+        val topLeft by float("Top Left", 5f, 0f..30f)
+        val topRight by float("Top Right", 5f, 0f..30f)
+        val bottomLeft by float("Bottom Left", 5f, 0f..30f)
+        val bottomRight by float("Bottom Right", 5f, 0f..30f)
+    }
+
+    init {
+        tree(CornerRadius)
+    }
 
     private val snapEnabled by boolean("Snapping", true)
     private val gridSize by int("Grid Size", 10, 1..100, "px")
-    private val showGridWhileDrag by boolean("Show Grid While Dragging", true)
     private val dimBackground by boolean("Dim Background", true)
     private val dimAlpha by float("Dim Amount", 0.6f, 0f..1f)
 
@@ -1616,11 +1628,6 @@ object ModuleLiquidClickgui : ClientModule(
             ctx.drawQuad(0f, 0f, viewW, viewH, alpha(Color4b(0, 0, 0, 255), (dimAlpha * 255 * uiAlpha).toInt()))
         }
 
-        val dragging = dragPanel != null
-        if (dragging && snapEnabled && showGridWhileDrag) {
-            drawGrid(ctx, 1f)
-        }
-
         // Search 固定在屏幕坐标，不受 Scale 影响
         if (searchEnabled) drawSearch(ctx, font)
 
@@ -1683,25 +1690,57 @@ object ModuleLiquidClickgui : ClientModule(
         return over(r[0], r[1], r[2], r[3])
     }
 
-    private fun drawGrid(ctx: GuiGraphicsExtractor, s: Float) {
-        val g = gridSize.toFloat().coerceAtLeast(1f)
-        val gc = Color4b(0x80, 0x80, 0x80, (255 * 0.25f * uiAlpha).toInt())
 
-        val halfW = viewW / 2f / s
-        val halfH = viewH / 2f / s
-        var x = (viewW / 2f - halfW - g).coerceAtLeast(0f)
-        while (x < viewW / 2f + halfW) {
-            ctx.drawQuad(x, 0f, x + 1f, viewH, gc)
-            x += g
-        }
-        var y = (viewH / 2f - halfH - g).coerceAtLeast(0f)
-        while (y < viewH / 2f + halfH) {
-            ctx.drawQuad(0f, y, viewW, y + 1f, gc)
-            y += g
-        }
+
+    /**
+     * Rect with only its TOP-LEFT/TOP-RIGHT corners rounded (independently), bottom edge stays
+     * perfectly square. Composited from plain quads + small rounded-rect corner patches, since
+     * the engine's rounded-rect primitive only supports one uniform radius for all four corners.
+     * Order matters: the straight fills must stop short of each corner's own radius (not a
+     * shared "max" radius), and the corner patches are drawn last - drawing a patch OVER an
+     * already-filled square corner wouldn't remove the square corner (a patch only paints inside
+     * its own rounded silhouette, it doesn't erase what's beneath it). Any overlap between the
+     * straight fills and the patches is harmless since both use the identical fill color.
+     */
+    private fun drawTopRoundedRect(
+        ctx: GuiGraphicsExtractor,
+        x0: Float, y0: Float, x1: Float, y1: Float,
+        rTLraw: Float, rTRraw: Float,
+        fill: Color4b,
+    ) {
+        // Half the smaller dimension - a patch box is 2*radius wide/tall, so this guarantees it
+        // never overflows past the rect's own edges (matches the engine's own internal clamp in
+        // RoundedRectGuiElementRenderState: min(width,height) * 0.5).
+        val maxR = minOf((x1 - x0) / 2f, (y1 - y0) / 2f)
+        val rTL = rTLraw.coerceIn(0f, maxR)
+        val rTR = rTRraw.coerceIn(0f, maxR)
+
+        ctx.drawQuad(x0 + rTL, y0, x1 - rTR, y1, fill)   // band between the two corner columns
+        ctx.drawQuad(x0, y0 + rTL, x0 + rTL, y1, fill)   // left corner column, below its own radius
+        ctx.drawQuad(x1 - rTR, y0 + rTR, x1, y1, fill)   // right corner column, below its own radius
+
+        if (rTL > 0f) ctx.drawRoundedRect(x0, y0, x0 + rTL * 2f, y0 + rTL * 2f, rTL, fill)
+        if (rTR > 0f) ctx.drawRoundedRect(x1 - rTR * 2f, y0, x1, y0 + rTR * 2f, rTR, fill)
     }
 
+    /** Mirror of [drawTopRoundedRect] - only the bottom two corners rounded, top edge square. */
+    private fun drawBottomRoundedRect(
+        ctx: GuiGraphicsExtractor,
+        x0: Float, y0: Float, x1: Float, y1: Float,
+        rBLraw: Float, rBRraw: Float,
+        fill: Color4b,
+    ) {
+        val maxR = minOf((x1 - x0) / 2f, (y1 - y0) / 2f)
+        val rBL = rBLraw.coerceIn(0f, maxR)
+        val rBR = rBRraw.coerceIn(0f, maxR)
 
+        ctx.drawQuad(x0 + rBL, y0, x1 - rBR, y1, fill)   // band between the two corner columns
+        ctx.drawQuad(x0, y0, x0 + rBL, y1 - rBL, fill)   // left corner column, above its own radius
+        ctx.drawQuad(x1 - rBR, y0, x1, y1 - rBR, fill)   // right corner column, above its own radius
+
+        if (rBL > 0f) ctx.drawRoundedRect(x0, y1 - rBL * 2f, x0 + rBL * 2f, y1, rBL, fill)
+        if (rBR > 0f) ctx.drawRoundedRect(x1 - rBR * 2f, y1 - rBR * 2f, x1, y1, rBR, fill)
+    }
 
     private fun drawPanel(ctx: GuiGraphicsExtractor, font: Font, p: Panel) {
         val a = (uiAlpha * 255).toInt()
@@ -1724,16 +1763,18 @@ object ModuleLiquidClickgui : ClientModule(
         }
 
 
-        ctx.drawRoundedRect(
-            p.x, p.y, p.x + w, p.y + HEADER_H + 2f, panelRadius, mix(0.9f, a),
+        drawTopRoundedRect(
+            ctx, p.x, p.y, p.x + w, p.y + HEADER_H + 2f,
+            CornerRadius.topLeft, CornerRadius.topRight, mix(0.9f, a),
         )
         ctx.drawQuad(p.x, p.y + HEADER_H, p.x + w, p.y + HEADER_H + 2f, mix(0.9f, a))
         ctx.drawQuad(p.x, p.y + HEADER_H, p.x + w, p.y + HEADER_H + 2f, alpha(accentColor, a))
 
 
         if (bodyH > 0.5f) {
-            ctx.drawRoundedRect(
-                p.x, p.y + HEADER_H + 2f, p.x + w, p.y + HEADER_H + 2f + bodyH, panelRadius, mix(0.8f, a),
+            drawBottomRoundedRect(
+                ctx, p.x, p.y + HEADER_H + 2f, p.x + w, p.y + HEADER_H + 2f + bodyH,
+                CornerRadius.bottomLeft, CornerRadius.bottomRight, mix(0.8f, a),
             )
 
             ctx.drawQuad(p.x, p.y + HEADER_H + 2f, p.x + w, p.y + HEADER_H + 8f, mix(0.8f, a))
@@ -2271,16 +2312,24 @@ object ModuleLiquidClickgui : ClientModule(
     )
 
 
+    /**
+     * Smooth diagonal line via rotation, not stepped axis-aligned boxes. The old version drew
+     * ~pixel-length individual bounding-box quads along the line, which staircases visibly on
+     * any diagonal (exactly the "pixelated" look) - rotating a single rect onto the line's own
+     * angle lets the GPU rasterize it smoothly, same as any other rect this engine draws.
+     */
     private fun diag(ctx: GuiGraphicsExtractor, x1: Float, y1: Float, x2: Float, y2: Float, t: Float, c: Color4b) {
-        val steps = max(abs(x2 - x1), abs(y2 - y1)).toInt().coerceAtLeast(1)
-        for (i in 0 until steps) {
-            val f0 = i / steps.toFloat()
-            val f1 = (i + 1) / steps.toFloat()
-            ctx.drawQuad(
-                x1 + (x2 - x1) * f0 - t * 0.5f, y1 + (y2 - y1) * f0 - t * 0.5f,
-                x1 + (x2 - x1) * f1 + t * 0.5f, y1 + (y2 - y1) * f1 + t * 0.5f,
-                c,
-            )
+        val dx = x2 - x1
+        val dy = y2 - y1
+        val len = sqrt(dx * dx + dy * dy)
+        if (len < 0.01f) return
+        val angle = atan2(dy, dx)
+        ctx.pose().withPush {
+            translate(x1, y1)
+            rotate(angle)
+            // radius = t/2 gives rounded end caps for free, via the same smooth rounded-rect
+            // primitive used everywhere else - no new drawing mechanism introduced.
+            ctx.drawRoundedRect(0f, -t / 2f, len, t / 2f, t / 2f, c)
         }
     }
 
@@ -2701,17 +2750,20 @@ object ModuleLiquidClickgui : ClientModule(
 
 
         val sbY = y + SETTING_ROW_PAD * 2f + 16f + PICKER_GAP
-        val cols = 24
-        val rows = 16
-        val cw = w / cols
-        val ch = PICKER_SB_H / rows
-        for (r in 0 until rows) {
-            for (c in 0 until cols) {
-                ctx.drawQuad(
-                    x + cw * c, sbY + ch * r, x + cw * (c + 1), sbY + ch * (r + 1),
-                    hsvToRgb(hue, (c + 0.5f) / cols, 1f - (r + 0.5f) / rows, a),
-                )
-            }
+        // Smooth SV box: fillGradient is a native vanilla GuiGraphicsExtractor method that
+        // interpolates color top-to-bottom per pixel on the GPU (perfectly smooth vertically,
+        // no banding). Saturation (horizontal) still needs per-column stepping since there's no
+        // 4-corner-gradient primitive available, but 128 columns is fine enough to look
+        // continuous - the old 24x16 flat-quad grid was the actual source of visible blockiness.
+        val svColumns = 128
+        val colW = w / svColumns
+        for (c in 0 until svColumns) {
+            val sat = (c + 0.5f) / svColumns
+            val top = hsvToRgb(hue, sat, 1f, a)
+            val bottom = Color4b(0, 0, 0, a)
+            val colX0 = (x + colW * c).roundToInt()
+            val colX1 = (x + colW * (c + 1)).roundToInt()
+            ctx.fillGradient(colX0, sbY.roundToInt(), colX1, (sbY + PICKER_SB_H).roundToInt(), top.argb, bottom.argb)
         }
 
         val cursorX = x + sv.coerceIn(0f, 1f) * w
@@ -2721,7 +2773,11 @@ object ModuleLiquidClickgui : ClientModule(
 
 
         val hueY = sbY + PICKER_SB_H + PICKER_GAP
-        val segs = 32
+        // 32 -> 180 segments (2 degrees of hue each): the visible color "steps" in the old
+        // version were exactly this - too few discrete flat-color blocks across a continuous
+        // spectrum. There's no horizontal-gradient primitive available (fillGradient is
+        // vertical-only), so finer stepping is the safe fix here.
+        val segs = 180
         val sw = w / segs
         for (i in 0 until segs) {
             ctx.drawQuad(
@@ -2734,7 +2790,7 @@ object ModuleLiquidClickgui : ClientModule(
 
         val alphaY = hueY + PICKER_BAR_H + PICKER_GAP
         drawCheckerboard(ctx, x, alphaY, w, PICKER_BAR_H, a)
-        val aSegs = 16
+        val aSegs = 96
         val asw = w / aSegs
         for (i in 0 until aSegs) {
             val f = (i + 0.5f) / aSegs
