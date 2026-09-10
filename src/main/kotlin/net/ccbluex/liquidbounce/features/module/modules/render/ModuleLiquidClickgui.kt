@@ -16,6 +16,9 @@ import net.ccbluex.liquidbounce.features.module.ClientModule
 import net.ccbluex.liquidbounce.features.module.ModuleCategories
 import net.ccbluex.liquidbounce.features.module.ModuleCategory
 import net.ccbluex.liquidbounce.features.module.ModuleManager
+import it.unimi.dsi.fastutil.floats.Float2IntFunction
+import net.ccbluex.liquidbounce.render.drawCircle
+import net.ccbluex.liquidbounce.render.drawLines
 import net.ccbluex.liquidbounce.render.drawQuad
 import net.ccbluex.liquidbounce.render.drawRoundedRect
 import net.ccbluex.liquidbounce.render.engine.type.Color4b
@@ -34,14 +37,13 @@ import org.lwjgl.glfw.GLFW
 import java.util.IdentityHashMap
 import java.util.prefs.Preferences
 import kotlin.math.abs
-import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
-import kotlin.math.sqrt
 
 object ModuleLiquidClickgui : ClientModule(
     "LiquidClickgui",
@@ -59,17 +61,13 @@ object ModuleLiquidClickgui : ClientModule(
     private val panelSpacing by float("Panel Spacing", 50f, 20f..140f)
     private val headerPadding by float("Header Padding", 10f, 4f..20f)
 
-    /** Independent per-corner radius for the panel's four true outer corners (see drawPanel). */
-    object CornerRadius : ValueGroup("Corner Radius") {
-        val topLeft by float("Top Left", 5f, 0f..30f)
-        val topRight by float("Top Right", 5f, 0f..30f)
-        val bottomLeft by float("Bottom Left", 5f, 0f..30f)
-        val bottomRight by float("Bottom Right", 5f, 0f..30f)
-    }
-
-    init {
-        tree(CornerRadius)
-    }
+    // ---- 四角圆角（可分别调整）----
+    private val cornerTL by float("Corner TL", 8f, 0f..28f)
+    private val cornerTR by float("Corner TR", 8f, 0f..28f)
+    private val cornerBL by float("Corner BL", 8f, 0f..28f)
+    private val cornerBR by float("Corner BR", 8f, 0f..28f)
+    private val widgetRadius by float("Widget Radius", 4f, 0f..16f)
+    private val smoothLines by boolean("Smooth Lines", true)
 
     private val snapEnabled by boolean("Snapping", true)
     private val gridSize by int("Grid Size", 10, 1..100, "px")
@@ -1625,8 +1623,11 @@ object ModuleLiquidClickgui : ClientModule(
         descTarget = null
 
         if (dimBackground && dimAlpha > 0f) {
-            ctx.drawQuad(0f, 0f, viewW, viewH, alpha(Color4b(0, 0, 0, 255), (dimAlpha * 255 * uiAlpha).toInt()))
+            // 全屏遮罩也走圆角管线最小半径，避免硬边采样差异
+            fillSmooth(ctx, 0f, 0f, viewW, viewH, alpha(Color4b(0, 0, 0, 255), (dimAlpha * 255 * uiAlpha).toInt()), 0.75f)
         }
+
+        // 拖动时不再绘制背景网格
 
         // Search 固定在屏幕坐标，不受 Scale 影响
         if (searchEnabled) drawSearch(ctx, font)
@@ -1690,101 +1691,156 @@ object ModuleLiquidClickgui : ClientModule(
         return over(r[0], r[1], r[2], r[3])
     }
 
+    /** 顶部圆角（标题栏） */
+    private fun headerCornerR(): Float = max(cornerTL, cornerTR).coerceAtLeast(0.75f)
 
+    /** 底部圆角（面板主体） */
+    private fun bodyCornerR(): Float = max(cornerBL, cornerBR).coerceAtLeast(0.75f)
+
+    /** 四角平均，用于阴影等 */
+    private fun avgCornerR(): Float =
+        ((cornerTL + cornerTR + cornerBL + cornerBR) * 0.25f).coerceAtLeast(0.75f)
 
     /**
-     * Rect with only its TOP-LEFT/TOP-RIGHT corners rounded (independently), bottom edge stays
-     * perfectly square. Composited from plain quads + small rounded-rect corner patches, since
-     * the engine's rounded-rect primitive only supports one uniform radius for all four corners.
-     * Order matters: the straight fills must stop short of each corner's own radius (not a
-     * shared "max" radius), and the corner patches are drawn last - drawing a patch OVER an
-     * already-filled square corner wouldn't remove the square corner (a patch only paints inside
-     * its own rounded silhouette, it doesn't erase what's beneath it). Any overlap between the
-     * straight fills and the patches is harmless since both use the identical fill color.
+     * 统一平滑填充：强制走 RoundedRect 渲染管线（SDF/AA），禁止硬边 Quad。
+     * radius 最小 0.75，保证边沿有抗锯齿，而不是「方块像素」。
      */
-    private fun drawTopRoundedRect(
+    private fun fillSmooth(
         ctx: GuiGraphicsExtractor,
-        x0: Float, y0: Float, x1: Float, y1: Float,
-        rTLraw: Float, rTRraw: Float,
-        fill: Color4b,
+        x1: Float, y1: Float, x2: Float, y2: Float,
+        color: Color4b,
+        radius: Float = widgetRadius,
     ) {
-        // Half the smaller dimension - a patch box is 2*radius wide/tall, so this guarantees it
-        // never overflows past the rect's own edges (matches the engine's own internal clamp in
-        // RoundedRectGuiElementRenderState: min(width,height) * 0.5).
-        val maxR = minOf((x1 - x0) / 2f, (y1 - y0) / 2f)
-        val rTL = rTLraw.coerceIn(0f, maxR)
-        val rTR = rTRraw.coerceIn(0f, maxR)
-
-        ctx.drawQuad(x0 + rTL, y0, x1 - rTR, y1, fill)   // band between the two corner columns
-        ctx.drawQuad(x0, y0 + rTL, x0 + rTL, y1, fill)   // left corner column, below its own radius
-        ctx.drawQuad(x1 - rTR, y0 + rTR, x1, y1, fill)   // right corner column, below its own radius
-
-        if (rTL > 0f) ctx.drawRoundedRect(x0, y0, x0 + rTL * 2f, y0 + rTL * 2f, rTL, fill)
-        if (rTR > 0f) ctx.drawRoundedRect(x1 - rTR * 2f, y0, x1, y0 + rTR * 2f, rTR, fill)
+        if (color.a <= 0) return
+        val xa = min(x1, x2)
+        val ya = min(y1, y2)
+        val xb = max(x1, x2)
+        val yb = max(y1, y2)
+        val w = xb - xa
+        val h = yb - ya
+        if (w < 0.01f || h < 0.01f) return
+        val minR = if (smoothLines) 0.75f else 0.5f
+        val r = radius.coerceIn(minR, min(w, h) * 0.5f)
+        ctx.drawRoundedRect(xa, ya, xb, yb, r, color)
     }
 
-    /** Mirror of [drawTopRoundedRect] - only the bottom two corners rounded, top edge square. */
-    private fun drawBottomRoundedRect(
+    /** 带描边的平滑矩形（描边同样走圆角管线） */
+    private fun fillSmoothOutlined(
         ctx: GuiGraphicsExtractor,
-        x0: Float, y0: Float, x1: Float, y1: Float,
-        rBLraw: Float, rBRraw: Float,
+        x1: Float, y1: Float, x2: Float, y2: Float,
         fill: Color4b,
+        outline: Color4b,
+        radius: Float,
+        outlineW: Float = 1.25f,
     ) {
-        val maxR = minOf((x1 - x0) / 2f, (y1 - y0) / 2f)
-        val rBL = rBLraw.coerceIn(0f, maxR)
-        val rBR = rBRraw.coerceIn(0f, maxR)
+        val xa = min(x1, x2)
+        val ya = min(y1, y2)
+        val xb = max(x1, x2)
+        val yb = max(y1, y2)
+        val w = xb - xa
+        val h = yb - ya
+        if (w < 0.01f || h < 0.01f) return
+        val r = radius.coerceIn(0.75f, min(w, h) * 0.5f)
+        ctx.drawRoundedRect(xa, ya, xb, yb, r, fill, outline, outlineW.coerceAtLeast(0.75f))
+    }
 
-        ctx.drawQuad(x0 + rBL, y0, x1 - rBR, y1, fill)   // band between the two corner columns
-        ctx.drawQuad(x0, y0, x0 + rBL, y1 - rBL, fill)   // left corner column, above its own radius
-        ctx.drawQuad(x1 - rBR, y0, x1, y1 - rBR, fill)   // right corner column, above its own radius
+    /** 水平胶囊线 */
+    private fun lineH(
+        ctx: GuiGraphicsExtractor,
+        x1: Float, x2: Float, y: Float,
+        thickness: Float,
+        color: Color4b,
+    ) {
+        val t = thickness.coerceAtLeast(if (smoothLines) 1.75f else 1f)
+        fillSmooth(ctx, x1, y - t * 0.5f, x2, y + t * 0.5f, color, t * 0.5f)
+    }
 
-        if (rBL > 0f) ctx.drawRoundedRect(x0, y1 - rBL * 2f, x0 + rBL * 2f, y1, rBL, fill)
-        if (rBR > 0f) ctx.drawRoundedRect(x1 - rBR * 2f, y1 - rBR * 2f, x1, y1, rBR, fill)
+    /** 竖直胶囊线 */
+    private fun lineV(
+        ctx: GuiGraphicsExtractor,
+        x: Float, y1: Float, y2: Float,
+        thickness: Float,
+        color: Color4b,
+    ) {
+        val t = thickness.coerceAtLeast(if (smoothLines) 1.75f else 1f)
+        fillSmooth(ctx, x - t * 0.5f, y1, x + t * 0.5f, y2, color, t * 0.5f)
+    }
+
+    /** GPU 线段（Line pipeline），用于斜线/轮廓，比方块步进更平滑 */
+    private fun lineAA(
+        ctx: GuiGraphicsExtractor,
+        x1: Float, y1: Float, x2: Float, y2: Float,
+        color: Color4b,
+    ) {
+        if (color.a <= 0) return
+        val pad = 2f
+        val bounds = ctx.getBounds(
+            min(x1, x2) - pad, min(y1, y2) - pad,
+            max(x1, x2) + pad, max(y1, y2) + pad,
+        )
+        ctx.drawLines(floatArrayOf(x1, y1, x2, y2), color.argb, bounds)
+    }
+
+    /** 平滑实心圆（Circle LUT，真正抗锯齿） */
+    private fun fillCircle(
+        ctx: GuiGraphicsExtractor,
+        cx: Float, cy: Float,
+        radius: Float,
+        color: Color4b,
+    ) {
+        if (radius <= 0.01f || color.a <= 0) return
+        val argb = color.argb
+        ctx.drawCircle(cx, cy, radius, 0f, Float2IntFunction { argb })
     }
 
     private fun drawPanel(ctx: GuiGraphicsExtractor, font: Font, p: Panel) {
         val a = (uiAlpha * 255).toInt()
         val w = panelWidth
         val bodyH = p.extAnim * panelMaxHeight
+        val topR = headerCornerR()
+        val botR = bodyCornerR()
+        val avgR = avgCornerR()
 
-
-        val sh = Color4b(baseColor.r, baseColor.g, baseColor.b, (255 * 0.5f * uiAlpha).toInt())
-        val r = 10f
-        for (i in 0 until 6) {
-            val f = (i + 1) / 6f
-            val alphaV = (sh.a * (1f - f)).toInt()
+        // 柔和阴影（圆角扩散，无硬像素条）
+        val shBase = Color4b(baseColor.r, baseColor.g, baseColor.b, (255 * 0.45f * uiAlpha).toInt())
+        for (i in 0 until 5) {
+            val f = (i + 1) / 5f
+            val alphaV = (shBase.a * (1f - f) * 0.55f).toInt()
             if (alphaV <= 0) continue
-            val c = Color4b(sh.r, sh.g, sh.b, alphaV)
-            val off = r * f
-            ctx.drawQuad(p.x - off, p.y, p.x + w + off, p.y + off, c)
-            ctx.drawQuad(p.x - off, p.y + HEADER_H + bodyH - off, p.x + w + off, p.y + HEADER_H + bodyH, c)
-            ctx.drawQuad(p.x - off, p.y, p.x, p.y + HEADER_H + bodyH, c)
-            ctx.drawQuad(p.x + w, p.y, p.x + w + off, p.y + HEADER_H + bodyH, c)
+            val off = (6f + avgR * 0.35f) * f
+            val c = Color4b(shBase.r, shBase.g, shBase.b, alphaV)
+            ctx.drawRoundedRect(
+                p.x - off, p.y - off * 0.4f,
+                p.x + w + off, p.y + HEADER_H + bodyH + off,
+                (avgR + off * 0.5f).coerceAtLeast(1f), c,
+            )
         }
 
-
-        drawTopRoundedRect(
-            ctx, p.x, p.y, p.x + w, p.y + HEADER_H + 2f,
-            CornerRadius.topLeft, CornerRadius.topRight, mix(0.9f, a),
+        // 标题栏：顶角圆角
+        ctx.drawRoundedRect(
+            p.x, p.y, p.x + w, p.y + HEADER_H + 2f, topR, mix(0.9f, a),
         )
-        ctx.drawQuad(p.x, p.y + HEADER_H, p.x + w, p.y + HEADER_H + 2f, mix(0.9f, a))
-        ctx.drawQuad(p.x, p.y + HEADER_H, p.x + w, p.y + HEADER_H + 2f, alpha(accentColor, a))
-
+        // 标题底部分隔线（平滑胶囊）
+        lineH(ctx, p.x + 2f, p.x + w - 2f, p.y + HEADER_H + 1f, 2f, alpha(accentColor, a))
 
         if (bodyH > 0.5f) {
-            drawBottomRoundedRect(
-                ctx, p.x, p.y + HEADER_H + 2f, p.x + w, p.y + HEADER_H + 2f + bodyH,
-                CornerRadius.bottomLeft, CornerRadius.bottomRight, mix(0.8f, a),
+            // 主体：底角圆角
+            ctx.drawRoundedRect(
+                p.x, p.y + HEADER_H + 2f, p.x + w, p.y + HEADER_H + 2f + bodyH, botR, mix(0.8f, a),
             )
-
-            ctx.drawQuad(p.x, p.y + HEADER_H + 2f, p.x + w, p.y + HEADER_H + 8f, mix(0.8f, a))
+            // 与标题衔接处补一块，避免圆角缺口露底
+            fillSmooth(
+                ctx,
+                p.x + 0.5f, p.y + HEADER_H + 1.5f,
+                p.x + w - 0.5f, p.y + HEADER_H + 2f + max(botR, 4f),
+                mix(0.8f, a),
+                1f,
+            )
         }
-
 
         if (catIcons) {
             drawCategoryIcon(ctx, p.category, p.x + 15f + 8.5f, p.y + HEADER_H / 2f, a)
         }
-
 
         val nameX = p.x + 15f + (if (catIcons) 17f + 12f else 0f)
         drawText(
@@ -1792,21 +1848,19 @@ object ModuleLiquidClickgui : ClientModule(
             alpha(textColor, a), 14f,
         )
 
-
         val bx = p.x + w - 15f - 6f
         val by = p.y + HEADER_H / 2f
         val ic = alpha(textColor, a)
         val ext = p.extAnim
 
-        ctx.drawQuad(bx - 6f, by - 1f, bx + 6f, by + 1f, ic)
-
+        // 展开指示：平滑横条 / 竖条
+        lineH(ctx, bx - 6f, bx + 6f, by, 2f, ic)
         if (ext < 0.99f) {
-            val hh = (1f - ext).coerceAtLeast(0.08f)
-            ctx.drawQuad(bx - hh, by - 6f, bx + hh, by + 6f, alpha(ic, (255 * (1f - ext)).toInt()))
+            val hh = (1f - ext).coerceAtLeast(0.08f) * 6f
+            lineV(ctx, bx, by - hh, by + hh, 2f, alpha(ic, (255 * (1f - ext)).toInt()))
         }
 
         headerRects[p] = floatArrayOf(p.x, p.y, w, HEADER_H + 2f)
-
 
         if (bodyH > 0.5f) {
             drawModuleList(ctx, font, p, bodyH, a)
@@ -1851,8 +1905,9 @@ object ModuleLiquidClickgui : ClientModule(
                     // 已打开时绘制也用全高，避免子项在动画中途被裁掉看不见
                     val visH = if (modOpen[m] == true) fullH else setH
                     if (y + visH > clipTop && y < clipBot) {
-                        ctx.drawQuad(x, y, x + w, y + visH, mix(0.5f, a))
-                        ctx.drawQuad(x, y, x + 4f, y + visH, alpha(accentColor, a))
+                        fillSmooth(ctx, x, y, x + w, y + visH, mix(0.5f, a), widgetRadius.coerceAtLeast(2f))
+                        // 左侧强调条：圆角胶囊，避免 1px 竖线锯齿
+                        lineV(ctx, x + 2f, y + 2f, y + visH - 2f, 3f, alpha(accentColor, a))
                         val innerTop = maxOf(y, clipTop)
                         val innerBottom = min(y + visH, clipBot)
                         if (innerBottom > innerTop) {
@@ -1875,9 +1930,13 @@ object ModuleLiquidClickgui : ClientModule(
                 val track = bodyH - thumbH
                 val t = (p.scroll / maxScroll).coerceIn(0f, 1f)
                 val ty = clipTop + track * t
-                ctx.drawQuad(
-                    x + w - 3f - scrollbarWidth, ty, x + w - 3f, ty + thumbH,
+                val sw = scrollbarWidth.coerceAtLeast(2f)
+                fillSmooth(
+                    ctx,
+                    x + w - 3f - sw, ty,
+                    x + w - 3f, ty + thumbH,
                     alpha(dimmedColor, (a * 0.7f).toInt()),
+                    sw * 0.5f,
                 )
             }
         }
@@ -1897,7 +1956,7 @@ object ModuleLiquidClickgui : ClientModule(
 
 
         if (hoverF > 0.01f) {
-            ctx.drawQuad(x, y, x + w, y + ROW_H, mix(0.85f, (a * hoverF).toInt()))
+            fillSmooth(ctx, x + 1f, y + 1f, x + w - 1f, y + ROW_H - 1f, mix(0.85f, (a * hoverF).toInt()), widgetRadius)
         }
 
 
@@ -1931,10 +1990,10 @@ object ModuleLiquidClickgui : ClientModule(
             val ay = y + ROW_H / 2f
             val c = alpha(textColor, (a * (0.5f + 0.5f * openF)).toInt())
 
-            ctx.drawQuad(ax - 1f, ay - 4f, ax + 1f, ay + 1f, c)
-            ctx.drawQuad(ax - 3f, ay - 2f, ax - 1f, ay, c)
-            ctx.drawQuad(ax + 1f, ay - 2f, ax + 3f, ay, c)
-            ctx.drawQuad(ax - 3f, ay - 0.5f, ax + 3f, ay + 1f, c)
+            fillSmooth(ctx, ax - 1.2f, ay - 4f, ax + 1.2f, ay + 1f, c, 1.2f)
+            fillSmooth(ctx, ax - 3.2f, ay - 2.2f, ax - 0.8f, ay + 0.2f, c, 1.2f)
+            fillSmooth(ctx, ax + 0.8f, ay - 2.2f, ax + 3.2f, ay + 0.2f, c, 1.2f)
+            fillSmooth(ctx, ax - 3.2f, ay - 0.7f, ax + 3.2f, ay + 1.2f, c, 1.2f)
         }
 
 
@@ -1980,10 +2039,10 @@ object ModuleLiquidClickgui : ClientModule(
         val a = (255 * highlightAnim * uiAlpha).toInt().coerceIn(0, 255)
         val b = alpha(accentColor, a)
         val t = (2f * s).coerceAtLeast(1.5f)
-        ctx.drawQuad(x1, y1, x1 + rw, y1 + t, b)
-        ctx.drawQuad(x1, y1 + rh - t, x1 + rw, y1 + rh, b)
-        ctx.drawQuad(x1, y1, x1 + t, y1 + rh, b)
-        ctx.drawQuad(x1 + rw - t, y1, x1 + rw, y1 + rh, b)
+        fillSmooth(ctx, x1, y1, x1 + rw, y1 + t, b, t * 0.5f)
+        fillSmooth(ctx, x1, y1 + rh - t, x1 + rw, y1 + rh, b, t * 0.5f)
+        fillSmooth(ctx, x1, y1, x1 + t, y1 + rh, b, t * 0.5f)
+        fillSmooth(ctx, x1 + rw - t, y1, x1 + rw, y1 + rh, b, t * 0.5f)
     }
 
 
@@ -2041,13 +2100,13 @@ object ModuleLiquidClickgui : ClientModule(
         if (arrowLeft) {
             var i = 0
             while (i < 8) {
-                ctx.drawQuad(bx - 8f + i, ay - (8 - i), bx - 8f + i + 1f, ay + (8 - i), ac)
+                fillSmooth(ctx, bx - 8f + i, ay - (8 - i), bx - 8f + i + 1f, ay + (8 - i), ac, 0.8f)
                 i++
             }
         } else {
             var i = 0
             while (i < 8) {
-                ctx.drawQuad(bx + bw + 7f - i, ay - (8 - i), bx + bw + 8f - i, ay + (8 - i), ac)
+                fillSmooth(ctx, bx + bw + 7f - i, ay - (8 - i), bx + bw + 8f - i, ay + (8 - i), ac, 0.8f)
                 i++
             }
         }
@@ -2083,9 +2142,9 @@ object ModuleLiquidClickgui : ClientModule(
             val c = Color4b(sh.r, sh.g, sh.b, (sh.a * (1f - f)).toInt())
             if (c.a <= 0) continue
             val off = 10f * f
-            ctx.drawQuad(sx - off, sy - off, sx + sw + off, sy + off, c)
-            ctx.drawQuad(sx - off, sy, sx + off, sy + inputH, c)
-            ctx.drawQuad(sx + sw - off, sy, sx + sw + off, sy + inputH, c)
+            fillSmooth(ctx, sx - off, sy - off, sx + sw + off, sy + off, c, (r + off * 0.3f).coerceAtLeast(1f))
+            fillSmooth(ctx, sx - off, sy, sx + off, sy + inputH, c, off.coerceAtLeast(1f))
+            fillSmooth(ctx, sx + sw - off, sy, sx + sw + off, sy + inputH, c, off.coerceAtLeast(1f))
         }
 
         val hasResults = searchResults.isNotEmpty()
@@ -2095,7 +2154,7 @@ object ModuleLiquidClickgui : ClientModule(
 
         if (resultsH > 0.5f) {
             ctx.drawRoundedRect(sx, sy, sx + sw, sy + inputH + 2f + resultsH, r, mix(0.9f, a))
-            ctx.drawQuad(sx + 2f, sy + inputH, sx + sw - 2f, sy + inputH + resultsH + 2f, mix(0.9f, a))
+            fillSmooth(ctx, sx + 2f, sy + inputH, sx + sw - 2f, sy + inputH + resultsH + 2f, mix(0.9f, a), 2f)
         } else {
             ctx.drawRoundedRect(sx, sy, sx + sw, sy + inputH, r, mix(0.9f, a))
         }
@@ -2107,13 +2166,13 @@ object ModuleLiquidClickgui : ClientModule(
 
         if (searchFocus && (System.currentTimeMillis() / 500) % 2 == 0L) {
             val cw = font.width(searchQuery) * (16f / 9f)
-            ctx.drawQuad(sx + 25f + cw + 1f, sy + 16f, sx + 25f + cw + 2f, sy + inputH - 16f, alpha(textColor, a))
+            lineV(ctx, sx + 25f + cw + 1.5f, sy + 16f, sy + inputH - 16f, 2f, alpha(textColor, a))
         }
 
         if (resultsH <= 0.5f) return
 
 
-        ctx.drawQuad(sx, sy + inputH, sx + sw, sy + inputH + 2f, alpha(accentColor, a))
+        lineH(ctx, sx + 4f, sx + sw - 4f, sy + inputH + 1f, 2f, alpha(accentColor, a))
 
         val listH = resultsH
         ctx.scissorStack.withPush(ctx.getBounds(sx, sy + inputH + 2f, sx + sw, sy + inputH + 2f + listH)) {
@@ -2312,24 +2371,17 @@ object ModuleLiquidClickgui : ClientModule(
     )
 
 
-    /**
-     * Smooth diagonal line via rotation, not stepped axis-aligned boxes. The old version drew
-     * ~pixel-length individual bounding-box quads along the line, which staircases visibly on
-     * any diagonal (exactly the "pixelated" look) - rotating a single rect onto the line's own
-     * angle lets the GPU rasterize it smoothly, same as any other rect this engine draws.
-     */
     private fun diag(ctx: GuiGraphicsExtractor, x1: Float, y1: Float, x2: Float, y2: Float, t: Float, c: Color4b) {
-        val dx = x2 - x1
-        val dy = y2 - y1
-        val len = sqrt(dx * dx + dy * dy)
-        if (len < 0.01f) return
-        val angle = atan2(dy, dx)
-        ctx.pose().withPush {
-            translate(x1, y1)
-            rotate(angle)
-            // radius = t/2 gives rounded end caps for free, via the same smooth rounded-rect
-            // primitive used everywhere else - no new drawing mechanism introduced.
-            ctx.drawRoundedRect(0f, -t / 2f, len, t / 2f, t / 2f, c)
+        // GPU Line + 轻微胶囊加粗，避免步进方块
+        lineAA(ctx, x1, y1, x2, y2, c)
+        val len = hypot((x2 - x1).toDouble(), (y2 - y1).toDouble()).toFloat().coerceAtLeast(0.01f)
+        val thickness = t.coerceAtLeast(1.4f)
+        val steps = (len * 1.5f).toInt().coerceIn(3, 48)
+        for (i in 0 until steps) {
+            val f = (i + 0.5f) / steps
+            val ax = x1 + (x2 - x1) * f
+            val ay = y1 + (y2 - y1) * f
+            fillCircle(ctx, ax, ay, thickness * 0.45f, c)
         }
     }
 
@@ -2389,8 +2441,8 @@ object ModuleLiquidClickgui : ClientModule(
             "world" -> {
                 ctx.drawRoundedRect(x + 1f, y + 0.5f, x + 16f, y + 14.5f, 7f, c)
                 ctx.drawRoundedRect(x + 3f, y + 2.5f, x + 14f, y + 12.5f, 5f, bg)
-                ctx.drawQuad(x + 1.5f, y + 6.5f, x + 15.5f, y + 8.5f, c)
-                ctx.drawQuad(x + 7.5f, y + 1f, x + 9.5f, y + 14f, c)
+                fillSmooth(ctx, x + 1.5f, y + 6.5f, x + 15.5f, y + 8.5f, c, 1f)
+                fillSmooth(ctx, x + 7.5f, y + 1f, x + 9.5f, y + 14f, c, 1f)
             }
             "misc" -> {
                 ctx.drawRoundedRect(x + 2f, y + 1f, x + 5.5f, y + 4.5f, 1.75f, c)
@@ -2398,22 +2450,22 @@ object ModuleLiquidClickgui : ClientModule(
                 ctx.drawRoundedRect(x + 11.5f, y + 9.5f, x + 15f, y + 13f, 1.75f, c)
             }
             "exploit" -> {
-                ctx.drawQuad(x + 9f, y, x + 16f, y + 3f, c)
-                ctx.drawQuad(x + 4f, y + 3.5f, x + 11f, y + 6.5f, c)
-                ctx.drawQuad(x + 6f, y + 6.5f, x + 13f, y + 9.5f, c)
-                ctx.drawQuad(x + 1f, y + 9.5f, x + 8f, y + 12.5f, c)
-                ctx.drawQuad(x + 1f, y + 12.5f, x + 5f, y + 15f, c)
+                fillSmooth(ctx, x + 9f, y, x + 16f, y + 3f, c, 1.2f)
+                fillSmooth(ctx, x + 4f, y + 3.5f, x + 11f, y + 6.5f, c, 1.2f)
+                fillSmooth(ctx, x + 6f, y + 6.5f, x + 13f, y + 9.5f, c, 1.2f)
+                fillSmooth(ctx, x + 1f, y + 9.5f, x + 8f, y + 12.5f, c, 1.2f)
+                fillSmooth(ctx, x + 1f, y + 12.5f, x + 5f, y + 15f, c, 1.2f)
             }
             "fun" -> {
                 ctx.drawRoundedRect(x + 0.5f, y, x + 16.5f, y + 15f, 7.5f, c)
                 ctx.drawRoundedRect(x + 2.5f, y + 2f, x + 14.5f, y + 13f, 5.5f, bg)
                 ctx.drawRoundedRect(x + 4.5f, y + 5f, x + 6.5f, y + 7f, 1f, c)
                 ctx.drawRoundedRect(x + 10.5f, y + 5f, x + 12.5f, y + 7f, 1f, c)
-                ctx.drawQuad(x + 5f, y + 9.5f, x + 12f, y + 11f, c)
+                fillSmooth(ctx, x + 5f, y + 9.5f, x + 12f, y + 11f, c, 0.9f)
             }
             "client" -> {
                 ctx.drawRoundedRect(x + 0.5f, y + 1f, x + 16.5f, y + 12f, 2f, c)
-                ctx.drawQuad(x + 7f, y + 12.5f, x + 10f, y + 15f, c)
+                fillSmooth(ctx, x + 7f, y + 12.5f, x + 10f, y + 15f, c, 0.9f)
             }
             else -> ctx.drawRoundedRect(x + 3f, y + 2f, x + 14f, y + 13f, 2f, c)
         }
@@ -2460,12 +2512,12 @@ object ModuleLiquidClickgui : ClientModule(
         switchAnim[v] = t
         val trackOff = mixColor(textColor, 0.45f, a)
         val trackOn = mixColor(accentColor, 0.4f, a)
-        ctx.drawRoundedRect(x, y + 2f, x + SWITCH_W, y + 10f, 4f, lerpColor(trackOff, trackOn, t))
-        val tx = x + t * (SWITCH_W - 12f)
-        ctx.drawRoundedRect(
-            tx, y, tx + 12f, y + 12f, 6f,
-            lerpColor(alpha(textColor, a), alpha(accentColor, a), t),
-        )
+        val trackR = min(widgetRadius.coerceAtLeast(4f), 5f)
+        ctx.drawRoundedRect(x, y + 2f, x + SWITCH_W, y + 10f, trackR, lerpColor(trackOff, trackOn, t))
+        val tx = x + 6f + t * (SWITCH_W - 12f)
+        val knobCol = lerpColor(alpha(textColor, a), alpha(accentColor, a), t)
+        // 真正的圆形抗锯齿旋钮
+        fillCircle(ctx, tx, y + 6f, 5.5f, knobCol)
     }
 
 
@@ -2544,7 +2596,7 @@ object ModuleLiquidClickgui : ClientModule(
         }
 
         if (editing && (System.currentTimeMillis() / 500) % 2 == 0L) {
-            ctx.drawQuad(valueX + valueW + 1f, y + 7f, valueX + valueW + 2f, y + 21f, alpha(textColor, a))
+            lineV(ctx, valueX + valueW + 1.5f, y + 7f, y + 21f, 2f, alpha(textColor, a))
         }
 
         textRects[v] = floatArrayOf(valueX - 6f, y, valueW + suffixW + 10f, 24f, p.index.toFloat())
@@ -2559,15 +2611,15 @@ object ModuleLiquidClickgui : ClientModule(
             val (lo, hi) = dualOf(v)
             val t1 = ((lo - minV) / (maxV - minV)).coerceIn(0f, 1f)
             val t2 = ((hi - minV) / (maxV - minV)).coerceIn(0f, 1f)
-            ctx.drawQuad(trackX, trackY, trackX + trackW, trackY + 2f, trackC)
-            ctx.drawQuad(trackX + t1 * trackW, trackY, trackX + t2 * trackW, trackY + 2f, fillC)
+            fillSmooth(ctx, trackX, trackY, trackX + trackW, trackY + 3f, trackC, 1.5f)
+            fillSmooth(ctx, trackX + t1 * trackW, trackY, trackX + t2 * trackW, trackY + 3f, fillC, 1.5f)
 
             ctx.drawRoundedRect(trackX + t1 * trackW - 6f, trackY - 5f, trackX + t1 * trackW + 6f, trackY + 7f, 6f, fillC)
             ctx.drawRoundedRect(trackX + t2 * trackW - 6f, trackY - 5f, trackX + t2 * trackW + 6f, trackY + 7f, 6f, fillC)
         } else {
             val t = ((numOf(v) - minV) / (maxV - minV)).coerceIn(0f, 1f)
-            ctx.drawQuad(trackX, trackY, trackX + trackW, trackY + 2f, trackC)
-            ctx.drawQuad(trackX, trackY, trackX + t * trackW, trackY + 2f, fillC)
+            fillSmooth(ctx, trackX, trackY, trackX + trackW, trackY + 3f, trackC, 1.5f)
+            fillSmooth(ctx, trackX, trackY, trackX + t * trackW, trackY + 3f, fillC, 1.5f)
             ctx.drawRoundedRect(trackX + t * trackW - 6f, trackY - 5f, trackX + t * trackW + 6f, trackY + 7f, 6f, fillC)
         }
 
@@ -2590,8 +2642,8 @@ object ModuleLiquidClickgui : ClientModule(
         ctx.drawRoundedRect(hx, hy, hx + w, hy2, 3f, headC)
         if (open) {
 
-            ctx.drawQuad(hx, hy2 - 3f, hx + 3f, hy2, headC)
-            ctx.drawQuad(hx + w - 3f, hy2 - 3f, hx + w, hy2, headC)
+            fillSmooth(ctx, hx, hy2 - 3f, hx + 3f, hy2, headC, 1.2f)
+            fillSmooth(ctx, hx + w - 3f, hy2 - 3f, hx + w, hy2, headC, 1.2f)
         }
 
 
@@ -2666,7 +2718,7 @@ object ModuleLiquidClickgui : ClientModule(
 
         val contY = y + SETTING_ROW_PAD * 2f + 14f + 10f
         val contH = chipsHeight(v, indent)
-        ctx.drawQuad(x, contY, x + 2f, contY + contH, alpha(accentColor, a))
+        lineV(ctx, x + 1f, contY, contY + contH, 3f, alpha(accentColor, a))
         val maxW = w - 16f
         val rows = chipRows(font, v, maxW)
         var cy = contY + 7f
@@ -2698,8 +2750,8 @@ object ModuleLiquidClickgui : ClientModule(
         drawText(ctx, font, v.name, x, y + SETTING_ROW_PAD, alpha(textColor, a), 12f)
         val boxY = y + SETTING_ROW_PAD + 14f + 5f
         val boxH = 26f
-        ctx.drawRoundedRect(x, boxY, x + w, boxY + boxH, 3f, mix(0.36f, a))
-        ctx.drawQuad(x, boxY + boxH - 2f, x + w, boxY + boxH, alpha(accentColor, a))
+        ctx.drawRoundedRect(x, boxY, x + w, boxY + boxH, widgetRadius.coerceAtLeast(3f), mix(0.36f, a))
+        lineH(ctx, x + 2f, x + w - 2f, boxY + boxH - 1f, 2f, alpha(accentColor, a))
 
         val editing = textEdit == v
         val cur = (v.get() as? String) ?: ""
@@ -2707,7 +2759,7 @@ object ModuleLiquidClickgui : ClientModule(
             drawText(ctx, font, textBuf, x + 5f, boxY + 5f, alpha(textColor, a), 12f)
             if ((System.currentTimeMillis() / 500) % 2 == 0L) {
                 val cw = strW(font, textBuf, 12f)
-                ctx.drawQuad(x + 5f + cw + 1f, boxY + 5f, x + 5f + cw + 2f, boxY + 19f, alpha(textColor, a))
+                lineV(ctx, x + 5f + cw + 1.5f, boxY + 5f, boxY + 19f, 2f, alpha(textColor, a))
             }
         } else if (cur.isNotEmpty()) {
             drawText(ctx, font, cur, x + 5f, boxY + 5f, alpha(textColor, a), 12f)
@@ -2750,39 +2802,36 @@ object ModuleLiquidClickgui : ClientModule(
 
 
         val sbY = y + SETTING_ROW_PAD * 2f + 16f + PICKER_GAP
-        // Smooth SV box: fillGradient is a native vanilla GuiGraphicsExtractor method that
-        // interpolates color top-to-bottom per pixel on the GPU (perfectly smooth vertically,
-        // no banding). Saturation (horizontal) still needs per-column stepping since there's no
-        // 4-corner-gradient primitive available, but 128 columns is fine enough to look
-        // continuous - the old 24x16 flat-quad grid was the actual source of visible blockiness.
-        val svColumns = 128
-        val colW = w / svColumns
-        for (c in 0 until svColumns) {
-            val sat = (c + 0.5f) / svColumns
-            val top = hsvToRgb(hue, sat, 1f, a)
-            val bottom = Color4b(0, 0, 0, a)
-            val colX0 = (x + colW * c).roundToInt()
-            val colX1 = (x + colW * (c + 1)).roundToInt()
-            ctx.fillGradient(colX0, sbY.roundToInt(), colX1, (sbY + PICKER_SB_H).roundToInt(), top.argb, bottom.argb)
+        val cols = 24
+        val rows = 16
+        val cw = w / cols
+        val ch = PICKER_SB_H / rows
+        for (r in 0 until rows) {
+            for (c in 0 until cols) {
+                fillSmooth(
+                    ctx,
+                    x + cw * c, sbY + ch * r, x + cw * (c + 1), sbY + ch * (r + 1),
+                    hsvToRgb(hue, (c + 0.5f) / cols, 1f - (r + 0.5f) / rows, a),
+                    0.75f,
+                )
+            }
         }
 
         val cursorX = x + sv.coerceIn(0f, 1f) * w
         val cursorY = sbY + (1f - vv.coerceIn(0f, 1f)) * PICKER_SB_H
-        ctx.drawRoundedRect(cursorX - 5f, cursorY - 5f, cursorX + 5f, cursorY + 5f, 5f, alpha(Color4b(255, 255, 255), a))
-        ctx.drawRoundedRect(cursorX - 3f, cursorY - 3f, cursorX + 3f, cursorY + 3f, 3f, alpha(Color4b(0, 0, 0), a))
+        fillCircle(ctx, cursorX, cursorY, 5f, alpha(Color4b(255, 255, 255), a))
+        fillCircle(ctx, cursorX, cursorY, 3f, alpha(Color4b(0, 0, 0), a))
 
 
         val hueY = sbY + PICKER_SB_H + PICKER_GAP
-        // 32 -> 180 segments (2 degrees of hue each): the visible color "steps" in the old
-        // version were exactly this - too few discrete flat-color blocks across a continuous
-        // spectrum. There's no horizontal-gradient primitive available (fillGradient is
-        // vertical-only), so finer stepping is the safe fix here.
-        val segs = 180
+        val segs = 32
         val sw = w / segs
         for (i in 0 until segs) {
-            ctx.drawQuad(
+            fillSmooth(
+                ctx,
                 x + sw * i, hueY, x + sw * (i + 1), hueY + PICKER_BAR_H,
                 hsvToRgb((i + 0.5f) / segs, 1f, 1f, a),
+                1f,
             )
         }
         drawBarCursor(ctx, x + hue.coerceIn(0f, 1f) * w, hueY, a)
@@ -2790,13 +2839,15 @@ object ModuleLiquidClickgui : ClientModule(
 
         val alphaY = hueY + PICKER_BAR_H + PICKER_GAP
         drawCheckerboard(ctx, x, alphaY, w, PICKER_BAR_H, a)
-        val aSegs = 96
+        val aSegs = 16
         val asw = w / aSegs
         for (i in 0 until aSegs) {
             val f = (i + 0.5f) / aSegs
-            ctx.drawQuad(
+            fillSmooth(
+                ctx,
                 x + asw * i, alphaY, x + asw * (i + 1), alphaY + PICKER_BAR_H,
                 Color4b(cur.r, cur.g, cur.b, (f * a).toInt().coerceIn(0, 255)),
+                1f,
             )
         }
         drawBarCursor(ctx, x + (cur.a / 255f) * w, alphaY, a)
@@ -2808,8 +2859,8 @@ object ModuleLiquidClickgui : ClientModule(
     private fun drawBarCursor(ctx: GuiGraphicsExtractor, cx: Float, barY: Float, a: Int) {
         val h = PICKER_BAR_H + 4f
         val y = barY - 2f
-        ctx.drawQuad(cx - 2.5f, y, cx + 2.5f, y + h, alpha(Color4b(0, 0, 0), a))
-        ctx.drawQuad(cx - 1.5f, y + 1f, cx + 1.5f, y + h - 1f, alpha(Color4b(255, 255, 255), a))
+        fillSmooth(ctx, cx - 2.5f, y, cx + 2.5f, y + h, alpha(Color4b(0, 0, 0), a), 2f)
+        fillSmooth(ctx, cx - 1.5f, y + 1f, cx + 1.5f, y + h - 1f, alpha(Color4b(255, 255, 255), a), 1.2f)
     }
 
     private fun drawCheckerboard(ctx: GuiGraphicsExtractor, x: Float, y: Float, w: Float, h: Float, a: Int) {
@@ -2824,7 +2875,7 @@ object ModuleLiquidClickgui : ClientModule(
             var colIdx = 0
             while (xx < x + w) {
                 val cx2 = min(xx + cell, x + w)
-                ctx.drawQuad(xx, yy, cx2, cy2, if ((rowIdx + colIdx) % 2 == 0) light else dark)
+                fillSmooth(ctx, xx, yy, cx2, cy2, if ((rowIdx + colIdx) % 2 == 0) light else dark, 0.75f)
                 xx += cell
                 colIdx++
             }
@@ -2859,7 +2910,7 @@ object ModuleLiquidClickgui : ClientModule(
         if (!listening && keyName == "None") {
 
             val nameW = strW(font, label, 12f) + strW(font, sep, 12f)
-            ctx.drawQuad(fx + nameW, by + 6f, fx + nameW + strW(font, keyName, 12f) + 1f, by + 20f, Color4b.TRANSPARENT)
+            // transparent marker — skip hard quad
             drawText(ctx, font, keyName, fx + nameW, by + 6f, alpha(dimmedColor, a), 12f)
         }
         keyRects[v] = floatArrayOf(x, y, w, h, p.index.toFloat())
@@ -2895,7 +2946,7 @@ object ModuleLiquidClickgui : ClientModule(
         val listH = padV * 2f + opts.size * optH
 
         ctx.drawRoundedRect(hx - 1f, hy, hx + hw + 1f, hy + listH, 3f, mix(1f, a), alpha(accentColor, a), 1f)
-        ctx.drawQuad(hx - 1f, hy, hx + hw + 1f, hy + 1f, mix(1f, a))
+        fillSmooth(ctx, hx - 1f, hy, hx + hw + 1f, hy + 1.5f, mix(1f, a), 0.75f)
 
         val activeLabel = choiceLabel(v)
         // hover 用布局鼠标
