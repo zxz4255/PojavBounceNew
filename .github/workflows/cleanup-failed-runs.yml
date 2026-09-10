@@ -22,45 +22,34 @@ jobs:
             let page = 1;
             let allRuns = [];
 
-            // 1. 手动翻页拉取所有记录（更安全，避免 undefined 混入）
+            // 1. 手动翻页拉取所有记录
             while (true) {
               const response = await github.rest.actions.listWorkflowRunsForRepo({
                 owner, repo, per_page: 100, page
               });
-              
               const data = response.data;
-              // 防御性检查：如果没数据或数据为空，跳出循环
-              if (!data || !data.workflow_runs || data.workflow_runs.length === 0) {
-                break;
-              }
-              
+              if (!data || !data.workflow_runs || data.workflow_runs.length === 0) break;
               allRuns.push(...data.workflow_runs);
-              
-              // 如果返回数量少于每页最大数量，说明已经是最后一页了
-              if (data.workflow_runs.length < 100) {
-                break;
-              }
+              if (data.workflow_runs.length < 100) break;
               page++;
             }
 
             core.info(`总共拉取到 ${allRuns.length} 个运行记录`);
 
-            // 2. 打印前 5 个记录的真实状态，让你看清红叉到底是什么 conclusion
-            allRuns.slice(0, 5).forEach(r => 
-              core.info(`ID: ${r.id} | 名称: ${r.name} | 状态: ${r.status} | 结论: ${r.conclusion}`)
-            );
-
-            // 3. 严格过滤：只删除结论为 'failure' 的记录
-            // 绝对不碰 success，同时排除当前清理任务自身，防止自己删自己
+            // 2. 放宽过滤条件：清理所有红叉（排除 success、skipped、neutral）
+            // 严格保留 success（成功）的记录，绝不触碰！
             const failed = allRuns.filter(r => 
               r && 
-              r.conclusion === 'failure' && 
-              r.name !== 'Cleanup Failed Runs'
+              r.status === 'completed' && 
+              r.conclusion !== 'success' && 
+              r.conclusion !== 'skipped' && 
+              r.conclusion !== 'neutral' &&
+              r.name !== 'Cleanup Failed Runs' // 排除自己，防止自删
             );
 
-            core.info(`共发现 ${failed.length} 个失败的运行`);
+            core.info(`共发现 ${failed.length} 个需要清理的记录（含 failure、cancelled、timed_out 等）`);
 
-            // 4. 逐个删除
+            // 3. 逐个删除
             let deleted = 0;
             for (const run of failed) {
               try {
@@ -73,4 +62,4 @@ jobs:
               }
             }
 
-            core.notice(`✅ 已删除 ${deleted} 个失败的运行（success 未被触碰）`);
+            core.notice(`✅ 已删除 ${deleted} 个记录（success 未被触碰）`);
