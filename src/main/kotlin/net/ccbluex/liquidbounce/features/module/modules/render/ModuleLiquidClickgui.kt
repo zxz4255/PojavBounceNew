@@ -68,6 +68,8 @@ object ModuleLiquidClickgui : ClientModule(
     private val cornerBR by float("Corner BR", 8f, 0f..28f)
     private val widgetRadius by float("Widget Radius", 4f, 0f..16f)
     private val smoothLines by boolean("Smooth Lines", true)
+    private val panelShadow by boolean("Panel Shadow", false)
+    private val perfMode by boolean("Performance Mode", true)
 
     private val snapEnabled by boolean("Snapping", true)
     private val gridSize by int("Grid Size", 10, 1..100, "px")
@@ -994,6 +996,8 @@ object ModuleLiquidClickgui : ClientModule(
     private fun toggleGroup(v: Value<*>) {
         val opening = !(groupOpen[v] == true)
         groupOpen[v] = opening
+        settingsHeightCache.clear()
+        panelHeightCache.clear()
         // 子项展开后必须按真实高度刷新 contentH + 滚动，否则固定 body 会裁掉下面的设置
         val panel = panels.firstOrNull { p ->
             p.modules.any { m -> modOpen[m] == true && valueBelongsToModule(v, m) }
@@ -1011,7 +1015,6 @@ object ModuleLiquidClickgui : ClientModule(
                     val start = y
                     walkValues(childrenOfModule(m), 0, 0f, 0f) { vv, _, vy, vh, _ ->
                         if (vv === v) {
-                            // 滚到该组展开后的大致底部，露出新增子项
                             prefer = start + vy + vh + 80f
                         }
                     }
@@ -1467,19 +1470,37 @@ object ModuleLiquidClickgui : ClientModule(
         cur + (target - cur) * (1f - (0.001f).pow(frameDt * speed)).coerceIn(0f, 1f)
 
 
+    /** 同帧高度缓存，避免每个模块每帧反复 walkValues */
+    private var heightCacheFrame = -1
+    private val settingsHeightCache = IdentityHashMap<ClientModule, Float>()
+    private val panelHeightCache = IdentityHashMap<Panel, Float>()
+
+    private fun beginHeightCacheFrame() {
+        // 用滚动/动画帧号区分；简单用 nano 低位也行，这里用递增
+        heightCacheFrame++
+        if (heightCacheFrame % 2 == 0) {
+            // 隔帧清一次，展开状态变化最多延迟 1 帧
+            settingsHeightCache.clear()
+            panelHeightCache.clear()
+        }
+    }
+
     /**
      * 按当前 groupOpen / colorOpen 计算模块设置区真实总高度。
-     * 必须用 walkValues 的返回 y（含嵌套子项 + 10f 间距），
-     * 不能只累加 emit 的 rowH（会漏掉间距，多级展开后越裁越多）。
+     * 必须用 walkValues 的返回 y（含嵌套子项 + 10f 间距）。
      */
     private fun settingsHeight(m: ClientModule): Float {
+        settingsHeightCache[m]?.let { return it }
         val start = 0f
         val end = walkValues(childrenOfModule(m), 0, 0f, start) { _, _, _, _, _ -> }
-        return (end - start).coerceAtLeast(0f)
+        val h = (end - start).coerceAtLeast(0f)
+        settingsHeightCache[m] = h
+        return h
     }
 
     /** 面板内全部模块 + 已展开设置的内容总高度（滚动上限依据） */
     private fun panelContentHeight(p: Panel): Float {
+        panelHeightCache[p]?.let { return it }
         var h = 0f
         for (m in p.modules) {
             h += ROW_H
@@ -1490,6 +1511,7 @@ object ModuleLiquidClickgui : ClientModule(
                 if (openF > 0.001f) h += settingsHeight(m) * quintOut(openF)
             }
         }
+        panelHeightCache[p] = h
         return h
     }
 
@@ -1623,11 +1645,11 @@ object ModuleLiquidClickgui : ClientModule(
         descTarget = null
 
         if (dimBackground && dimAlpha > 0f) {
-            // 全屏遮罩也走圆角管线最小半径，避免硬边采样差异
-            fillSmooth(ctx, 0f, 0f, viewW, viewH, alpha(Color4b(0, 0, 0, 255), (dimAlpha * 255 * uiAlpha).toInt()), 0.75f)
+            // 全屏遮罩用普通 quad，避免圆角管线全屏开销
+            ctx.drawQuad(0f, 0f, viewW, viewH, alpha(Color4b(0, 0, 0, 255), (dimAlpha * 255 * uiAlpha).toInt()))
         }
 
-        // 拖动时不再绘制背景网格
+        beginHeightCacheFrame()
 
         // Search 固定在屏幕坐标，不受 Scale 影响
         if (searchEnabled) drawSearch(ctx, font)
@@ -1793,56 +1815,84 @@ object ModuleLiquidClickgui : ClientModule(
         ctx.drawCircle(cx, cy, radius, 0f, Float2IntFunction { argb })
     }
 
+    /**
+     * 上圆下直：整块圆角画出后，用直角矩形盖住下半，去掉底角圆弧。
+     * 下圆上直：同理盖住上半。避免四角全圆导致标题/列表衔接露黑边。
+     */
+    private fun fillTopRounded(
+        ctx: GuiGraphicsExtractor,
+        x1: Float, y1: Float, x2: Float, y2: Float,
+        radius: Float, color: Color4b,
+    ) {
+        val r = radius.coerceAtLeast(0.5f).coerceAtMost((y2 - y1) * 0.5f)
+        ctx.drawRoundedRect(x1, y1, x2, y2, r, color)
+        // 盖掉底部两个圆角 → 下沿直角，与下方列表平接
+        if (y2 - y1 > r + 0.5f) {
+            ctx.drawQuad(x1, y2 - r - 0.5f, x2, y2, color)
+        }
+    }
+
+    private fun fillBottomRounded(
+        ctx: GuiGraphicsExtractor,
+        x1: Float, y1: Float, x2: Float, y2: Float,
+        radius: Float, color: Color4b,
+    ) {
+        val r = radius.coerceAtLeast(0.5f).coerceAtMost((y2 - y1) * 0.5f)
+        ctx.drawRoundedRect(x1, y1, x2, y2, r, color)
+        // 盖掉顶部两个圆角 → 上沿直角，与标题底平接
+        if (y2 - y1 > r + 0.5f) {
+            ctx.drawQuad(x1, y1, x2, y1 + r + 0.5f, color)
+        }
+    }
+
     private fun drawPanel(ctx: GuiGraphicsExtractor, font: Font, p: Panel) {
         val a = (uiAlpha * 255).toInt()
         val w = panelWidth
         val bodyH = p.extAnim * panelMaxHeight
         val topR = headerCornerR()
         val botR = bodyCornerR()
-        val avgR = avgCornerR()
+        val headerCol = mix(0.9f, a)
+        val bodyCol = mix(0.8f, a)
 
-        // 柔和阴影（圆角扩散，无硬像素条）
-        val shBase = Color4b(baseColor.r, baseColor.g, baseColor.b, (255 * 0.45f * uiAlpha).toInt())
-        for (i in 0 until 5) {
-            val f = (i + 1) / 5f
-            val alphaV = (shBase.a * (1f - f) * 0.55f).toInt()
-            if (alphaV <= 0) continue
-            val off = (6f + avgR * 0.35f) * f
-            val c = Color4b(shBase.r, shBase.g, shBase.b, alphaV)
+        // 阴影默认关（很耗）；需要时只画 1 层
+        if (panelShadow && !perfMode) {
+            val off = 4f
             ctx.drawRoundedRect(
-                p.x - off, p.y - off * 0.4f,
+                p.x - off, p.y - off * 0.3f,
                 p.x + w + off, p.y + HEADER_H + bodyH + off,
-                (avgR + off * 0.5f).coerceAtLeast(1f), c,
+                avgCornerR() + 2f,
+                Color4b(baseColor.r, baseColor.g, baseColor.b, (40 * uiAlpha).toInt().coerceIn(0, 255)),
             )
         }
 
-        // 标题栏：顶角圆角
-        ctx.drawRoundedRect(
-            p.x, p.y, p.x + w, p.y + HEADER_H + 2f, topR, mix(0.9f, a),
-        )
-        // 标题底部分隔线（平滑胶囊）
-        lineH(ctx, p.x + 2f, p.x + w - 2f, p.y + HEADER_H + 1f, 2f, alpha(accentColor, a))
+        val hy2 = p.y + HEADER_H + 2f
+        // 标题：上圆下直，两侧垂直
+        fillTopRounded(ctx, p.x, p.y, p.x + w, hy2, topR, headerCol)
+        // 底部分隔线贴齐标题底边
+        ctx.drawQuad(p.x, hy2 - 2f, p.x + w, hy2, alpha(accentColor, a))
 
         if (bodyH > 0.5f) {
-            // 主体：底角圆角
-            ctx.drawRoundedRect(
-                p.x, p.y + HEADER_H + 2f, p.x + w, p.y + HEADER_H + 2f + bodyH, botR, mix(0.8f, a),
-            )
-            // 与标题衔接处补一块，避免圆角缺口露底
-            fillSmooth(
-                ctx,
-                p.x + 0.5f, p.y + HEADER_H + 1.5f,
-                p.x + w - 0.5f, p.y + HEADER_H + 2f + max(botR, 4f),
-                mix(0.8f, a),
-                1f,
-            )
+            val by2 = hy2 + bodyH
+            // 列表区：上直下圆，与标题直角衔接，两侧平直不露黑
+            fillBottomRounded(ctx, p.x, hy2, p.x + w, by2, botR, bodyCol)
+            // 接缝再盖一条，彻底消灭缝隙
+            ctx.drawQuad(p.x, hy2 - 0.5f, p.x + w, hy2 + 2f, bodyCol)
         }
 
+        // 由设置 "Category Icons" 控制；关闭时不画图标、标题左对齐
         if (catIcons) {
-            drawCategoryIcon(ctx, p.category, p.x + 15f + 8.5f, p.y + HEADER_H / 2f, a)
+            if (perfMode) {
+                ctx.drawRoundedRect(
+                    p.x + 12f, p.y + HEADER_H * 0.5f - 5f,
+                    p.x + 22f, p.y + HEADER_H * 0.5f + 5f,
+                    2f, alpha(textColor, (a * 0.7f).toInt()),
+                )
+            } else {
+                drawCategoryIcon(ctx, p.category, p.x + 15f + 8.5f, p.y + HEADER_H / 2f, a)
+            }
         }
 
-        val nameX = p.x + 15f + (if (catIcons) 17f + 12f else 0f)
+        val nameX = p.x + 15f + (if (catIcons) 29f else 0f)
         drawText(
             ctx, font, p.category, nameX, p.y + (HEADER_H - 17f) / 2f,
             alpha(textColor, a), 14f,
@@ -1852,12 +1902,10 @@ object ModuleLiquidClickgui : ClientModule(
         val by = p.y + HEADER_H / 2f
         val ic = alpha(textColor, a)
         val ext = p.extAnim
-
-        // 展开指示：平滑横条 / 竖条
-        lineH(ctx, bx - 6f, bx + 6f, by, 2f, ic)
+        ctx.drawQuad(bx - 5f, by - 1f, bx + 5f, by + 1f, ic)
         if (ext < 0.99f) {
-            val hh = (1f - ext).coerceAtLeast(0.08f) * 6f
-            lineV(ctx, bx, by - hh, by + hh, 2f, alpha(ic, (255 * (1f - ext)).toInt()))
+            val hh = (1f - ext).coerceAtLeast(0.08f) * 5f
+            ctx.drawQuad(bx - 1f, by - hh, bx + 1f, by + hh, alpha(ic, (255 * (1f - ext)).toInt()))
         }
 
         headerRects[p] = floatArrayOf(p.x, p.y, w, HEADER_H + 2f)
@@ -1905,9 +1953,9 @@ object ModuleLiquidClickgui : ClientModule(
                     // 已打开时绘制也用全高，避免子项在动画中途被裁掉看不见
                     val visH = if (modOpen[m] == true) fullH else setH
                     if (y + visH > clipTop && y < clipBot) {
-                        fillSmooth(ctx, x, y, x + w, y + visH, mix(0.5f, a), widgetRadius.coerceAtLeast(2f))
-                        // 左侧强调条：圆角胶囊，避免 1px 竖线锯齿
-                        lineV(ctx, x + 2f, y + 2f, y + visH - 2f, 3f, alpha(accentColor, a))
+                        // 设置区直角填满，避免圆角缺色露黑
+                        ctx.drawQuad(x, y, x + w, y + visH, mix(0.5f, a))
+                        ctx.drawQuad(x, y, x + 3f, y + visH, alpha(accentColor, a))
                         val innerTop = maxOf(y, clipTop)
                         val innerBottom = min(y + visH, clipBot)
                         if (innerBottom > innerTop) {
@@ -2135,26 +2183,16 @@ object ModuleLiquidClickgui : ClientModule(
         a: Int, sw: Float, sx: Float, sy: Float, inputH: Float,
     ) {
         val hasResults = searchResults.isNotEmpty()
-        val r = searchRadius + (10f - searchRadius) * searchOpenAnim
+        val r = searchRadius.coerceIn(2f, 40f)
         val resultsH = if (hasResults) min(searchResults.size * 39f, 250f) else if (searchQuery.isNotEmpty()) 39f else 0f
+        val bg = mix(0.9f, a)
 
-        val sh = Color4b(baseColor.r, baseColor.g, baseColor.b, (255 * 0.5f * uiAlpha).toInt())
-        for (i in 0 until 4) {
-            val f = (i + 1) / 4f
-            val c = Color4b(sh.r, sh.g, sh.b, (sh.a * (1f - f)).toInt())
-            if (c.a <= 0) continue
-            val off = 10f * f
-            fillSmooth(ctx, sx - off, sy - off, sx + sw + off, sy + off, c, (r + off * 0.3f).coerceAtLeast(1f))
-            fillSmooth(ctx, sx - off, sy, sx + off, sy + inputH, c, off.coerceAtLeast(1f))
-            fillSmooth(ctx, sx + sw - off, sy, sx + sw + off, sy + inputH, c, off.coerceAtLeast(1f))
-        }
-
-
+        // 单层完整圆角底，避免多层阴影造成两侧发黑、缺色
+        val totalH = inputH + if (resultsH > 0.5f) resultsH + 2f else 0f
+        ctx.drawRoundedRect(sx, sy, sx + sw, sy + totalH, r, bg)
         if (resultsH > 0.5f) {
-            ctx.drawRoundedRect(sx, sy, sx + sw, sy + inputH + 2f + resultsH, r, mix(0.9f, a))
-            fillSmooth(ctx, sx + 2f, sy + inputH, sx + sw - 2f, sy + inputH + resultsH + 2f, mix(0.9f, a), 2f)
-        } else {
-            ctx.drawRoundedRect(sx, sy, sx + sw, sy + inputH, r, mix(0.9f, a))
+            // 结果区与输入区接缝补实色，不露底
+            ctx.drawQuad(sx + 1f, sy + inputH - 1f, sx + sw - 1f, sy + inputH + 3f, bg)
         }
 
 
