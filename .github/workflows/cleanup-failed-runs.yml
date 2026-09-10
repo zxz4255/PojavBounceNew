@@ -19,15 +19,31 @@ jobs:
             const owner = context.repo.owner;
             const repo  = context.repo.repo;
 
+            // 1. 去掉 status 参数，拉取所有能拿到的记录
             const runs = await github.paginate(
               github.rest.actions.listWorkflowRunsForRepo,
-              { owner, repo, per_page: 100, status: 'completed' },
-              (response) => response.data.workflow_runs   // ← 关键修复
+              { owner, repo, per_page: 100 },
+              (response) => response.data.workflow_runs
             );
 
-            const failed = runs.filter(r => r && r.conclusion === 'failure');
+            core.info(`总共拉取到 ${runs.length} 个运行记录`);
+
+            // 2. 打印前5个记录的真实状态，看看红色的叉到底是什么 conclusion
+            runs.slice(0, 5).forEach(r => 
+              core.info(`ID: ${r.id} | 名称: ${r.name} | 状态: ${r.status} | 结论: ${r.conclusion}`)
+            );
+
+            // 3. 严格过滤：只删除结论为 'failure' 的记录，绝对不碰 success
+            // 排除当前清理任务自身，防止自己删自己
+            const failed = runs.filter(r => 
+              r && 
+              r.conclusion === 'failure' && 
+              r.name !== 'Cleanup Failed Runs'
+            );
+
             core.info(`共发现 ${failed.length} 个失败的运行`);
 
+            // 4. 逐个删除
             let deleted = 0;
             for (const run of failed) {
               try {
@@ -40,4 +56,4 @@ jobs:
               }
             }
 
-            core.notice(`✅ 已删除 ${deleted} 个失败的运行`);
+            core.notice(`✅ 已删除 ${deleted} 个失败的运行（success 未被触碰）`);
