@@ -36,18 +36,18 @@ jobs:
 
             core.info(`总共拉取到 ${allRuns.length} 个运行记录`);
 
-            // 2. 放宽过滤条件：清理所有红叉（排除 success、skipped、neutral）
-            // 严格保留 success（成功）的记录，绝不触碰！
+            // 2. 过滤条件：清理所有非 success 的已完成记录
+            // 唯一保护对象：当前正在运行的这一次清理任务 (context.runId)
             const failed = allRuns.filter(r => 
               r && 
               r.status === 'completed' && 
               r.conclusion !== 'success' && 
               r.conclusion !== 'skipped' && 
               r.conclusion !== 'neutral' &&
-              r.name !== 'Cleanup Failed Runs' // 排除自己，防止自删
+              r.id !== context.runId
             );
 
-            core.info(`共发现 ${failed.length} 个需要清理的记录（含 failure、cancelled、timed_out 等）`);
+            core.info(`共发现 ${failed.length} 个需要清理的记录`);
 
             // 3. 逐个删除
             let deleted = 0;
@@ -62,4 +62,4 @@ jobs:
               }
             }
 
-            core.notice(`✅ 已删除 ${deleted} 个记录（success 未被触碰）`);
+            core.notice(`✅ 本次已彻底清理 ${deleted} 个记录（success 完好无损）`);
