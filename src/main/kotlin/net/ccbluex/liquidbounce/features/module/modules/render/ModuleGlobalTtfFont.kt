@@ -5,10 +5,10 @@
  * 本模块在 .minecraft/resourcepacks/LiquidBounce-TTF 生成资源包：
  *   - assets/minecraft/font/default.json  （type: ttf）
  *   - assets/minecraft/font/uniform.json
- *   - assets/minecraft/font/<字体文件>.ttf
- * 然后启用该资源包并重载，实现“整个游戏文字都走 TTF”。
+ *   - assets/minecraft/font 下的 ttf 文件
+ * 然后启用该资源包并重载，实现整个游戏文字都走 TTF。
  *
- * 字体放置：.minecraft/LiquidBounce/fonts/*.ttf
+ * 字体放置：.minecraft/LiquidBounce/fonts/ 目录中的 .ttf 文件
  * 选定文件名在模块选项 Font File 中填写（或用 Auto Pick 选第一份）。
  *
  * LiquidBounce Nextgen / Minecraft 26.x · 不依赖 LB 自带 FontManager（那只服务 HUD）
