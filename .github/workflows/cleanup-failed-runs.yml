@@ -19,23 +19,40 @@ jobs:
             const owner = context.repo.owner;
             const repo  = context.repo.repo;
 
-            // 1. 去掉 status 参数，拉取所有能拿到的记录
-            const runs = await github.paginate(
-              github.rest.actions.listWorkflowRunsForRepo,
-              { owner, repo, per_page: 100 },
-              (response) => response.data.workflow_runs
-            );
+            let page = 1;
+            let allRuns = [];
 
-            core.info(`总共拉取到 ${runs.length} 个运行记录`);
+            // 1. 手动翻页拉取所有记录（更安全，避免 undefined 混入）
+            while (true) {
+              const response = await github.rest.actions.listWorkflowRunsForRepo({
+                owner, repo, per_page: 100, page
+              });
+              
+              const data = response.data;
+              // 防御性检查：如果没数据或数据为空，跳出循环
+              if (!data || !data.workflow_runs || data.workflow_runs.length === 0) {
+                break;
+              }
+              
+              allRuns.push(...data.workflow_runs);
+              
+              // 如果返回数量少于每页最大数量，说明已经是最后一页了
+              if (data.workflow_runs.length < 100) {
+                break;
+              }
+              page++;
+            }
 
-            // 2. 打印前5个记录的真实状态，看看红色的叉到底是什么 conclusion
-            runs.slice(0, 5).forEach(r => 
+            core.info(`总共拉取到 ${allRuns.length} 个运行记录`);
+
+            // 2. 打印前 5 个记录的真实状态，让你看清红叉到底是什么 conclusion
+            allRuns.slice(0, 5).forEach(r => 
               core.info(`ID: ${r.id} | 名称: ${r.name} | 状态: ${r.status} | 结论: ${r.conclusion}`)
             );
 
-            // 3. 严格过滤：只删除结论为 'failure' 的记录，绝对不碰 success
-            // 排除当前清理任务自身，防止自己删自己
-            const failed = runs.filter(r => 
+            // 3. 严格过滤：只删除结论为 'failure' 的记录
+            // 绝对不碰 success，同时排除当前清理任务自身，防止自己删自己
+            const failed = allRuns.filter(r => 
               r && 
               r.conclusion === 'failure' && 
               r.name !== 'Cleanup Failed Runs'
