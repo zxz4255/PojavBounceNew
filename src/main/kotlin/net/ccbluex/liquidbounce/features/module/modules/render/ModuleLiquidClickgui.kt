@@ -74,7 +74,7 @@ object ModuleLiquidClickgui : ClientModule(
     private val snapEnabled by boolean("Snapping", true)
     private val gridSize by int("Grid Size", 10, 1..100, "px")
     private val dimBackground by boolean("Dim Background", true)
-    private val dimAlpha by float("Dim Amount", 0.6f, 0f..1f)
+    private val dimAlpha by float("Dim Amount", 0.22f, 0f..1f)
 
     private val searchEnabled by boolean("Search Bar", true)
     private val searchWidth by float("Search Width", 600f, 300f..900f)
