@@ -17,6 +17,7 @@ import net.ccbluex.liquidbounce.render.drawRoundedRect
 import net.ccbluex.liquidbounce.render.engine.type.Color4b
 import net.ccbluex.liquidbounce.utils.client.mc
 import net.minecraft.client.gui.Font
+import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.input.CharacterEvent
@@ -135,9 +136,11 @@ object ModuleSolsticeClickgui : ClientModule(
     }
 
     private fun inScale(): Float {
+        // 动画完成时强制精确 1f，避免亚像素缩放导致文字/面板持续模糊
+        if (scaleAnim >= 1f) return 1f
         val p = scaleAnim
         return when (animMode) {
-            AnimMode.ZOOM -> easeOutExpo(p).coerceIn(0f, 0.996f)
+            AnimMode.ZOOM -> easeOutExpo(p).coerceIn(0f, 1f)
             AnimMode.BOUNCE -> if (enabled) easeOutElastic(p) else easeOutBack(p)
         }
     }
@@ -709,6 +712,9 @@ object ModuleSolsticeClickgui : ClientModule(
         override fun isPauseScreen() = false
         override fun shouldCloseOnEsc() = false
 
+        // 禁止 Minecraft 默认的背景模糊/暗化覆盖层，GUI 由 OverlayRenderEvent 自行渲染
+        override fun renderBackground(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) = Unit
+
         override fun onClose() {
             if (ModuleSolsticeClickgui.enabled) ModuleSolsticeClickgui.enabled = false
         }
@@ -1129,26 +1135,26 @@ object ModuleSolsticeClickgui : ClientModule(
         }
     }
 
-    /** 模块行：略加 1px 高度消除 scale 浮点缝隙 */
+    /** 模块行：像素对齐绘制，避免亚像素模糊 */
     private fun drawSeamlessRow(
         ctx: GuiGraphicsExtractor,
         x: Float, y: Float, w: Float, h: Float,
         color: Color4b,
     ) {
-        // floor 对齐 + 向下多画 1px 与下一行重叠，避免缝
-        val x0 = kotlin.math.floor(x.toDouble()).toFloat()
-        val y0 = kotlin.math.floor(y.toDouble()).toFloat()
-        val x1 = kotlin.math.ceil((x + w).toDouble()).toFloat()
-        val y1 = kotlin.math.ceil((y + h).toDouble()).toFloat() + 1f
+        // roundToInt 对齐到像素网格，消除亚像素偏移造成的模糊
+        val x0 = x.roundToInt().toFloat()
+        val y0 = y.roundToInt().toFloat()
+        val x1 = (x + w).roundToInt().toFloat()
+        val y1 = (y + h).roundToInt().toFloat() + 1f
         ctx.drawQuad(x0, y0, x1, y1, color)
     }
 
-    private fun scaleRect(cx: Float, cy: Float, x: Float, y: Float, w: Float, h: Float, s: Float): FloatArray {
-        // 统一缩放后像素对齐，避免标题栏/模块错位与缝隙
-        val x1 = kotlin.math.floor((cx + (x - cx) * s).toDouble()).toFloat()
-        val y1 = kotlin.math.floor((cy + (y - cy) * s).toDouble()).toFloat()
-        val x2 = kotlin.math.floor((cx + (x + w - cx) * s).toDouble()).toFloat()
-        val y2 = kotlin.math.floor((cy + (y + h - cy) * s).toDouble()).toFloat()
+private fun scaleRect(cx: Float, cy: Float, x: Float, y: Float, w: Float, h: Float, s: Float): FloatArray {
+        // 使用 roundToInt 进行像素对齐（而非 floor），避免亚像素偏移导致的模糊
+        val x1 = (cx + (x - cx) * s).roundToInt().toFloat()
+        val y1 = (cy + (y - cy) * s).roundToInt().toFloat()
+        val x2 = (cx + (x + w - cx) * s).roundToInt().toFloat()
+        val y2 = (cy + (y + h - cy) * s).roundToInt().toFloat()
         return floatArrayOf(x1, y1, (x2 - x1).coerceAtLeast(1f), (y2 - y1).coerceAtLeast(1f))
     }
 
