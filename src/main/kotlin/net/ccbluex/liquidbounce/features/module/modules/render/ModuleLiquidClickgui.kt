@@ -27,9 +27,8 @@ import net.ccbluex.liquidbounce.render.withPush
 import net.ccbluex.liquidbounce.utils.client.mc
 import net.ccbluex.liquidbounce.utils.input.InputBind
 import net.minecraft.client.gui.Font
-import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.GuiGraphicsExtractor
-import net.minecraft.client.gui.screens.Screen
+import net.minecraft.client.gui.screen.Screen
 import net.minecraft.client.input.CharacterEvent
 import net.minecraft.client.input.KeyEvent
 import net.minecraft.client.input.MouseButtonEvent
@@ -1545,9 +1544,6 @@ object ModuleLiquidClickgui : ClientModule(
     private class LiquidScreen : Screen(Component.literal("ClickGUI")) {
         override fun isPauseScreen() = false
         override fun shouldCloseOnEsc() = false
-
-        // 禁止 Minecraft 默认的背景模糊/暗化覆盖层，GUI 由 OverlayRenderEvent 自行渲染
-        override fun renderBackground(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) = Unit
 
         override fun onClose() {
             if (ModuleLiquidClickgui.enabled) ModuleLiquidClickgui.enabled = false
