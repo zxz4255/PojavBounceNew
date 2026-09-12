@@ -5,7 +5,7 @@ import net.minecraft.client.gui.font.FontManager;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -14,20 +14,16 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * FontManager 加载完成后注入磁盘 TTF GlyphProvider。
- * 依赖 Kotlin: net.ccbluex.liquidbounce.utils.ttf.ForcedTtf
+ * FontManager 加载完成后注入磁盘 TTF。
+ * 注意: reload 有返回值，必须用 CallbackInfoReturnable（用 CallbackInfo 会启动崩溃）。
+ *
  * mixins.json: "minecraft.client.MixinFontManagerForceTtf"
  */
 @Mixin(FontManager.class)
 public abstract class MixinFontManagerForceTtf {
 
-    @Inject(method = "apply", at = @At("RETURN"), require = 0)
-    private void liquidbounce$injectTtfAfterApply(CallbackInfo ci) {
-        tryInject();
-    }
-
     @Inject(method = "reload", at = @At("RETURN"), require = 0)
-    private void liquidbounce$injectTtfAfterReload(CallbackInfo ci) {
+    private void liquidbounce$injectTtfAfterReload(CallbackInfoReturnable<?> cir) {
         tryInject();
     }
 
