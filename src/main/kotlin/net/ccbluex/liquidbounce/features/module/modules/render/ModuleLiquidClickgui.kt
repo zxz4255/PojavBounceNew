@@ -27,6 +27,7 @@ import net.ccbluex.liquidbounce.render.withPush
 import net.ccbluex.liquidbounce.utils.client.mc
 import net.ccbluex.liquidbounce.utils.input.InputBind
 import net.minecraft.client.gui.Font
+import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.input.CharacterEvent
@@ -1545,6 +1546,9 @@ object ModuleLiquidClickgui : ClientModule(
         override fun isPauseScreen() = false
         override fun shouldCloseOnEsc() = false
 
+        // 禁止 Minecraft 默认的背景模糊/暗化覆盖层，GUI 由 OverlayRenderEvent 自行渲染
+        override fun renderBackground(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) = Unit
+
         override fun onClose() {
             if (ModuleLiquidClickgui.enabled) ModuleLiquidClickgui.enabled = false
         }
@@ -1734,14 +1738,15 @@ object ModuleLiquidClickgui : ClientModule(
         radius: Float = widgetRadius,
     ) {
         if (color.a <= 0) return
-        val xa = min(x1, x2)
-        val ya = min(y1, y2)
-        val xb = max(x1, x2)
-        val yb = max(y1, y2)
+        // 像素对齐避免亚像素模糊
+        val xa = min(x1, x2).roundToInt().toFloat()
+        val ya = min(y1, y2).roundToInt().toFloat()
+        val xb = max(x1, x2).roundToInt().toFloat()
+        val yb = max(y1, y2).roundToInt().toFloat()
         val w = xb - xa
         val h = yb - ya
         if (w < 0.01f || h < 0.01f) return
-        val minR = if (smoothLines) 0.75f else 0.5f
+        val minR = if (smoothLines) 1.5f else 1f
         val r = radius.coerceIn(minR, min(w, h) * 0.5f)
         ctx.drawRoundedRect(xa, ya, xb, yb, r, color)
     }
@@ -1755,15 +1760,16 @@ object ModuleLiquidClickgui : ClientModule(
         radius: Float,
         outlineW: Float = 1.25f,
     ) {
-        val xa = min(x1, x2)
-        val ya = min(y1, y2)
-        val xb = max(x1, x2)
-        val yb = max(y1, y2)
+        // 像素对齐
+        val xa = min(x1, x2).roundToInt().toFloat()
+        val ya = min(y1, y2).roundToInt().toFloat()
+        val xb = max(x1, x2).roundToInt().toFloat()
+        val yb = max(y1, y2).roundToInt().toFloat()
         val w = xb - xa
         val h = yb - ya
         if (w < 0.01f || h < 0.01f) return
-        val r = radius.coerceIn(0.75f, min(w, h) * 0.5f)
-        ctx.drawRoundedRect(xa, ya, xb, yb, r, fill, outline, outlineW.coerceAtLeast(0.75f))
+        val r = radius.coerceIn(1.5f, min(w, h) * 0.5f)
+        ctx.drawRoundedRect(xa, ya, xb, yb, r, fill, outline, outlineW.coerceAtLeast(1f))
     }
 
     /** 水平胶囊线 */
@@ -1824,11 +1830,16 @@ object ModuleLiquidClickgui : ClientModule(
         x1: Float, y1: Float, x2: Float, y2: Float,
         radius: Float, color: Color4b,
     ) {
-        val r = radius.coerceAtLeast(0.5f).coerceAtMost((y2 - y1) * 0.5f)
-        ctx.drawRoundedRect(x1, y1, x2, y2, r, color)
+        // 像素对齐坐标
+        val ax = x1.roundToInt().toFloat()
+        val ay = y1.roundToInt().toFloat()
+        val bx = x2.roundToInt().toFloat()
+        val by = y2.roundToInt().toFloat()
+        val r = radius.coerceAtLeast(1f).coerceAtMost((by - ay) * 0.5f)
+        ctx.drawRoundedRect(ax, ay, bx, by, r, color)
         // 盖掉底部两个圆角 → 下沿直角，与下方列表平接
-        if (y2 - y1 > r + 0.5f) {
-            ctx.drawQuad(x1, y2 - r - 0.5f, x2, y2, color)
+        if (by - ay > r + 1f) {
+            ctx.drawQuad(ax, by - r - 0.5f, bx, by, color)
         }
     }
 
@@ -1837,11 +1848,16 @@ object ModuleLiquidClickgui : ClientModule(
         x1: Float, y1: Float, x2: Float, y2: Float,
         radius: Float, color: Color4b,
     ) {
-        val r = radius.coerceAtLeast(0.5f).coerceAtMost((y2 - y1) * 0.5f)
-        ctx.drawRoundedRect(x1, y1, x2, y2, r, color)
+        // 像素对齐坐标
+        val ax = x1.roundToInt().toFloat()
+        val ay = y1.roundToInt().toFloat()
+        val bx = x2.roundToInt().toFloat()
+        val by = y2.roundToInt().toFloat()
+        val r = radius.coerceAtLeast(1f).coerceAtMost((by - ay) * 0.5f)
+        ctx.drawRoundedRect(ax, ay, bx, by, r, color)
         // 盖掉顶部两个圆角 → 上沿直角，与标题底平接
-        if (y2 - y1 > r + 0.5f) {
-            ctx.drawQuad(x1, y1, x2, y1 + r + 0.5f, color)
+        if (by - ay > r + 1f) {
+            ctx.drawQuad(ax, ay, bx, ay + r + 0.5f, color)
         }
     }
 
@@ -2367,15 +2383,12 @@ object ModuleLiquidClickgui : ClientModule(
         x: Float, y: Float, color: Color4b, size: Float,
     ) {
         if (text.isEmpty()) return
-        val k = size / 9f
-        ctx.pose().withPush {
-            translate(x, y)
-            scale(k, k)
-            ctx.text(font, text, 0, 0, color.argb, false)
-        }
+        // 直接在整数像素坐标绘制，不使用 pose scale 缩放文字，避免 GPU 缩放模糊
+        ctx.text(font, text, x.roundToInt(), y.roundToInt(), color.argb, false)
     }
 
-    private fun strW(font: Font, text: String, size: Float): Float = font.width(text) * (size / 9f)
+    // 文字不再做 GPU 缩放，宽度直接用原始 font.width
+    private fun strW(font: Font, text: String, size: Float): Float = font.width(text).toFloat()
 
 
     private fun fmtNum(f: Float, isInt: Boolean): String =
