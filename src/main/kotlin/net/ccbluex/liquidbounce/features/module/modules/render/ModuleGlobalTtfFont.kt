@@ -1,16 +1,16 @@
 // ModuleGlobalTtfFont - 磁盘 TTF 强制注入（不走资源包）
-// 依赖: ForcedTtfHolder / TtfDiskProviderFactory / MixinFontManagerForceTtf
+// 依赖 Java: src/main/java/net/ccbluex/liquidbounce/utils/ttf/ForcedTtf.java
+// Mixin: minecraft.client.MixinFontManagerForceTtf
 // 字体目录: .minecraft/LiquidBounce/fonts/ 下的 .ttf 文件
-// mixins.json 注册: minecraft.client.MixinFontManagerForceTtf
 package net.ccbluex.liquidbounce.features.module.modules.render
 
 import net.ccbluex.liquidbounce.event.events.GameTickEvent
 import net.ccbluex.liquidbounce.event.handler
 import net.ccbluex.liquidbounce.features.module.ClientModule
 import net.ccbluex.liquidbounce.features.module.ModuleCategories
-import net.ccbluex.liquidbounce.features.module.modules.render.ttf.ForcedTtfHolder
 import net.ccbluex.liquidbounce.utils.client.chat
 import net.ccbluex.liquidbounce.utils.client.mc
+import net.ccbluex.liquidbounce.utils.ttf.ForcedTtf
 import java.io.File
 
 object ModuleGlobalTtfFont : ClientModule(
@@ -66,22 +66,28 @@ object ModuleGlobalTtfFont : ClientModule(
     }
 
     private fun pushHolder(ttf: File) {
-        ForcedTtfHolder.enabled = true
-        ForcedTtfHolder.ttfFile = ttf
-        ForcedTtfHolder.size = fontSize
-        ForcedTtfHolder.oversample = oversample
-        ForcedTtfHolder.shiftX = shiftX
-        ForcedTtfHolder.shiftY = shiftY
-        ForcedTtfHolder.skip = skipChars
-        ForcedTtfHolder.alsoUniform = alsoUniform
+        ForcedTtf.enabled = true
+        ForcedTtf.ttfFile = ttf
+        ForcedTtf.size = fontSize
+        ForcedTtf.oversample = oversample
+        ForcedTtf.shiftX = shiftX
+        ForcedTtf.shiftY = shiftY
+        ForcedTtf.skip = skipChars
+        ForcedTtf.alsoUniform = alsoUniform
     }
 
-    private fun clearHolder() {
-        ForcedTtfHolder.enabled = false
-        ForcedTtfHolder.ttfFile = null
+    fun applyFont(): Boolean {
+        val ttf = resolveTtf()
+        if (ttf == null) {
+            notify("§c未找到 TTF，放到: §e${fontsDir().absolutePath}")
+            return false
+        }
+        pushHolder(ttf)
+        notify("§f注入字体: §a${ttf.absolutePath}")
+        requestFontReload()
+        return true
     }
 
-    // 触发客户端资源重载，FontManager 重建后由 Mixin 注入
     private fun requestFontReload() {
         runCatching {
             val m = mc.javaClass.methods.firstOrNull {
@@ -98,18 +104,6 @@ object ModuleGlobalTtfFont : ClientModule(
         }
     }
 
-    fun applyFont(): Boolean {
-        val ttf = resolveTtf()
-        if (ttf == null) {
-            notify("§c未找到 TTF，放到: §e${fontsDir().absolutePath}")
-            return false
-        }
-        pushHolder(ttf)
-        notify("§f注入字体: §a${ttf.absolutePath}")
-        requestFontReload()
-        return true
-    }
-
     override fun onEnabled() {
         lastReapply = reapply
         if (applyOnEnable) {
@@ -119,7 +113,7 @@ object ModuleGlobalTtfFont : ClientModule(
     }
 
     override fun onDisabled() {
-        clearHolder()
+        ForcedTtf.clear()
         pending = false
         requestFontReload()
         notify("§7已关闭强制 TTF，重载后恢复原版字体")
