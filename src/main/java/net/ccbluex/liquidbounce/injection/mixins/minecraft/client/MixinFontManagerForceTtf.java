@@ -14,9 +14,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * FontManager 加载完成后，把磁盘 TTF 的 GlyphProvider 插到 default / uniform 前面。
- *
- * 依赖: src/main/java/net/ccbluex/liquidbounce/utils/ttf/ForcedTtf.java
+ * FontManager 加载完成后注入磁盘 TTF GlyphProvider。
+ * 依赖 Kotlin: net.ccbluex.liquidbounce.utils.ttf.ForcedTtf
  * mixins.json: "minecraft.client.MixinFontManagerForceTtf"
  */
 @Mixin(FontManager.class)
