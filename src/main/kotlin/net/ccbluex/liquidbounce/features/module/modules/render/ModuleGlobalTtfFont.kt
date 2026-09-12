@@ -1,5 +1,5 @@
 // ModuleGlobalTtfFont - 磁盘 TTF 强制注入（不走资源包）
-// 依赖 Java: src/main/java/net/ccbluex/liquidbounce/utils/ttf/ForcedTtf.java
+// 依赖: src/main/kotlin/net/ccbluex/liquidbounce/utils/ttf/ForcedTtf.kt
 // Mixin: minecraft.client.MixinFontManagerForceTtf
 // 字体目录: .minecraft/LiquidBounce/fonts/ 下的 .ttf 文件
 package net.ccbluex.liquidbounce.features.module.modules.render
