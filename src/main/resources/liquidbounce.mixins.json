@@ -25,7 +25,7 @@
     "minecraft.block.MixinWebBlock",
     "minecraft.client.MinecraftAccessor",
     "minecraft.client.MixinClientClockManager",
-    "minecraft.client.MixinForceTtfFont",
+    "minecraft.client.MixinFontManagerForceTtf",
     "minecraft.client.MixinClientInput",
     "minecraft.client.MixinClientLevel",
     "minecraft.client.MixinClientLevelAccessor",
