@@ -1,14 +1,7 @@
-/*
- * ModuleGlobalTtfFont —— 磁盘 TTF 强制注入（不走资源包）
- *
- * 依赖:
- *   - ForcedTtfHolder.java
- *   - TtfDiskProviderFactory.java
- *   - MixinFontManagerForceTtf.java  (mixins.json 注册 minecraft.client.MixinFontManagerForceTtf)
- *
- * 字体: .minecraft/LiquidBounce/fonts/*.ttf
- * 开启后写 Holder → 触发资源/字体重载 → Mixin 在 FontManager 加载完后插入 GlyphProvider
- */
+// ModuleGlobalTtfFont - 磁盘 TTF 强制注入（不走资源包）
+// 依赖: ForcedTtfHolder / TtfDiskProviderFactory / MixinFontManagerForceTtf
+// 字体目录: .minecraft/LiquidBounce/fonts/ 下的 .ttf 文件
+// mixins.json 注册: minecraft.client.MixinFontManagerForceTtf
 package net.ccbluex.liquidbounce.features.module.modules.render
 
 import net.ccbluex.liquidbounce.event.events.GameTickEvent
@@ -88,7 +81,7 @@ object ModuleGlobalTtfFont : ClientModule(
         ForcedTtfHolder.ttfFile = null
     }
 
-    /** 触发客户端资源重载 → FontManager 重建 → Mixin 注入 */
+    // 触发客户端资源重载，FontManager 重建后由 Mixin 注入
     private fun requestFontReload() {
         runCatching {
             val m = mc.javaClass.methods.firstOrNull {
@@ -128,7 +121,6 @@ object ModuleGlobalTtfFont : ClientModule(
     override fun onDisabled() {
         clearHolder()
         pending = false
-        // 重载以恢复原版字体
         requestFontReload()
         notify("§7已关闭强制 TTF，重载后恢复原版字体")
     }
