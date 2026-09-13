@@ -17,7 +17,6 @@ import net.ccbluex.liquidbounce.render.drawRoundedRect
 import net.ccbluex.liquidbounce.render.engine.type.Color4b
 import net.ccbluex.liquidbounce.utils.client.mc
 import net.minecraft.client.gui.Font
-import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.input.CharacterEvent
@@ -710,8 +709,8 @@ object ModuleSolsticeClickgui : ClientModule(
         override fun isPauseScreen() = false
         override fun shouldCloseOnEsc() = false
 
-        // 禁止 Minecraft 默认的背景模糊/暗化覆盖层，GUI 由 OverlayRenderEvent 自行渲染
-        override fun renderBackground(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) = Unit
+        // 26.2: 不再 override renderBackground（签名变更且无 GuiGraphics）
+        // 背景暗化由 OverlayRenderEvent 里的 dim 绘制负责
 
         override fun onClose() {
             if (ModuleSolsticeClickgui.enabled) ModuleSolsticeClickgui.enabled = false
