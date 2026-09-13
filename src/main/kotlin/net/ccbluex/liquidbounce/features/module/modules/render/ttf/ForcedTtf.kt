@@ -1,4 +1,4 @@
-// 磁盘 TTF 状态 + 构造 TrueTypeGlyphProvider（纯 Kotlin，避免 Java 源路径问题）
+// 磁盘 TTF：状态 + 构造 TrueTypeGlyphProvider + 注入到已有 FontManager（不重载资源）
 // 路径: src/main/kotlin/net/ccbluex/liquidbounce/utils/ttf/ForcedTtf.kt
 package net.ccbluex.liquidbounce.utils.ttf
 
@@ -35,10 +35,15 @@ object ForcedTtf {
     @JvmField @Volatile
     var alsoUniform: Boolean = true
 
+    /** 当前已注入的 provider，关闭时尝试从列表移除 */
+    @JvmField @Volatile
+    var lastProvider: Any? = null
+
     @JvmStatic
     fun clear() {
         enabled = false
         ttfFile = null
+        lastProvider = null
     }
 
     @JvmStatic
@@ -96,6 +101,173 @@ object ForcedTtf {
             t.printStackTrace()
             return null
         }
+    }
+
+    /**
+     * 在已加载的 FontManager 上注入 provider，不调用 reloadResources。
+     * @return 注入成功的 FontSet 数量
+     */
+    @JvmStatic
+    fun injectIntoMinecraft(mc: Any): Int {
+        val provider = createProviderFromHolder() ?: return 0
+        lastProvider = provider
+        val fontManager = findFontManager(mc) ?: return 0
+        return injectIntoFontSets(fontManager, provider)
+    }
+
+    @JvmStatic
+    fun findFontManager(mc: Any): Any? {
+        // mc.fontManager / getFontManager()
+        try {
+            for (n in listOf("getFontManager", "fontManager", "getFonts")) {
+                val m = mc.javaClass.methods.firstOrNull {
+                    it.parameterCount == 0 && it.name.equals(n, true)
+                }
+                if (m != null) {
+                    val r = m.invoke(mc)
+                    if (r != null) return r
+                }
+            }
+            for (f in mc.javaClass.declaredFields) {
+                if (f.name.contains("font", true) && f.type.simpleName.contains("FontManager", true)) {
+                    f.isAccessible = true
+                    return f.get(mc)
+                }
+            }
+            // 任意含 FontManager 的字段
+            for (f in mc.javaClass.declaredFields) {
+                f.isAccessible = true
+                val v = f.get(mc) ?: continue
+                if (v.javaClass.name.contains("FontManager")) return v
+            }
+        } catch (t: Throwable) {
+            t.printStackTrace()
+        }
+        return null
+    }
+
+    @JvmStatic
+    @Suppress("UNCHECKED_CAST")
+    fun injectIntoFontSets(manager: Any, glyphProvider: Any): Int {
+        var count = 0
+        for (f in manager.javaClass.declaredFields) {
+            f.isAccessible = true
+            val valMap = try {
+                f.get(manager)
+            } catch (_: Throwable) {
+                continue
+            }
+            if (valMap !is Map<*, *> || valMap.isEmpty()) continue
+
+            for ((key, fontSet) in valMap) {
+                if (fontSet == null) continue
+                val id = key?.toString() ?: ""
+                val isDefault = id.contains("default", true)
+                val isUniform = id.contains("uniform", true)
+                if (!isDefault && !(alsoUniform && isUniform)) continue
+                if (prependProvider(fontSet, glyphProvider)) count++
+            }
+        }
+        return count
+    }
+
+    @JvmStatic
+    @Suppress("UNCHECKED_CAST")
+    fun prependProvider(fontSet: Any, glyphProvider: Any): Boolean {
+        // 1) List 字段
+        for (f in fontSet.javaClass.declaredFields) {
+            f.isAccessible = true
+            val v = try {
+                f.get(fontSet)
+            } catch (_: Throwable) {
+                continue
+            }
+            if (v is MutableList<*>) {
+                if (v.isNotEmpty()) {
+                    val first = v[0]
+                    if (first != null && !isGlyphProviderLike(first) && !isGlyphProviderLike(glyphProvider)) {
+                        continue
+                    }
+                }
+                try {
+                    val raw = v as MutableList<Any?>
+                    raw.removeAll { it != null && it.javaClass == glyphProvider.javaClass }
+                    raw.add(0, glyphProvider)
+                    // 尝试清缓存，让新 provider 立刻生效
+                    clearFontSetCaches(fontSet)
+                    return true
+                } catch (_: Throwable) {
+                }
+            }
+            if (v is List<*>) {
+                // 不可变则跳过
+            }
+        }
+
+        // 2) 方法
+        for (m in fontSet.javaClass.declaredMethods) {
+            if (m.parameterCount != 1) continue
+            val n = m.name.lowercase()
+            if (!(n.contains("provider") || n.contains("glyph"))) continue
+            try {
+                m.isAccessible = true
+                val pt = m.parameterTypes[0]
+                if (pt.isAssignableFrom(glyphProvider.javaClass) || pt.name.contains("GlyphProvider")) {
+                    m.invoke(fontSet, glyphProvider)
+                    clearFontSetCaches(fontSet)
+                    return true
+                }
+            } catch (_: Throwable) {
+            }
+        }
+        return false
+    }
+
+    private fun clearFontSetCaches(fontSet: Any) {
+        // 清 glyph 缓存 Map，强制重新从 provider 取字形
+        for (f in fontSet.javaClass.declaredFields) {
+            try {
+                f.isAccessible = true
+                val v = f.get(fontSet) ?: continue
+                when (v) {
+                    is MutableMap<*, *> -> {
+                        if (f.name.contains("glyph", true) || f.name.contains("cache", true) ||
+                            f.name.contains("char", true) || f.name.contains("codepoint", true)
+                        ) {
+                            try {
+                                v.clear()
+                            } catch (_: Throwable) {
+                            }
+                        }
+                    }
+                    is MutableList<*> -> {
+                        if (f.name.contains("cache", true)) {
+                            try {
+                                (v as MutableList<*>).clear()
+                            } catch (_: Throwable) {
+                            }
+                        }
+                    }
+                }
+            } catch (_: Throwable) {
+            }
+        }
+        // 常见方法名
+        for (n in listOf("reload", "clear", "reset", "invalidate", "rebuild")) {
+            try {
+                val m = fontSet.javaClass.methods.firstOrNull {
+                    it.parameterCount == 0 && it.name.equals(n, true)
+                } ?: continue
+                m.invoke(fontSet)
+            } catch (_: Throwable) {
+            }
+        }
+    }
+
+    private fun isGlyphProviderLike(o: Any): Boolean {
+        val n = o.javaClass.name
+        return n.contains("GlyphProvider") || n.contains("TrueType") ||
+            n.contains("Bitmap") || n.contains("Provider")
     }
 
     private fun createFreeTypeFace(fontMemory: ByteBuffer): Any? {
