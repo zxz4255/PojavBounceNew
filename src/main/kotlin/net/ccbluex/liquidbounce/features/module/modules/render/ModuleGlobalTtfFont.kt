@@ -1,7 +1,6 @@
-// ModuleGlobalTtfFont - 磁盘 TTF 强制注入（不走资源包）
-// 依赖: src/main/kotlin/net/ccbluex/liquidbounce/utils/ttf/ForcedTtf.kt
-// Mixin: minecraft.client.MixinFontManagerForceTtf
-// 字体目录: .minecraft/LiquidBounce/fonts/ 下的 .ttf 文件
+// ModuleGlobalTtfFont - 磁盘 TTF 运行时注入（不重载资源包）
+// 依赖: utils/ttf/ForcedTtf.kt
+// Mixin 可选: 仅在原版自己重载字体后补注一次
 package net.ccbluex.liquidbounce.features.module.modules.render
 
 import net.ccbluex.liquidbounce.event.events.GameTickEvent
@@ -37,6 +36,7 @@ object ModuleGlobalTtfFont : ClientModule(
     private var lastReapply = false
     private var pending = false
     private var pendingTicks = 0
+    private var retryLeft = 0
 
     private fun runDir(): File = try {
         val m = mc.javaClass.methods.firstOrNull {
@@ -76,6 +76,7 @@ object ModuleGlobalTtfFont : ClientModule(
         ForcedTtf.alsoUniform = alsoUniform
     }
 
+    /** 直接注入，不调用 F3+T / reloadResourcePacks */
     fun applyFont(): Boolean {
         val ttf = resolveTtf()
         if (ttf == null) {
@@ -83,25 +84,26 @@ object ModuleGlobalTtfFont : ClientModule(
             return false
         }
         pushHolder(ttf)
-        notify("§f注入字体: §a${ttf.absolutePath}")
-        requestFontReload()
-        return true
-    }
+        notify("§f字体: §a${ttf.name} §7(${ttf.length()} bytes)")
 
-    private fun requestFontReload() {
-        runCatching {
-            val m = mc.javaClass.methods.firstOrNull {
-                it.parameterCount == 0 && (
-                    it.name == "reloadResourcePacks" ||
-                        it.name == "reloadResources" ||
-                        (it.name.contains("reload", true) && it.name.contains("Resource", true))
-                )
-            }
-            m?.invoke(mc)
-            notify("§a已请求重载字体（磁盘注入，无资源包）")
-        }.onFailure {
-            notify("§e请按 §fF3+T §e重载资源以应用 TTF")
+        val n = try {
+            ForcedTtf.injectIntoMinecraft(mc)
+        } catch (t: Throwable) {
+            t.printStackTrace()
+            notify("§c注入异常: ${t.message}")
+            return false
         }
+
+        if (n > 0) {
+            notify("§a已注入 §f$n §a个 FontSet（无资源重载）")
+            retryLeft = 0
+            return true
+        }
+
+        // FontManager 可能尚未就绪，稍后重试
+        retryLeft = 40
+        notify("§e暂未注入成功，将自动重试…")
+        return false
     }
 
     override fun onEnabled() {
@@ -115,17 +117,27 @@ object ModuleGlobalTtfFont : ClientModule(
     override fun onDisabled() {
         ForcedTtf.clear()
         pending = false
-        requestFontReload()
-        notify("§7已关闭强制 TTF，重载后恢复原版字体")
+        retryLeft = 0
+        notify("§7已关闭强制 TTF（新字形不再使用自定义字体）")
     }
 
     @Suppress("unused")
     private val tickHandler = handler<GameTickEvent> {
         if (pending) {
             pendingTicks++
-            if (pendingTicks >= 10) {
+            if (pendingTicks >= 5) {
                 pending = false
                 applyFont()
+            }
+        }
+        if (retryLeft > 0 && ForcedTtf.enabled) {
+            retryLeft--
+            if (retryLeft % 10 == 0) {
+                val n = runCatching { ForcedTtf.injectIntoMinecraft(mc) }.getOrDefault(0)
+                if (n > 0) {
+                    notify("§a重试成功，注入 §f$n §a个 FontSet")
+                    retryLeft = 0
+                }
             }
         }
         if (reapply && !lastReapply) applyFont()
