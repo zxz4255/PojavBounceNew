@@ -73,8 +73,9 @@ object ModuleLiquidClickgui : ClientModule(
 
     private val snapEnabled by boolean("Snapping", true)
     private val gridSize by int("Grid Size", 10, 1..100, "px")
-    private val dimBackground by boolean("Dim Background", true)
-    private val dimAlpha by float("Dim Amount", 0.22f, 0f..1f)
+    private val dimBackground by boolean("Dim Background", false)
+    // 默认 0：不再全屏压黑；需要时再在设置里开
+    private val dimAlpha by float("Dim Amount", 0f, 0f..1f)
 
     private val searchEnabled by boolean("Search Bar", true)
     private val searchWidth by float("Search Width", 600f, 300f..900f)
@@ -1542,13 +1543,77 @@ object ModuleLiquidClickgui : ClientModule(
 
 
     private class LiquidScreen : Screen(Component.literal("ClickGUI")) {
+        private var savedBlur: Double? = null
+
         override fun isPauseScreen() = false
         override fun shouldCloseOnEsc() = false
 
-        // 26.2: 不再 override renderBackground（签名变更且无 GuiGraphics）
-        // 背景暗化由 OverlayRenderEvent 里的 dim 绘制负责
+        // 打开时关掉原版菜单背景模糊（26.2 options）
+        init {
+            runCatching {
+                val opt = mc.options
+                for (name in listOf("menuBackgroundBlurriness", "getMenuBackgroundBlurriness")) {
+                    val f = opt.javaClass.declaredFields.firstOrNull { it.name.equals(name, true) }
+                    if (f != null) {
+                        f.isAccessible = true
+                        val cur = f.get(opt)
+                        savedBlur = (cur as? Number)?.toDouble()
+                        // OptionInstance-like: try set
+                        runCatching {
+                            val set = cur?.javaClass?.methods?.firstOrNull {
+                                it.name == "set" && it.parameterCount == 1
+                            }
+                            set?.invoke(cur, 0.0)
+                        }
+                        runCatching { f.set(opt, 0) }
+                        break
+                    }
+                    val m = opt.javaClass.methods.firstOrNull {
+                        it.parameterCount == 0 && it.name.equals(name, true)
+                    }
+                    if (m != null) {
+                        val inst = m.invoke(opt)
+                        savedBlur = runCatching {
+                            inst.javaClass.methods.firstOrNull { it.name == "get" && it.parameterCount == 0 }
+                                ?.invoke(inst) as? Number
+                        }.getOrNull()?.toDouble()
+                        runCatching {
+                            inst.javaClass.methods.firstOrNull { it.name == "set" && it.parameterCount == 1 }
+                                ?.invoke(inst, 0)
+                        }
+                    }
+                }
+            }
+        }
 
         override fun onClose() {
+            // 恢复模糊选项
+            runCatching {
+                val opt = mc.options
+                val restore = savedBlur ?: return@runCatching
+                for (name in listOf("menuBackgroundBlurriness", "getMenuBackgroundBlurriness")) {
+                    val f = opt.javaClass.declaredFields.firstOrNull { it.name.equals(name, true) }
+                    if (f != null) {
+                        f.isAccessible = true
+                        val cur = f.get(opt)
+                        runCatching {
+                            cur?.javaClass?.methods?.firstOrNull { it.name == "set" && it.parameterCount == 1 }
+                                ?.invoke(cur, restore)
+                        }
+                        break
+                    }
+                    val m = opt.javaClass.methods.firstOrNull {
+                        it.parameterCount == 0 && it.name.equals(name, true)
+                    }
+                    if (m != null) {
+                        val inst = m.invoke(opt)
+                        runCatching {
+                            inst.javaClass.methods.firstOrNull { it.name == "set" && it.parameterCount == 1 }
+                                ?.invoke(inst, restore)
+                        }
+                    }
+                }
+            }
             if (ModuleLiquidClickgui.enabled) ModuleLiquidClickgui.enabled = false
         }
 
