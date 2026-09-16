@@ -45,7 +45,7 @@ object ModuleSolsticeClickgui : ClientModule(
 
     private val animMode by enumChoice("Animation", AnimMode.BOUNCE)
     private val easeSpeed by float("Ease Speed", 18f, 5f..30f)
-    private val dimAlpha by float("Dim Alpha", 0.18f, 0f..0.8f)
+    private val dimAlpha by float("Dim Alpha", 0f, 0f..0.8f)
     private val bottomGlow by boolean("Bottom Glow", true)
     private val bottomGlowStrength by float("Bottom Glow Strength", 0.4f, 0f..1f)
     private val catWidth by float("Category Width", 180f, 100f..320f)
@@ -706,13 +706,48 @@ object ModuleSolsticeClickgui : ClientModule(
     }
 
     private class SolsticeScreen : Screen(Component.literal("SolsticeClickGui")) {
+        private var savedBlur: Double? = null
+
         override fun isPauseScreen() = false
         override fun shouldCloseOnEsc() = false
 
-        // 26.2: 不再 override renderBackground（签名变更且无 GuiGraphics）
-        // 背景暗化由 OverlayRenderEvent 里的 dim 绘制负责
+        init {
+            runCatching {
+                val opt = mc.options
+                for (name in listOf("menuBackgroundBlurriness", "getMenuBackgroundBlurriness")) {
+                    val m = opt.javaClass.methods.firstOrNull {
+                        it.parameterCount == 0 && it.name.equals(name, true)
+                    }
+                    if (m != null) {
+                        val inst = m.invoke(opt)
+                        savedBlur = runCatching {
+                            inst.javaClass.methods.firstOrNull { it.name == "get" && it.parameterCount == 0 }
+                                ?.invoke(inst) as? Number
+                        }.getOrNull()?.toDouble()
+                        runCatching {
+                            inst.javaClass.methods.firstOrNull { it.name == "set" && it.parameterCount == 1 }
+                                ?.invoke(inst, 0)
+                        }
+                        break
+                    }
+                }
+            }
+        }
 
         override fun onClose() {
+            runCatching {
+                val restore = savedBlur ?: return@runCatching
+                val opt = mc.options
+                val m = opt.javaClass.methods.firstOrNull {
+                    it.parameterCount == 0 && (
+                        it.name.equals("menuBackgroundBlurriness", true) ||
+                            it.name.equals("getMenuBackgroundBlurriness", true)
+                    )
+                } ?: return@runCatching
+                val inst = m.invoke(opt)
+                inst.javaClass.methods.firstOrNull { it.name == "set" && it.parameterCount == 1 }
+                    ?.invoke(inst, restore)
+            }
             if (ModuleSolsticeClickgui.enabled) ModuleSolsticeClickgui.enabled = false
         }
 
@@ -1195,7 +1230,9 @@ object ModuleSolsticeClickgui : ClientModule(
             applySlider(it, sliderRectX, sliderRectX + sliderRectW, false)
         }
 
-        ctx.drawQuad(0f, 0f, sw, sh, Color4b(0, 0, 0, (255 * dimAlpha * anim).toInt().coerceIn(0, 200)))
+        if (dimAlpha > 0.001f) {
+            ctx.drawQuad(0f, 0f, sw, sh, Color4b(0, 0, 0, (255 * dimAlpha * anim).toInt().coerceIn(0, 200)))
+        }
 
         if (bottomGlow) {
             // 屏幕底部最强，向上变弱
