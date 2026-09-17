@@ -699,7 +699,6 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleTargetHudRenderer,
             ModuleOpalNameTag,
             ModuleLiquidClickgui,
-            ModuleGlobalTtfFont,
             ModuleNoBob,
             ModuleNoFov,
             ModuleNoHurtCam,
