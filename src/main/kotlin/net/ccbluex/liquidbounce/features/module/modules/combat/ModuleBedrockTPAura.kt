@@ -240,7 +240,7 @@ object ModuleBedrockTPAura : ClientModule("ModuleBedrockTPAura", ModuleCategorie
                 considerInventory = false,
                 valueGroup = rotations,
                 priority = Priority.IMPORTANT_FOR_USAGE_1,
-                provider = this@ModulePacketTPAura,
+                provider = this@ModuleBedrockTPAura,
             )
         }.onFailure {
             // RotationManager 不可用时直接转向，保证攻击角度正确
