@@ -51,6 +51,7 @@ class ClickGuiPanel(
     private val openSettings = mutableSetOf<String>()
     private var draggingValue: Value<*>? = null
     private var draggingValueY = 0f
+    private var draggingModuleName: String = ""
 
     var hoveredModule: ClientModule? = null
         private set
@@ -123,6 +124,7 @@ class ClickGuiPanel(
                         if (ClickGuiSettingRenderer.mouseClicked(value, x + 4f, sy, WIDTH - 4f, mx, my, 0, mod.name)) {
                             draggingValue = value
                             draggingValueY = sy
+                            draggingModuleName = mod.name
                         }
                         return true
                     }
