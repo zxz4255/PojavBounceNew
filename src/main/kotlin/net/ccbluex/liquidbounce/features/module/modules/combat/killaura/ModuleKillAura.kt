@@ -171,10 +171,12 @@ object ModuleKillAura : ClientModule("KillAura", ModuleCategories.COMBAT) {
 
         if (CombatManager.shouldPauseCombat) {
             KillAuraAutoBlock.stopBlocking()
+            KillAuraAutoBlock.resetHypixelLag()
             return@tickHandler
         }
 
         if (target == null) {
+            KillAuraAutoBlock.resetHypixelLag()
             val hasUnblocked = KillAuraAutoBlock.stopBlocking()
 
             // Deal with fake swing when there is no target
@@ -277,6 +279,11 @@ object ModuleKillAura : ClientModule("KillAura", ModuleCategories.COMBAT) {
 
         val mainHandStack = player.mainHandItem
 
+        // HypixelLag: BLOCK → UNBLOCK → ATTACK 状态机；未到 ATTACK 则本 tick 不打
+        if (!KillAuraAutoBlock.prepareHypixelLagAttack()) {
+            return
+        }
+
         // Attack enemy, according to the attack scheduler
         if (clicker.isClickTick && canAttackNow(target, mainHandStack) &&
             !KillAuraAutoBlock.isPrioritizingBlocking) {
@@ -291,6 +298,8 @@ object ModuleKillAura : ClientModule("KillAura", ModuleCategories.COMBAT) {
                 range.update()
                 KillAuraNotifyWhenFail.failedHitsIncrement = 0
                 KillAuraAutoBlock.hasBlockedSinceAttack = false
+                // HypixelLag: 攻击完成 → 回到 BLOCK 并准备下一轮格挡
+                KillAuraAutoBlock.completeHypixelLagAttack()
 
                 GenericDebugRecorder.recordDebugInfo(ModuleKillAura, "attackEntity", JsonObject().apply {
                     add("player", GenericDebugRecorder.debugObject(player))
@@ -299,7 +308,10 @@ object ModuleKillAura : ClientModule("KillAura", ModuleCategories.COMBAT) {
 
                 true
             }
-        } else if (KillAuraClicker.ticksSinceLastClick >= KillAuraAutoBlock.reblockTicks) {
+        } else if (
+            !KillAuraAutoBlock.isAwaitingHypixelLagAttack() &&
+            KillAuraClicker.ticksSinceLastClick >= KillAuraAutoBlock.reblockTicks
+        ) {
             KillAuraAutoBlock.startBlocking()
         }
     }
