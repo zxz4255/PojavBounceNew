@@ -24,6 +24,7 @@ import net.ccbluex.liquidbounce.utils.client.mc
 import net.ccbluex.liquidbounce.utils.text.asPlainText
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.screens.Screen
+import net.minecraft.client.input.CharacterEvent
 import net.minecraft.client.input.KeyEvent
 import net.minecraft.client.input.MouseButtonEvent
 import org.lwjgl.glfw.GLFW
@@ -161,7 +162,7 @@ class NativeClickGuiScreen : Screen("ClickGUI".asPlainText()) {
         val mod = panel?.hoveredModule ?: return
         // ClientModule description comes from translation; fallback to name
         val desc = runCatching {
-            mod.description?.string?.takeIf { it.isNotBlank() && it != mod.name }
+            mod.description.get()?.takeIf { it.isNotBlank() && it != mod.name }
         }.getOrNull() ?: return
         descText = desc
         descX = panel.x + ClickGuiPanel.WIDTH + 12f
@@ -372,7 +373,8 @@ class NativeClickGuiScreen : Screen("ClickGUI".asPlainText()) {
         return super.keyPressed(input)
     }
 
-    override fun charTyped(codePoint: Char, modifiers: Int): Boolean {
+    override fun charTyped(event: CharacterEvent): Boolean {
+        val codePoint = event.codepoint().toChar()
         if (searchFocused || searchQuery.isNotEmpty() || codePoint.isLetterOrDigit() || codePoint == ' ') {
             searchFocused = true
             if (!codePoint.isISOControl()) {
@@ -381,7 +383,7 @@ class NativeClickGuiScreen : Screen("ClickGUI".asPlainText()) {
                 return true
             }
         }
-        return super.charTyped(codePoint, modifiers)
+        return super.charTyped(event)
     }
 
     private fun refreshSearch() {
