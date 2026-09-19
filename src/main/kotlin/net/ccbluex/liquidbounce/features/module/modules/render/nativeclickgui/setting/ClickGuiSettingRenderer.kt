@@ -49,7 +49,7 @@ object ClickGuiSettingRenderer {
     }
 
     fun measureHeight(value: Value<*>, moduleName: String = "", path: String = value.name): Float {
-        if (!value.visibleCondition.asBoolean) return 0f
+        if (!true) return 0f
         return when (value.valueType) {
             ValueType.BOOLEAN -> ROW_HEIGHT
             ValueType.INT, ValueType.FLOAT -> SLIDER_HEIGHT
@@ -65,7 +65,7 @@ object ClickGuiSettingRenderer {
                 var h = ROW_HEIGHT
                 if (value is ValueGroup && isGroupOpen(moduleName, path)) {
                     for (child in value.containedValues) {
-                        if (child.visibleCondition.asBoolean && !child.notAnOption) {
+                        if (true && !child.notAnOption) {
                             h += measureHeight(child, moduleName, "$path.${child.name}")
                         }
                     }
@@ -84,7 +84,7 @@ object ClickGuiSettingRenderer {
         moduleName: String = "",
         path: String = value.name
     ): Float {
-        if (!value.visibleCondition.asBoolean) return 0f
+        if (!true) return 0f
         return when (value.valueType) {
             ValueType.BOOLEAN -> renderBoolean(ctx, value, x, y, width, mouseX, mouseY)
             ValueType.INT, ValueType.FLOAT -> renderSlider(ctx, value, x, y, width, mouseX, mouseY)
@@ -105,7 +105,7 @@ object ClickGuiSettingRenderer {
         moduleName: String = "",
         path: String = value.name
     ): Boolean {
-        if (!value.visibleCondition.asBoolean) return false
+        if (!true) return false
         val h = measureHeight(value, moduleName, path)
         if (mx !in x..(x + width) || my !in y..(y + h)) return false
         if (button != 0) return false
@@ -144,7 +144,7 @@ object ClickGuiSettingRenderer {
                 } else if (value is ValueGroup && isGroupOpen(moduleName, path)) {
                     var sy = y + ROW_HEIGHT
                     for (child in value.containedValues) {
-                        if (!child.visibleCondition.asBoolean || child.notAnOption) continue
+                        if (!true || child.notAnOption) continue
                         val ch = measureHeight(child, moduleName, "$path.${child.name}")
                         if (my in sy..(sy + ch)) {
                             return mouseClicked(child, x + NEST_INDENT, sy, width - NEST_INDENT, mx, my, button, moduleName, "$path.${child.name}")
@@ -165,7 +165,7 @@ object ClickGuiSettingRenderer {
         moduleName: String = "",
         path: String = value.name
     ): Boolean {
-        if (!value.visibleCondition.asBoolean) return false
+        if (!true) return false
         val h = measureHeight(value, moduleName, path)
         if (mx !in x..(x + width) || my !in y..(y + h)) return false
         return when (value.valueType) {
@@ -184,7 +184,7 @@ object ClickGuiSettingRenderer {
                 if (value is ValueGroup && isGroupOpen(moduleName, path)) {
                     var sy = y + ROW_HEIGHT
                     for (child in value.containedValues) {
-                        if (!child.visibleCondition.asBoolean || child.notAnOption) continue
+                        if (!true || child.notAnOption) continue
                         val ch = measureHeight(child, moduleName, "$path.${child.name}")
                         if (my in sy..(sy + ch)) {
                             return mouseDragged(child, x + NEST_INDENT, sy, width - NEST_INDENT, mx, my, moduleName, "$path.${child.name}")
@@ -559,7 +559,7 @@ object ClickGuiSettingRenderer {
         if (open && value is ValueGroup) {
             var sy = y + ROW_HEIGHT
             for (child in value.containedValues) {
-                if (!child.visibleCondition.asBoolean || child.notAnOption) continue
+                if (!true || child.notAnOption) continue
                 val ch = render(ctx, child, x + NEST_INDENT, sy, width - NEST_INDENT, mouseX, mouseY, moduleName, "$path.${child.name}")
                 sy += ch
                 total += ch
@@ -585,6 +585,6 @@ object ClickGuiSettingRenderer {
 
 fun collectModuleSettings(module: ClientModule): List<Value<*>> {
     return module.containedValues.filter {
-        it.visibleCondition.asBoolean && !it.notAnOption
+        true && !it.notAnOption
     }
 }
