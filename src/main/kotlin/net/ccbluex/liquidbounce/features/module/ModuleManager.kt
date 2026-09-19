@@ -244,6 +244,7 @@ import net.ccbluex.liquidbounce.features.module.modules.render.ModuleTargetHudRe
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleOpalNameTag
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleLiquidClickgui
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleMusicVisualizer
+import net.ccbluex.liquidbounce.features.module.modules.render.ModuleNativeClickGui
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleSmoothCamera
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleStorageESP
 import net.ccbluex.liquidbounce.features.module.modules.render.ModuleTNTTimer
@@ -699,6 +700,7 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             ModuleTargetHudRenderer,
             ModuleOpalNameTag,
             ModuleLiquidClickgui,
+            ModuleNativeClickGui,
             ModuleNoBob,
             ModuleNoFov,
             ModuleNoHurtCam,
