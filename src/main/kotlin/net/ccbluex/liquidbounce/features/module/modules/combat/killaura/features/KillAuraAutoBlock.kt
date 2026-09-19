@@ -78,6 +78,20 @@ import kotlin.jvm.optionals.getOrNull
 object KillAuraAutoBlock : ToggleableValueGroup(ModuleKillAura, "AutoBlocking", false) {
 
     private val blockMode by enumChoice("BlockMode", BlockMode.INTERACT)
+
+    // --- HypixelLag mode (ported from extended AutoBlock build) ---
+    private val hypixelAlwaysRender by boolean("HypixelAlwaysRenderBlocking", false)
+    private val hypixelRequirePress by boolean("HypixelRequirePress", false)
+    private val hypixelAps by int("HypixelAps", 14, 1..20, "aps")
+    private val hypixelBlockRange by float("HypixelBlockRange", 3.2f, 3.0f..8.0f, "blocks")
+
+    private enum class HypixelLagState { BLOCK, UNBLOCK, ATTACK }
+    private var hypixelLagState = HypixelLagState.BLOCK
+    private var lastHypixelAttackNanos = 0L
+
+    private val isHypixelLag: Boolean
+        get() = blockMode == BlockMode.HYPIXEL_LAG
+
     /**
      * This options means to simulate vanilla use item action.
      * If the effective hand (item) is [InteractionHand.OFF_HAND],
@@ -171,10 +185,14 @@ object KillAuraAutoBlock : ToggleableValueGroup(ModuleKillAura, "AutoBlocking", 
             (isOlderThanOrEqual1_8 || ModuleSwordBlock.running)
 
     val shouldUnblockToHit
-        get() = unblockMode != UnblockMode.NONE
+        get() = if (isHypixelLag) {
+            hypixelLagState == HypixelLagState.ATTACK
+        } else {
+            unblockMode != UnblockMode.NONE
+        }
 
     val blockImmediate
-        get() = reblockTicks == 0
+        get() = !isHypixelLag && reblockTicks == 0
 
     var hasBlockedSinceAttack = false
 
@@ -201,6 +219,7 @@ object KillAuraAutoBlock : ToggleableValueGroup(ModuleKillAura, "AutoBlocking", 
 
     override fun onDisabled() {
         this.stopBlocking()
+        resetHypixelLag()
         this.hasBlockedSinceAttack = false
         this.isInDanger = false
         super.onDisabled()
@@ -218,8 +237,61 @@ object KillAuraAutoBlock : ToggleableValueGroup(ModuleKillAura, "AutoBlocking", 
     }
 
     /**
-     * Starts blocking.
+     * HypixelLag state machine — call before attack.
+     * @return true if attack is allowed this tick
      */
+    fun prepareHypixelLagAttack(): Boolean {
+        if (!isHypixelLag || !running) return true
+        return when (hypixelLagState) {
+            HypixelLagState.BLOCK -> {
+                if (!canHypixelBlock()) return true
+                val isBlocking = enforcedBlockingHand != null || player.isBlockingServerside
+                hypixelLagState = HypixelLagState.UNBLOCK
+                !isBlocking
+            }
+            HypixelLagState.UNBLOCK -> {
+                stopBlocking()
+                if (hypixelAlwaysRender) {
+                    makeSeemBlock()
+                }
+                hypixelLagState = HypixelLagState.ATTACK
+                false
+            }
+            HypixelLagState.ATTACK -> canHypixelAttack()
+        }
+    }
+
+    fun isAwaitingHypixelLagAttack(): Boolean =
+        running && isHypixelLag && hypixelLagState == HypixelLagState.ATTACK
+
+    fun completeHypixelLagAttack() {
+        if (!isHypixelLag) return
+        if (isAwaitingHypixelLagAttack()) {
+            lastHypixelAttackNanos = System.nanoTime()
+            hypixelLagState = HypixelLagState.BLOCK
+        }
+        if (running && hypixelLagState == HypixelLagState.UNBLOCK) {
+            startBlocking()
+        }
+    }
+
+    fun resetHypixelLag() {
+        hypixelLagState = HypixelLagState.BLOCK
+        lastHypixelAttackNanos = 0L
+    }
+
+    private fun canHypixelBlock(): Boolean {
+        val target = targetTracker.target ?: return false
+        val rangeSq = hypixelBlockRange * hypixelBlockRange
+        val inRange = player.squaredBoxedDistanceTo(target) <= rangeSq
+        return inRange && (!hypixelRequirePress || player.isUsingItem)
+    }
+
+    private fun canHypixelAttack(): Boolean {
+        val interval = 1_000_000_000L / hypixelAps.coerceAtLeast(1)
+        return System.nanoTime() - lastHypixelAttackNanos >= interval
+    }
+
     @Suppress("ReturnCount", "CognitiveComplexMethod")
     fun startBlocking(): Boolean {
         if (!running) {
@@ -292,6 +364,7 @@ object KillAuraAutoBlock : ToggleableValueGroup(ModuleKillAura, "AutoBlocking", 
     @Suppress("unused")
     private val worldChangeHandler = handler<WorldChangeEvent> {
         enforcedBlockingHand = null
+        resetHypixelLag()
     }
 
     @Suppress("unused")
@@ -465,6 +538,8 @@ object KillAuraAutoBlock : ToggleableValueGroup(ModuleKillAura, "AutoBlocking", 
         BASIC("Basic"),
         INTERACT("Interact"),
         FAKE("Fake"),
+        /** Unblock → Attack → Block cycle timed by APS (ported lag mode) */
+        HYPIXEL_LAG("HypixelLag"),
     }
 
     enum class UnblockMode(override val tag: String) : Tagged {
