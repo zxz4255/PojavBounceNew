@@ -1,0 +1,76 @@
+<div align="center">
+<p>
+    <img width="200" src="https://raw.githubusercontent.com/CCBlueX/LiquidCloud/master/LiquidBounce/liquidbounceLogo.svg">
+</p>
+
+[Bilibili](https://b23.tv/tTuEWKE)
+</div>
+
+PojavBounceNew is a free and open-source mixin-based injection hacked client using the Fabric API for Minecraft.And it based on Rubbishy-Liquidbounce-NextGen For Android.I(40%)，Geda6(25%) and Cleverpeople(45%) used DeepSeek,AutoClaw(GLM5) and Genmini to develop this project.And I skided ArrayList,TargetInfo,Notifications from Rubbishy-Liquidbounce and I fixed and improved them.I added fonts to it.Thanked to Rubbishy-Liquidbounce and it created and skided some modules which made this project great. I want the latest LiquidBounce NextGen can work on Android.
+中字:PojavBounceNew 是一个免费且开源的基于混合输入的注入破解客户端，使用 Minecraft 的 Fabric API。它基于 Rubbishy-Liquidbounce-NextGen for Android以及LiquidBounceNextGen0.39.1，我Seagdo(bilibili名)（40%）、各大6（10%）和 Cleverpeople（50%）使用了DeepSeek基础版，DeepSeekV4Flash,GLM5，等AI工具开发了该项目。我把功能列表、目标信息显示、消息通知和在测试中的hotbar原水还原，从Rubbishy-Liquidbounce项目里打滑过来，修复并完善了它们。我给它内置了字体材质包。感谢CleverPeople的Rubbishy-Liquidbounce，我创建并从那打滑了一些模块，使这个项目非常出色。我想要最新的LiquidBounce下一代能在安卓上运行。
+
+## Issues
+
+If you notice any bugs or missing features, you can let us know by opening an
+issue [here](https://github.com/CCBlueX/LiquidBounce/issues).
+
+## License
+
+This project is subject to the [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.en.html). This
+does only apply for source code located directly in this clean repository. During the development and compilation
+process, additional source code may be used to which we have obtained no rights. Such code is not covered by the GPL
+license.
+
+For those who are unfamiliar with the license, here is a summary of its main points. This is by no means legal advice
+nor legally binding.
+
+*Actions that you are allowed to do:*
+
+- Use
+- Share
+- Modify
+
+*If you do decide to use ANY code from the source:*
+
+- **You must disclose the source code of your modified work and the source code you took from this project. This means
+  you are not allowed to use code from this project (even partially) in a closed-source (or even obfuscated)
+  application.**
+- **Your modified application must also be licensed under the GPL**
+
+## Setting up a Workspace
+
+LiquidBounce uses Gradle; to make sure that it is installed properly, you can
+check [Gradle's website](https://gradle.org/install/). It also requires [Node.js](https://nodejs.org) to be installed for
+our [theme](https://github.com/CCBlueX/LiquidBounce/tree/nextgen/src-theme).
+
+1. Clone the repository using `git clone --recurse-submodules https://github.com/CCBlueX/LiquidBounce`.
+2. CD into the local repository. (`cd LiquidBounce`)
+3. Run `./gradlew genSources` for better development experience (Optional).
+4. Open the folder as a Gradle project in your preferred IDE.
+5. Run the client. (`./gradlew runClient`)
+
+## Additional libraries
+
+### Mixins
+
+Mixins can be used to modify classes at runtime before they are loaded. LiquidBounce uses it to inject its code into the
+Minecraft client. This way, none of Mojang's copyrighted code is shipped. If you want to learn more about it, check out
+its [Documentation](https://docs.spongepowered.org/5.1.0/en/plugin/internals/mixins.html).
+
+## Contributing
+
+We appreciate contributions. So if you want to support us, feel free to make changes to LiquidBounce's source code and
+submit a pull request.
+
+## Stats
+
+![Alt](https://repobeats.axiom.co/api/embed/ad3a9161793c4dfe50934cd4442d25dc3ca93128.svg "Repobeats analytics image")
+
+## Imprint
+
+**CCBlueX**  
+Vahrenwalder Str. 269A
+30179 Hanover
+Germany
+
+**Owner and responsible for the content:** Marco Beyer

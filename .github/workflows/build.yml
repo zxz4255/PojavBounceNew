@@ -1,0 +1,38 @@
+name: Build
+on:
+  push:
+    branches: [ nextgen, main, master, 26.2(main) ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+
+      - run: chmod +x gradlew
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - run: ./gradlew build -x test -x detekt --no-daemon
+
+      # 提取主 JAR（排除 sources），并重命名为固定名称
+      - name: 提取主 JAR
+        run: |
+          JAR=$(ls build/libs/liquidbounce-*.jar | grep -v sources | head -n 1)
+          if [ -z "$JAR" ]; then echo "❌ 未找到主 JAR"; exit 1; fi
+          cp "$JAR" ./liquidbounce.jar
+
+      # 只上传这个重命名后的 JAR（只有这一个文件）
+      - uses: actions/upload-artifact@v4
+        with:
+          name: liquidbounce
+          path: liquidbounce.jar   # 现在只上传一个文件
+          retention-days: 90

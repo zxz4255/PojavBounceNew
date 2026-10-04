@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    branches: [ nextgen, main, master ]
+    paths:
+      - '.github/workflows/release.yml'   # 只有 release.yml 改动才触发分支构建
+    tags:
+      - '*'                               # 任意标签触发正式 Release
+  workflow_dispatch:                      # 保留手动触发
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+
+      - run: chmod +x gradlew
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - run: ./gradlew build -x test -x detekt --no-daemon
+
+      # 直接列出 build/libs 确认 JAR 存在
+      - name: 列出构建产物
+        run: ls -la build/libs/
+
+      # 上传 JAR 作为 Artifact（方便分支推送时下载测试）
+      - name: 上传 JAR 作为 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: liquidbounce
+          path: build/libs/liquidbounce-*.jar
+          retention-days: 90
+
+      # 仅在推送标签时创建正式 Release
+      - name: 创建 Release 并上传 JAR
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/libs/liquidbounce-*.jar
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
