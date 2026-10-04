@@ -1,0 +1,12 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>CognitiveComplexMethod:AStarPathBuilder.kt:AStarPathBuilder$fun findPath: List&lt;Vec3i></ID>
+    <ID>CognitiveComplexMethod:BlockExtensions.kt:fun Block?.isInteractable: Boolean</ID>
+    <ID>CognitiveComplexMethod:PlacementRenderHandler.kt:PlacementRenderHandler$fun render</ID>
+    <ID>LoopWithTooManyJumpStatements:ModuleProjectilePuncher.kt:ModuleProjectilePuncher$for</ID>
+    <ID>LoopWithTooManyJumpStatements:TargetFinding.kt:for</ID>
+    <ID>MaxLineLength:ModuleBookBot.kt:ModuleBookBot.BookBuilder$*</ID>
+  </CurrentIssues>
+</SmellBaseline>
