@@ -1,4 +1,4 @@
-/*
+}/*
  * This file is part of LiquidBounce (https://github.com/CCBlueX/LiquidBounce)
  *
  * Copyright (c) 2015 - 2026 CCBlueX
@@ -33,7 +33,7 @@ import net.ccbluex.liquidbounce.render.engine.type.Color4b
 import net.ccbluex.liquidbounce.render.withPush
 import net.ccbluex.liquidbounce.utils.render.textureSetup
 import net.minecraft.client.Minecraft
-import Font
+import net.minecraft.client.gui.Font
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.render.TextureSetup
 import net.minecraft.client.player.AbstractClientPlayer
