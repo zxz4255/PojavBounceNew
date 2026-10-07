@@ -1,4 +1,4 @@
-}/*
+/*
  * This file is part of LiquidBounce (https://github.com/CCBlueX/LiquidBounce)
  *
  * Copyright (c) 2015 - 2026 CCBlueX
@@ -200,11 +200,18 @@ object ModuleOpaiTargetHud : ClientModule("OpaiTargetHud", ModuleCategories.REND
         return max(measure(font, if (label.contains(".")) label else "$label.0"), measure(font, "00.0"))
     }
 
-    private fun computeBounds(font: Font, name: String, maximum: Float,
-                              viewportWidth: Int, viewportHeight: Int): Bounds {
+    private fun computeBounds(
+        font: Font,
+        name: String,
+        maximum: Float,
+        viewportWidth: Int,
+        viewportHeight: Int,
+    ): Bounds {
         val label = labelWidth(font, maximum)
-        val width = min(max(WIDTH, ceil(35 + measure(font, name) + label + 4).toInt()),
-            max(1, viewportWidth - 4))
+        val width = min(
+            max(WIDTH, ceil(35 + measure(font, name) + label + 4).toInt()),
+            max(1, viewportWidth - 4),
+        )
         val x = Mth.clamp((viewportWidth / 2f + offsetX).toInt(), 2, max(2, viewportWidth - width - 2))
         val y = Mth.clamp((viewportHeight / 2f + offsetY).toInt(), 2, max(2, viewportHeight - HEIGHT - 2))
         return Bounds(x, y, width, HEIGHT)
@@ -222,7 +229,7 @@ object ModuleOpaiTargetHud : ClientModule("OpaiTargetHud", ModuleCategories.REND
      *  (the same function their baked panel PNG encodes), margin 8px, step .25. */
     private fun shadowCoverage(distance: Float): Float {
         val normalized = max(0f, distance) / 2.8f
-        return 0.5f * exp(-0.78f * normalized - 0.5f * normalized * normalized)
+        return 0.5f * exp(-0.78f * normalized - 0.5f * normalized * normalized).toFloat()
     }
 
     private fun shadowLayer(spread: Float): Int {
@@ -240,8 +247,10 @@ object ModuleOpaiTargetHud : ClientModule("OpaiTargetHud", ModuleCategories.REND
                 if (layer != 0) {
                     gfx.drawRoundedRect(
                         -spread, -spread,
-                        bounds.width + SHADOW_MARGIN * 2 + spread, bounds.height + SHADOW_MARGIN * 2 + spread,
-                        (RADIUS + SHADOW_MARGIN) + spread, Color4b(layer),
+                        bounds.width + SHADOW_MARGIN * 2 + spread,
+                        bounds.height + SHADOW_MARGIN * 2 + spread,
+                        (RADIUS + SHADOW_MARGIN) + spread,
+                        Color4b(layer),
                     )
                 }
                 spread -= 0.25f
@@ -254,8 +263,14 @@ object ModuleOpaiTargetHud : ClientModule("OpaiTargetHud", ModuleCategories.REND
         }
     }
 
-    private fun drawBar(gfx: GuiGraphicsExtractor, x: Float, y: Float, width: Float, height: Float,
-                        color: Int) {
+    private fun drawBar(
+        gfx: GuiGraphicsExtractor,
+        x: Float,
+        y: Float,
+        width: Float,
+        height: Float,
+        color: Int,
+    ) {
         if (width <= 0) return
         // The original slices a 20px pill texture so both caps stay circular;
         // radius=h/2 in the SDF rounded-rect pipeline is the identical shape.
@@ -265,8 +280,15 @@ object ModuleOpaiTargetHud : ClientModule("OpaiTargetHud", ModuleCategories.REND
     /** Rounded skin head extraction — face layer U=8 plus hat overlay U=40 in
      *  64px skin space, corner-cut strips at 4x supersample (1:1 port of
      *  Samsara's NativePlayerFace.extract). */
-    private fun drawFace(gfx: GuiGraphicsExtractor, skin: Identifier,
-                         x: Float, y: Float, size: Float, radius: Float, opacity: Float) {
+    private fun drawFace(
+        gfx: GuiGraphicsExtractor,
+        skin: Identifier,
+        x: Float,
+        y: Float,
+        size: Float,
+        radius: Float,
+        opacity: Float,
+    ) {
         val setup = Minecraft.getInstance().textureManager.getTexture(skin).textureSetup
         gfx.pose().withPush {
             translate(x, y)
@@ -286,21 +308,42 @@ object ModuleOpaiTargetHud : ClientModule("OpaiTargetHud", ModuleCategories.REND
         }
     }
 
-    private fun strip(gfx: GuiGraphicsExtractor, setup: TextureSetup,
-                      u: Int, pixels: Int, x: Int, y: Int, width: Int, height: Int, color: Int) {
+    private fun strip(
+        gfx: GuiGraphicsExtractor,
+        setup: TextureSetup,
+        u: Int,
+        pixels: Int,
+        x: Int,
+        y: Int,
+        width: Int,
+        height: Int,
+        color: Int,
+    ) {
         if (width <= 0 || height <= 0) return
         val factor = 8f / pixels
         gfx.drawTexQuad(
             setup,
-            x0 = x.toFloat(), y0 = y.toFloat(), x1 = (x + width).toFloat(), y1 = (y + height).toFloat(),
-            u1 = (u + x * factor) / 64, v1 = (8 + y * factor) / 64,
-            u2 = (u + (x + width) * factor) / 64, v2 = (8 + (y + height) * factor) / 64,
+            x0 = x.toFloat(),
+            y0 = y.toFloat(),
+            x1 = (x + width).toFloat(),
+            y1 = (y + height).toFloat(),
+            u1 = (u + x * factor) / 64,
+            v1 = (8 + y * factor) / 64,
+            u2 = (u + (x + width) * factor) / 64,
+            v2 = (8 + (y + height) * factor) / 64,
             argb = color,
         )
     }
 
-    private fun drawText(gfx: GuiGraphicsExtractor, font: Font,
-                         text: String, x: Float, y: Float, color: Int, opacity: Float) {
+    private fun drawText(
+        gfx: GuiGraphicsExtractor,
+        font: Font,
+        text: String,
+        x: Float,
+        y: Float,
+        color: Int,
+        opacity: Float,
+    ) {
         val tinted = tintOpacity(color, opacity)
         // Vanilla treats near-zero text alpha as an unspecified opaque color.
         if ((tinted ushr 24) < 4) return
@@ -326,7 +369,8 @@ object ModuleOpaiTargetHud : ClientModule("OpaiTargetHud", ModuleCategories.REND
     private fun renderOpai(gfx: GuiGraphicsExtractor, mc: Minecraft, current: Player?) {
         val player = mc.player
         if (player == null || mc.level == null || mc.gui.overlay() != null || current == null ||
-            current.level() != mc.level || current.isRemoved) {
+            current.level() != mc.level || current.isRemoved
+        ) {
             target = null
             return
         }
@@ -341,25 +385,40 @@ object ModuleOpaiTargetHud : ClientModule("OpaiTargetHud", ModuleCategories.REND
         val viewportWidth = mc.window.guiScaledWidth
         val viewportHeight = mc.window.guiScaledHeight
         val content = computeBounds(font, name, sample.maximum, viewportWidth, viewportHeight)
-        val scaleFactor = min(scale.coerceIn(0.5f, 2f),
-            min(max(1, viewportWidth - 4) / content.width.toFloat(),
-                max(1, viewportHeight - 4) / content.height.toFloat()))
+        val scaleFactor = min(
+            scale.coerceIn(0.5f, 2f),
+            min(
+                max(1, viewportWidth - 4) / content.width.toFloat(),
+                max(1, viewportHeight - 4) / content.height.toFloat(),
+            ),
+        )
 
-        val palette = palette
+        val activePalette = palette
         gfx.pose().withPush {
             translate(content.x.toFloat(), content.y.toFloat())
             gfx.pose().scale(scaleFactor, scaleFactor)
 
-            drawPanel(gfx, Bounds(0, 0, content.width, content.height), 1f, palette)
+            drawPanel(gfx, Bounds(0, 0, content.width, content.height), 1f, activePalette)
             val skin = (current as? AbstractClientPlayer)?.skin?.body()?.texturePath()
                 ?: DefaultPlayerSkin.get(current.gameProfile).body().texturePath()
             drawFace(gfx, skin, 3f, 3f, FACE_SIZE, FACE_RADIUS, 1f)
 
             val label = sample.label()
-            val fittedName = fit(font, name,
-                content.width - 35 - labelWidth(font, sample.maximum) - 3)
+            val fittedName = fit(
+                font,
+                name,
+                content.width - 35 - labelWidth(font, sample.maximum) - 3,
+            )
             drawText(gfx, font, fittedName, 32f, 5f, TEXT, 1f)
-            drawText(gfx, font, label, 32f + measure(font, fittedName) + 1.5f, 5f, palette.accent, 1f)
+            drawText(
+                gfx,
+                font,
+                label,
+                32f + measure(font, fittedName) + 1.5f,
+                5f,
+                activePalette.accent,
+                1f,
+            )
 
             if (showArmor) {
                 for (slot in 0..3) {
@@ -377,7 +436,7 @@ object ModuleOpaiTargetHud : ClientModule("OpaiTargetHud", ModuleCategories.REND
             drawBar(gfx, 3f, 32f, barWidth, 5f, tintOpacity(0x66000000, 1f))
             // Only the remaining damage interval; the fill covers the front of it.
             drawBar(gfx, 3f, 31.25f, barWidth * sample.trailFraction(), 4.5f, tintOpacity(0x66FFFFFF, 1f))
-            drawBar(gfx, 3f, 31.25f, barWidth * sample.fraction(), 4.5f, tintOpacity(palette.accent, 1f))
+            drawBar(gfx, 3f, 31.25f, barWidth * sample.fraction(), 4.5f, tintOpacity(activePalette.accent, 1f))
         }
     }
 
@@ -389,10 +448,12 @@ object ModuleOpaiTargetHud : ClientModule("OpaiTargetHud", ModuleCategories.REND
     private val renderHandler = handler<OverlayRenderEvent> { event ->
         val mc = Minecraft.getInstance()
         val aura = runCatching { ModuleKillAura }.getOrNull()
-        val target = if (aura != null && aura.running) {
+        val current = if (aura != null && aura.running) {
             aura.targetTracker.target as? Player
-        } else null
-        renderOpai(event.context, mc, target)
+        } else {
+            null
+        }
+        renderOpai(event.context, mc, current)
     }
 
     override fun onDisabled() {
