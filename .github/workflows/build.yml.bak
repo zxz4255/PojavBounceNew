@@ -1,0 +1,34 @@
+name: Build Android
+
+on:
+  push:
+    branches: [ nextgen, main, master, 26.3(new) ]
+  pull_request:
+    branches: [ nextgen, main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setting up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Build
+        run: ./gradlew build -x test -x detekt
+
+      - name: Upload JAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: liquidbounce-android
+          path: build/libs/*.jar
+          retention-days: 30
