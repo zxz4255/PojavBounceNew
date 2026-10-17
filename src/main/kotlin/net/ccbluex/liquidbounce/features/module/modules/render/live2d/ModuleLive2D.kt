@@ -274,6 +274,10 @@ object ModuleLive2D : ClientModule("Live2D", ModuleCategories.RENDER) {
         return mx >= posX && mx <= posX + w && my >= posY && my <= posY + h
     }
 
+    fun setModelSize(height: Int) {
+        size = height.coerceIn(40, 800)
+    }
+
     fun moveBy(dx: Int, dy: Int) {
         posX = (posX + dx).coerceIn(-2000, 2000)
         posY = (posY + dy).coerceIn(-2000, 2000)
