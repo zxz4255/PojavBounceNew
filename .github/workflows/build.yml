@@ -1,0 +1,47 @@
+name: Build Android
+
+on:
+  push:
+    branches: [ nextgen, main, master, "26.3(new)" ]
+  pull_request:
+    branches: [ nextgen, main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setting up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+          cache: 'gradle'   # 缓存 \~/.gradle/caches 依赖
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          # 默认分支/手动触发可写缓存；PR 只读，避免污染主缓存
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+          # 保留构建缓存（task outputs），加速二次 build
+          cache-overwrite-existing: false
+          gradle-home-cache-cleanup: true
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x ./gradlew
+
+      - name: Build
+        run: ./gradlew build -x test -x detekt
+        env:
+          # 尽量用本地/CI 缓存，减少重复下载
+          GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.caching=true"
+
+      - name: Upload JAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: liquidbounce-android
+          path: build/libs/*.jar
+          retention-days: 30
